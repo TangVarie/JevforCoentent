@@ -6,7 +6,7 @@
   python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --opus fixtures/fq_opus_gate1_50.tsv \
       --gate1 fixtures/fq_jev_d081_A_gate1_50.tsv --out docs/fq-shadow.md --raw raw.json --sql shadow.sql --run-tag shadow-2026-09-23
 
-  # 直接从库里取（需要 SUPABASE_URL + SUPABASE_SERVICE_KEY；只读 notes / note_feature_answers）
+  # 直接从库里取（需要 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY；只读 notes / note_feature_answers）
   python3 scripts/fq_shadow.py --from-db --limit 200 --project NUC_phase1 ...
 
 Opus/D-081 的 TSV 格式：subject_id<TAB>q=答案[!无效原因][⟨证据⟩][~概率];...（与 note_feature_answers 一一对应）。
@@ -71,9 +71,9 @@ def _pg(url, key, path):
 
 
 def fetch_from_db(limit: int, project: str | None):
-    url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
+    url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not (url and key):
-        sys.exit("--from-db 需要 SUPABASE_URL / SUPABASE_SERVICE_KEY")
+        sys.exit("--from-db 需要 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
     q = f"notes?select=note_id,project_id,title,raw_content&order=note_id&limit={limit}"
     if project:
         q += f"&project_id=eq.{urllib.parse.quote(project)}"

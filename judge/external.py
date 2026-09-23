@@ -122,6 +122,26 @@ def normalize_note(n: dict, keyword: str, category: str, sort_type: str) -> dict
             "publish_time": _pick(card, "time", "publish_time", "create_time"), "raw": n}
 
 
+def _find_session(obj: Any, depth: int = 0) -> dict:
+    """搜索返回里的翻页会话：TikHub 要求第 2 页起回传首页给的 search_id / search_session_id（官方 OpenAPI 的「翻页说明」）。"""
+    if depth > 5:
+        return {}
+    if isinstance(obj, dict):
+        got = {k: obj[k] for k in ("search_id", "search_session_id") if isinstance(obj.get(k), str) and obj[k]}
+        if got:
+            return got
+        for v in obj.values():
+            r = _find_session(v, depth + 1)
+            if r:
+                return r
+    elif isinstance(obj, list):
+        for v in obj[:5]:
+            r = _find_session(v, depth + 1)
+            if r:
+                return r
+    return {}
+
+
 class TikHubClient:
     def __init__(self, api_key: Optional[str] = None, budget: Optional[Budget] = None, rps: float = 5.0, mock: bool = False):
         self.api_key = api_key or os.environ.get("TIKHUB_API_KEY", "")
@@ -129,6 +149,7 @@ class TikHubClient:
         self.min_interval = 1.0 / max(rps, 0.1)
         self._last = 0.0
         self.mock = mock
+        self._sessions: dict = {}          # (keyword, sort_type) → {search_id, search_session_id}，翻页时回传
         if not self.api_key and not mock:
             raise RuntimeError("没有 TIKHUB_API_KEY")
 
@@ -146,7 +167,15 @@ class TikHubClient:
             return json.loads(r.read().decode("utf-8"))
 
     def search(self, keyword: str, page: int, sort_type: str, note_type: Optional[str]) -> tuple:
-        raw = self._get(SEARCH_PATH, {"keyword": keyword, "page": page, "sort_type": sort_type, "note_type": note_type})
+        params = {"keyword": keyword, "page": page, "sort_type": sort_type, "note_type": note_type}
+        sess = self._sessions.get((keyword, sort_type))
+        if page > 1 and sess:
+            params.update(sess)
+        raw = self._get(SEARCH_PATH, params)
+        if not sess:
+            found = _find_session(raw)
+            if found:
+                self._sessions[(keyword, sort_type)] = found
         return _find_notes(raw), raw
 
     def detail(self, note_id: str, note_type: str = "") -> tuple:
@@ -168,7 +197,9 @@ def mock_search(params: dict) -> dict:
         nid = "m" + hashlib.sha256(f"{kw}|{sort_type}|{page}|{i}".encode("utf-8")).hexdigest()[:10]
         notes.append({"note_id": nid, "title": f"{kw}第{page * 20 + i}天，说说感受", "desc": f"关于{kw}的一条摘要，讲了自己昨天在药店的经历，有点想问大家。",
                       "user": {"nickname": f"用户{i}"}, "interact_info": {"liked_count": base - i * 3, "collected_count": i, "comment_count": i % 7}, "type": "normal"})
-    return {"code": 200, "data": {"items": notes}}
+    # 假供应商也给翻页会话，并把本次请求带没带会话参数原样回显（测试用）
+    return {"code": 200, "data": {"items": notes, "search_id": f"sid-{kw}-{sort_type}", "search_session_id": f"ssid-{kw}-{sort_type}"},
+            "echo": {"search_id": params.get("search_id"), "search_session_id": params.get("search_session_id"), "page": page}}
 
 
 def mock_detail(params: dict) -> dict:
@@ -186,11 +217,13 @@ class RunReport:
     searched: int = 0
     candidates: int = 0
     duplicates: int = 0
-    triaged_kept: int = 0
+    triaged_kept: int = 0          # 分诊通过（还没取全文 / 打标）
     fetched: int = 0
-    judged: int = 0
+    dropped_short: int = 0         # 分诊通过、取了全文仍太短而丢弃
+    judged: int = 0                # 打标入账本
     per_category: dict = field(default_factory=dict)
     stopped_reason: str = ""
+    errors: list = field(default_factory=list)      # [(哪一步, 错误)]：单条失败不中止整次运行
     kept_notes: list = field(default_factory=list)
     rows: list = field(default_factory=list)
 
@@ -212,8 +245,41 @@ def triage_state(n: dict, category: str) -> dict:
             "品类": category, "关键词": n["keyword"], "标题": n["title"] or "（无）", "摘要": n["body"][:400] or "（无）", "作者昵称": n["author"] or "（无）"}
 
 
+def _process_note(n: dict, name: str, cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Bank, fq_bank: Bank,
+                  rep: RunReport, stats: dict, keep_voices: set, min_chars: int) -> str:
+    """一条候选从分诊到入账本。返回结局：triage_reject / short / kept。抛 BudgetExceeded 由上层停整次运行；其它异常由上层记错继续。"""
+    tr = judge_state(jev, triage_bank, n["note_id"], triage_state(n, name), subject_type="external_note")
+    it = tr.items
+    if it.get("on_topic", {}).get("answer") != "是" or it.get("voice", {}).get("answer") not in keep_voices:
+        return "triage_reject"
+    n["triage"] = {k: v["answer"] for k, v in it.items()}
+    rep.triaged_kept += 1; stats["triaged"] += 1
+    if len(n["body"]) < min_chars:
+        full, _ = provider.detail(n["note_id"], n["note_type"]); rep.fetched += 1; stats["fetched"] += 1
+        n["title"] = str(_pick(full, "title", default=n["title"]) or n["title"])
+        n["body"] = str(_pick(full, "desc", "content", "body", default=n["body"]) or n["body"])
+        n["fetched_full"] = True
+    if len(n["body"]) < min_chars:
+        rep.dropped_short += 1; stats["short"] += 1
+        return "short"
+    raw_text = f"标题：{n['title']}\n正文：{n['body']}" if n["title"] else n["body"]
+    jr = judge_note(jev, fq_bank, n["note_id"], raw_text, title_extraction="markers", subject_type="external_note")
+    rep.rows.extend(ledger_rows(jr, fq_bank, run_tag="external"))
+    rep.rows.extend(ledger_rows(tr, triage_bank, run_tag="external"))
+    n["fq"] = {k: v.get("answer") for k, v in jr.items.items()}
+    n.pop("raw", None)
+    rep.kept_notes.append(n); rep.judged += 1
+    stats["kept"] += 1; stats["judged"] += 1
+    return "kept"
+
+
 def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Bank, fq_bank: Bank, state: dict,
              known_ids: Optional[set] = None, dry_run: bool = False) -> RunReport:
+    """一次运行。纪律：
+      · seen 只在一条笔记有了结局（分诊拒绝 / 太短 / 入账本）之后才写；因上限、预算、报错而没看的不写，下次还会看。
+      · dry_run 不写 seen、不调 Jev、不取全文，只数候选。
+      · 每次 / 每月上限到了整个品类停搜（不再逐页付费）；预算到了整次运行停。
+      · 单条笔记或单页搜索的异常记进 rep.errors 继续跑；意外异常也不丢产物，写进 stopped_reason。"""
     rep = RunReport(started=datetime.now(timezone.utc).isoformat(timespec="seconds"))
     month = rep.started[:7]
     keep_voices = set(cfg.get("keep_voices") or ["普通用户"])
@@ -223,56 +289,72 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
     seen = state.setdefault("seen", {})
     monthly = state.setdefault("monthly", {}).setdefault(month, {})
     known_ids = known_ids or set()
+
+    def err(where: str, exc: Exception, stats: dict) -> None:
+        rep.errors.append((where, f"{type(exc).__name__}: {exc}"))
+        stats["errors"] += 1
+
     try:
         for cat in cfg.get("categories") or []:
             name = cat["name"]
-            stats = rep.per_category.setdefault(name, {"searched": 0, "candidates": 0, "kept": 0, "fetched": 0, "judged": 0})
+            stats = rep.per_category.setdefault(name, {"searched": 0, "candidates": 0, "triaged": 0, "kept": 0, "fetched": 0,
+                                                       "short": 0, "judged": 0, "errors": 0})
             kept_this_run = 0
             if monthly.get(name, 0) >= per_month_cap:
                 stats["note"] = "本月上限已到"; continue
+
+            def cap_reached() -> bool:
+                return kept_this_run >= per_run_cap or monthly.get(name, 0) >= per_month_cap
+
+            done = False
             for kw in cat.get("keywords") or []:
                 for sort_type in cfg.get("sorts") or ["general"]:
                     for page in range(1, int(cfg.get("pages_per_sort", 1)) + 1):
-                        if kept_this_run >= per_run_cap:
-                            break
-                        notes, _ = provider.search(kw, page, sort_type, cfg.get("note_type"))
+                        if cap_reached():
+                            done = True; break
+                        try:
+                            notes, _ = provider.search(kw, page, sort_type, cfg.get("note_type"))
+                        except BudgetExceeded:
+                            raise
+                        except Exception as exc:  # noqa: BLE001 — 供应商一页失败不中止整次运行
+                            err(f"search {kw}/{sort_type}/p{page}", exc, stats); continue
                         rep.searched += 1; stats["searched"] += 1
                         for raw in notes:
+                            if not isinstance(raw, dict):
+                                continue
                             n = normalize_note(raw, kw, name, sort_type)
                             if not n["note_id"]:
                                 continue
-                            rep.candidates += 1; stats["candidates"] += 1
+                            rep.candidates += 1; stats["candidates"] += 1          # 搜到的页整页计数，报告里看得到规模
                             if n["note_id"] in seen or n["note_id"] in known_ids:
                                 rep.duplicates += 1; continue
-                            seen[n["note_id"]] = {"cat": name, "kw": kw, "at": rep.started, "kept": False}
                             if dry_run:
                                 continue
-                            tr = judge_state(jev, triage_bank, n["note_id"], triage_state(n, name), subject_type="external_note")
-                            it = tr.items
-                            if it.get("on_topic", {}).get("answer") != "是" or it.get("voice", {}).get("answer") not in keep_voices:
-                                continue
-                            if kept_this_run >= per_run_cap or monthly.get(name, 0) >= per_month_cap:
-                                break
-                            n["triage"] = {k: v["answer"] for k, v in it.items()}
-                            if len(n["body"]) < min_chars:
-                                full, _ = provider.detail(n["note_id"], n["note_type"]); rep.fetched += 1; stats["fetched"] += 1
-                                n["title"] = str(_pick(full, "title", default=n["title"]) or n["title"])
-                                n["body"] = str(_pick(full, "desc", "content", "body", default=n["body"]) or n["body"])
-                                n["fetched_full"] = True
-                            if len(n["body"]) < min_chars:
-                                continue
-                            raw_text = f"标题：{n['title']}\n正文：{n['body']}" if n["title"] else n["body"]
-                            jr = judge_note(jev, fq_bank, n["note_id"], raw_text, title_extraction="markers", subject_type="external_note")
-                            rep.rows.extend(ledger_rows(jr, fq_bank, run_tag="external"))
-                            rep.rows.extend(ledger_rows(tr, triage_bank, run_tag="external"))
-                            n["fq"] = {k: v.get("answer") for k, v in jr.items.items()}
-                            n.pop("raw", None)
-                            rep.kept_notes.append(n); rep.triaged_kept += 1; rep.judged += 1
-                            stats["kept"] += 1; stats["judged"] += 1
-                            kept_this_run += 1; monthly[name] = monthly.get(name, 0) + 1
-                            seen[n["note_id"]]["kept"] = True
+                            if cap_reached():
+                                done = True; continue                               # 到上限：本页剩下的只数不看，也不进 seen
+                            try:
+                                outcome = _process_note(n, name, cfg, provider, jev, triage_bank, fq_bank, rep, stats, keep_voices, min_chars)
+                            except BudgetExceeded:
+                                raise
+                            except Exception as exc:  # noqa: BLE001 — 这条不进 seen，下次再看
+                                err(n["note_id"], exc, stats); continue
+                            seen[n["note_id"]] = {"cat": name, "kw": kw, "at": rep.started, "kept": outcome == "kept", "why": outcome}
+                            if outcome == "kept":
+                                kept_this_run += 1; monthly[name] = monthly.get(name, 0) + 1
+                        if done:
+                            break
+                    if done:
+                        break
+                if done:
+                    break
+            if kept_this_run >= per_run_cap:
+                stats["note"] = "本次上限已到"
+            elif monthly.get(name, 0) >= per_month_cap:
+                stats["note"] = "本月上限已到"
     except BudgetExceeded as exc:
         rep.stopped_reason = str(exc)
+    except Exception as exc:  # noqa: BLE001 — 意外异常也要把已花钱拿到的产物和 state 写出去
+        rep.stopped_reason = f"异常中止：{type(exc).__name__}: {exc}"
     rep.calls = provider.budget.calls; rep.spent_usd = provider.budget.spent
     return rep
 
@@ -309,10 +391,14 @@ def render_report(rep: RunReport, cfg: dict) -> str:
     L = [f"# 外部语料运行报告 · {rep.started}", "",
          f"供应商 {cfg.get('provider')} · 调用 {rep.calls} 次 · 花费 {rep.spent_usd:.2f} 美元（上限 {cfg.get('budget_usd_per_run')}）"
          + (f" · **提前停止：{rep.stopped_reason}**" if rep.stopped_reason else ""), "",
-         f"搜索页 {rep.searched} · 候选 {rep.candidates} · 重复 {rep.duplicates} · 分诊留下 {rep.triaged_kept} · 取全文 {rep.fetched} · 打标 {rep.judged} · 账本行 {len(rep.rows)}", "",
-         "| 品类 | 搜索页 | 候选 | 留下 | 取全文 | 备注 |", "|---|---|---|---|---|---|"]
+         f"搜索页 {rep.searched} · 候选 {rep.candidates} · 重复 {rep.duplicates} · 分诊通过 {rep.triaged_kept} · 取全文 {rep.fetched} · 太短丢弃 {rep.dropped_short} · 打标 {rep.judged} · 账本行 {len(rep.rows)} · 出错 {len(rep.errors)}", "",
+         "| 品类 | 搜索页 | 候选 | 分诊通过 | 取全文 | 太短 | 打标 | 出错 | 备注 |", "|---|---|---|---|---|---|---|---|---|"]
     for name, s in rep.per_category.items():
-        L.append(f"| {name} | {s['searched']} | {s['candidates']} | {s['kept']} | {s['fetched']} | {s.get('note', '')} |")
+        L.append(f"| {name} | {s['searched']} | {s['candidates']} | {s.get('triaged', 0)} | {s['fetched']} | {s.get('short', 0)} | {s['judged']} | {s.get('errors', 0)} | {s.get('note', '')} |")
+    if rep.errors:
+        L += ["", "出错的（不进 seen，下次会再看）：", ""] + [f"- {w}: {e}" for w, e in rep.errors[:50]]
+        if len(rep.errors) > 50:
+            L.append(f"- …还有 {len(rep.errors) - 50} 条")
     if rep.kept_notes:
         from collections import Counter
         v = Counter((n.get("triage") or {}).get("ad_like") for n in rep.kept_notes)

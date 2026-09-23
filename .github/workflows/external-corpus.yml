@@ -1,5 +1,6 @@
 name: external-corpus
 # 每周一 03:00 UTC（北京时间 11:00）抓一次外部语料。量级和预算在 config/external_corpus.yaml，这里只管频率。
+# 顺序：抓取 → 先上传产物（哪怕后面失败）→ 经 PostgREST 写库（没配密钥就跳过并提示；写库失败不让 job 红，state 照样保存）。
 on:
   schedule:
     - cron: "0 3 * * 1"
@@ -10,6 +11,11 @@ jobs:
   crawl:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      TIKHUB_API_KEY: ${{ secrets.TIKHUB_API_KEY }}
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}   # 与 TV 同名，Railway / Actions 一份配置两边用
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,22 +24,19 @@ jobs:
       - name: restore state
         uses: actions/cache@v4
         with: {path: state, key: external-corpus-state-${{ github.run_id }}, restore-keys: external-corpus-state-}
+      - name: plan only (dry run)
+        if: github.event.inputs.dry_run == 'true'
+        run: python3 scripts/external_corpus.py --dry-run
       - name: run
-        env:
-          TIKHUB_API_KEY: ${{ secrets.TIKHUB_API_KEY }}
-          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        if: github.event.inputs.dry_run != 'true'
         run: |
           mkdir -p out
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then python3 scripts/external_corpus.py --dry-run; exit 0; fi
-          python3 scripts/external_corpus.py --out out/report.md --sql out/answers.sql --notes-sql out/external_notes.sql --raw out/kept.json
-          echo "EXTERNAL_CORPUS_DONE rc=$?"
-      - name: write to db (only if service key present)
-        if: ${{ env.SUPABASE_SERVICE_KEY != '' }}
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python3 scripts/apply_sql.py out/external_notes.sql out/answers.sql
-      - uses: actions/upload-artifact@v4
+          python3 scripts/external_corpus.py --out out/report.md --sql out/answers.sql --notes-sql out/external_notes.sql --rows out/rows.json --raw out/kept.json
+      - name: upload products (even if a later step fails)
+        if: always() && hashFiles('out/**') != ''
+        uses: actions/upload-artifact@v4
         with: {name: external-corpus-${{ github.run_id }}, path: out}
+      - name: write to db via PostgREST (skipped with a notice when the key is absent)
+        if: github.event.inputs.dry_run != 'true'
+        continue-on-error: true
+        run: python3 scripts/apply_rows.py out/rows.json

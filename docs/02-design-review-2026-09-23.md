@@ -20,6 +20,9 @@
 
 ## 1. 先修：本仓自己的硬伤（不修跑不起来，或跑了也白跑）
 
+> **修复记录（同日第二版）**：下面十三项已全部修掉，表格保留作当时的诊断。改了什么：
+> #1 `requirements.txt` 钉 `mcp>=1.2,<2`；#2 v1_18 视图改成分位数 CTE 再 JOIN，并按 `question_version / extractor` 分组（PG 16 连跑两遍、能查）；#3 `banks.bank_sha256` 改用 vendor 进来的 `tv_feature_bank.bank_digest`，内联题库对规范化 JSON 算，测试钉住「冻结不改 digest」；#4 删掉 `apply_sql.py`，新加 `scripts/apply_rows.py` 经 PostgREST upsert（外部笔记表在前、账本行在后），`external_corpus.py --rows` 出 rows.json，workflow 改成 job 级 env、先上传产物再写库、写库失败不让 job 红；#5 `/judge` 按 subject 用线程池并行（`JUDGE_WORKERS`，默认 4），输入形状整批先校验，单个 subject 的 Jev 失败只带 `error`、全部失败才 502；#6 新加 `POST /judge_draft`（多层题库 + brief 现编项目题库 / 内联题库 + hard_rules + 修改单 + 账本行），`loop.judge_draft` 加 `subject_id / subject_type` 并保留每层的 `JudgeResult`，`compile_project_bank` 配套 `project_hard_rules` 把 brief 的 `want` 接到判定，`/judge` 也把账本行原样带回；#7 鉴权 fail-closed（没配 `JUDGE_API_KEY` 一律 503，`JUDGE_ALLOW_ANONYMOUS=1` 才放行，key 比较用 `hmac.compare_digest`），`/health` 回显 auth 模式；#8 `TikHubClient` 记住首页返回的 `search_id / search_session_id`，第 2 页起回传；#9 单页搜索、单条笔记的异常记进 `rep.errors` 继续跑，意外异常也写 `stopped_reason` 并保留产物；#10 `seen` 只在有结局（分诊拒绝 / 太短 / 入账本）后写，因上限、预算、报错没看的不写，每次 / 每月上限到了整个品类停搜；#11 `--mock` 的 state 默认落临时目录，`dry_run` 不写 seen，`state/` `out/` 进 `.gitignore`；#12 `SHA256SUMS` 改相对路径，CI 那步去掉 `--ignore-missing` 与 `continue-on-error`；#13 全仓改用 `SUPABASE_SERVICE_ROLE_KEY`。顺手：`.env.example` 按代码实际读的变量重写（去掉没有读取点的 `JEV_MODEL`、错名的 `SOCIALDATAX_API_KEY`），报告里「分诊通过 / 太短丢弃 / 打标 / 出错」分开计数。测试 22 → 28。
+
 | # | 事 | 证据 | 后果 | 修法 |
 |---|---|---|---|---|
 | 1 | **依赖装到 mcp 2.x** | `requirements.txt:4` 写 `mcp>=1.2`；干净环境装到 2.x，`judge/mcp_server.py:16` 的 `from mcp.server.fastmcp import FastMCP` 抛 `ModuleNotFoundError`（2.x 改名 `MCPServer`） | 本地 22 个测试挂 2 个；`.github/workflows/ci.yml` 第一次 push 就红；`python -m judge.mcp_server` 起不来 | `mcp>=1.2,<2` |

@@ -13,11 +13,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 import yaml
+
+from .spans import bank_digest
 
 SCOPE_LABEL = {"title": "标题", "first_sentence": "正文第一句", "last_para": "正文最后一段",
                "body": "正文", "full": "标题和正文"}
@@ -70,8 +73,11 @@ class Bank:
         return [q.id for q in self.questions]
 
 
-def file_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def bank_sha256(path: Optional[Path], raw: Optional[dict] = None) -> str:
+    """落库用的题库校验和。有文件 → TV 同款规范化 digest（见 spans.bank_digest）；内联题库 → 规范化 JSON 的 sha256。"""
+    if path is not None:
+        return bank_digest(path.read_bytes())
+    return hashlib.sha256(json.dumps(raw or {}, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _fmt_examples(xs) -> str:
@@ -105,10 +111,10 @@ def _load_tv(raw: dict, path: Path, name: str) -> Bank:
                                ask=q["ask"], version=int(q.get("version", 1)), aw_instruction=str(q.get("aw_instruction") or "")))
     return Bank(name=name, version=raw.get("bank_version", "?"), model=raw.get("model") or "jev-1.13.0",
                 fmt="tv", questions=qs, ambiguity=raw.get("ambiguity") or dict(DEFAULT_AMBIGUITY), path=path,
-                sha256=file_sha256(path))
+                sha256=bank_sha256(path, raw))
 
 
-def _load_jev(raw: dict, path: Path, name: str, lang: str = LANG_DEFAULT) -> Bank:
+def _load_jev(raw: dict, path: Optional[Path], name: str, lang: str = LANG_DEFAULT) -> Bank:
     qs = []
     for q in raw.get("questions", []):
         text = q["instructions"].get(lang) or q["instructions"]["zh"]
@@ -123,7 +129,12 @@ def _load_jev(raw: dict, path: Path, name: str, lang: str = LANG_DEFAULT) -> Ban
                                on_ambiguous=q.get("on_ambiguous", ""), ask=text))
     return Bank(name=name, version=raw.get("bank_version", "?"), model=raw.get("model") or "jev-1.13.0",
                 fmt="jev", questions=qs, ambiguity=raw.get("ambiguity") or dict(DEFAULT_AMBIGUITY), path=path,
-                sha256=file_sha256(path), fill_defaults={k: str(v) for k, v in (raw.get("fill_defaults") or {}).items()})
+                sha256=bank_sha256(path, raw), fill_defaults={k: str(v) for k, v in (raw.get("fill_defaults") or {}).items()})
+
+
+def load_bank_data(raw: dict, name: str, lang: str = LANG_DEFAULT) -> Bank:
+    """内联的 Jev 格式题库（HTTP 请求里带来的 dict，没有文件）。sha256 对规范化 JSON 算。"""
+    return _load_jev(raw, None, name, lang)
 
 
 def load_bank(path: str | Path, name: Optional[str] = None, lang: str = LANG_DEFAULT) -> Bank:
