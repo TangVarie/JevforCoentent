@@ -2,6 +2,7 @@
 
 > **对象**：上传包 `812beb15-judge.zip`，原样导入为本仓第一个 commit（未改一个字）。对照三仓当天 main：truth-vault `d7615d5`、autowriter `b09df8e`、sanshengliubu `cab7750`，与 docs/31 页首写的三个 commit 逐一相同，没有版本漂移。
 > **方法**：读完全部源码、题库、fixtures、文档；本地跑 22 个测试；用机器上现成的 PostgreSQL 16 真跑 TV 的 v1_13 账本表 + 本仓 v1_17 + v1_18，再把三个脚本 mock 生成的账本 SQL 灌进去；联网核 TypeSafe 官方文档、TikHub OpenAPI、GitHub Actions 文档与 runner 源码；对三仓逐条打开文档引用的每个 file:line；七个维度并行审（core / loop+comments / 外部语料与基础设施 / TV / 写作台 / 三省六部 / 文档与题库），每条中高严重度发现另起怀疑者复核。
+> **复核状态**：七个维度共报 94 条，其中 23 条（high 全部 + medium 的 bug / mismatch）送两路怀疑者复核；跑完 7 条时撞上会话额度，7 条全部成立、零驳倒（其中 4 条被「实际后果」视角降级，本文按降级后的口径写）。其余 16 条没跑复核的，我逐条自己核了一遍：v1_18 视图用真实 PostgreSQL 16 跑、`exec_sql` 与密钥变量名用全仓 grep、金标准处数用 diff、写作台 D-071 与 worker 的 subprocess 包装直接打开原文，其余按源码逐行读。
 > **一句话**：设计立得住，三个仓库的现状与文档写的基本一致（§3）；挡在「跑起来」前面的是本仓自己的十来处硬伤（§1），加上几处设计里说了、代码里没有或做反了的事（§2）；文档对写作台那条「写手抽完就散场」读反了 D-071，影响的是入库判定的覆盖面（§4 #2）。三仓这边不需要先改什么，接入时各自要动的点见 §5。
 
 ---
@@ -69,7 +70,7 @@ SQL 链路其余部分是通的：v1_17 连跑两遍结果一样，自动约束�
 
 | # | 设计原文 | 代码现状 | 影响 |
 |---|---|---|---|
-| 1 | **「fq 题的正向写法只对过了闸二的题下发」**（`loop.py:13` 模块头；docs/31 §5.4；§2.2「通用层的题不原样塞进生成端的 prompt」） | `loop.py:214-218` 对未 validated 的 fq 目标题仍 `plan.append(...)`，只是把 instruction 文案改成「此题未过闸二，只记录不下发」；`loop.py:236-237` 的 `repair_prompt` 把 plan 里每一条都拼进发给生成端的 prompt，不看 kind；`produce()`（`:286-287`）直接用它修补。实跑：修改单末尾出现「『正文里有没有某个人说的原话？』现在是『否』（目标『是』，此题未过闸二，只记录不下发）」 | 题干原文、当前答案、目标答案都到了生成端，只有定义没去；这正是 docs/31 §2.2 / §8 要防的「写手对着题库写」。未 validated 的条目不该进 plan，只进 trail |
+| 1 | **「fq 题的正向写法只对过了闸二的题下发」**（`loop.py:13` 模块头；docs/31 §5.4；§2.2「通用层的题不原样塞进生成端的 prompt」） | `loop.py:214-218` 对未 validated 的 fq 目标题仍 `plan.append(...)`，只是把 instruction 文案改成「此题未过闸二，只记录不下发」；`loop.py:236-237` 的 `repair_prompt` 把 plan 里每一条都拼进发给生成端的 prompt，不看 kind；`produce()`（`:286-287`）直接用它修补。实跑：修改单末尾出现「『正文里有没有某个人说的原话？』现在是『否』（目标『是』，此题未过闸二，只记录不下发）」 | 题干原文、当前答案、目标答案都到了生成端，只有定义没去；这正是 docs/31 §2.2 / §8 要防的「写手对着题库写」。今天只有 `produce(target=…)` 这条路会走到它（MCP 的 `repair_plan_for` 与 HTTP 都不传 target），所以是设计缺口而不是线上事故；但 target 正是闸二之后「目标画像进入库判定」（docs/31 §9.1）要用的参数，到那一步就会现原形。未 validated 的条目不该进 plan，只进 trail |
 | 2 | **暗题**：「人感题库的 1/3 不写进任何 prompt，每季度换」（docs/00 #4 记为已拍板；docs/31 §2.2、§8、§9.2 第 4 条） | 题库格式没有 hidden 字段（`banks.py:29-41` 的 `Question` 字段、`_load_jev:111-126` 读的键都没有）；`loop.repair_plan:221-229` 把三道人感题的语义直接写进指令；`mcp_server.list_banks:48` 列出全部题 id，`judge_draft:63-64` 返回 `detail` 里所有题 | Goodhart 三道保险里唯一能在代码里做的一道没有落点，docs/00 把它写成事实而非待办。要做：`Bank` 加隐藏集合 + 轮换记录；修改单、`list_banks`、`detail` 输出按它过滤 |
 | 3 | **brief 的 P0 硬约束编译成题**（docs/31 §5.4「生成端拿到的约束和判定端用的题是同一套定义」；docs/00 #9「项目层由写作台按 brief 编」） | `compile_project_bank:46-48` 把 `want` 只写进 `feeds` 文案；`judge_draft:155` 判硬伤只看另一个独立参数 `hard_rules`；`produce:276-282` 同样外部传入；`mcp_server.judge_draft:55-62` 没有 brief / hard_rules 参数，`repair_plan_for:73-74` 连 `project=` 都没传 | brief 里 `want=False` 的硬约束编译后只是一道普通题，调用方漏建 `hard_rules` 就等于没有硬约束；写手侧 MCP 根本送不进项目题库。`compile_project_bank` 应同时返回 `hard_rules`，MCP 加参数 |
 | 4 | **数据出境**：「未发布稿默认只跑通用层 + 平台层；处方药项目的未发布稿不跑」（docs/00 #7） | `/judge` 与 MCP 都没有项目 / 品类 / 发布状态的开关 | 任何调用方都能把处方药草稿连项目题库一起发出去。要么 deskcore 调用侧按 `tv_project_map` 查品类，要么 `/judge` 加 policy；现在两边都没有 |
