@@ -1,0 +1,102 @@
+# ════════════════════════════════════════════════════════════════════
+# 金标准草稿  cg-v0.1 —— Claude 起草，待 Ziao 勘误后才算金标准
+# ════════════════════════════════════════════════════════════════════
+# 每条 expect 里：
+#   选择题  写可接受的选项列表（列了多个 = 两个都算对）
+#   是非题  写 true / false；写 歧义 = 期望 Jev 把它标成歧义（概率落在 0.35–0.65）
+#   <题号>_ambiguous: true  = 期望 Jev 标歧义或选「说不清」，而不是硬选
+# why 是我标这个答案的理由，改答案时顺手改理由，方便回头看当时怎么想的。
+# ════════════════════════════════════════════════════════════════════
+
+gold_version: cg-v0.1
+
+cases:
+
+  # ── 单条评论（comment_bank.yaml）────────────────────────────────────
+
+  - id: c1
+    expect:
+      speech_act: [亲历背书]
+      names_brand: true
+      echoes_post: false
+      detail_level: [模糊]
+      register: [文案腔]
+      reader_value: [只有评价]
+      arranged: true
+    why: 「留子回国」跟帖子讲的美本文科秋招只是同一个品类，没有接帖子里任何一件具体的事；「本土化」是机构话术
+
+  - id: c2
+    expect:
+      speech_act: [提问]
+      names_brand: false
+      echoes_post: true
+      detail_level: [无]
+      register: [随手口语]
+      reader_value: [无]
+      arranged: false
+    why: 三个字，问的是帖子里故意没写的机构名——这是评论区里唯一一条像读者写的；它本身给不了别人信息，但它是承接的入口
+
+  - id: c3
+    expect:
+      speech_act: [回复答疑]
+      names_brand: true
+      echoes_post: true
+      detail_level: [无]
+      register: [随手口语]
+      reader_value: [可行动信息]
+      arranged: 歧义
+    why: 替作者回答「在哪里」，给了可搜索的账号名，是全区唯一一条承接；但由第三方账号来答，读者会犹豫这是不是机构自己——期望 Jev 也犹豫
+
+  - id: c4
+    expect:
+      speech_act: [亲历背书]
+      names_brand: true
+      echoes_post: false
+      detail_level: [模糊]
+      register: [文案腔]
+      reader_value: [只有评价]
+      arranged: true
+    why: 「提前批」帖子里没有；「满意的结果」是结论没有依据；「感谢途鸽」开头是感谢信句式
+
+  - id: c5
+    expect:
+      speech_act: [旁观推荐, 亲历背书]
+      names_brand: true
+      echoes_post: true
+      detail_level: [无]
+      register: [文案腔]
+      reader_value: [只有评价]
+      arranged: true
+    why: 七条里唯一接住了帖子的一条（文科 + 挖亮点 ≈ 美本文科 + 挖素材），但没说自己用没用过，「非常专业」是文案词；接住帖子也救不了它
+
+  - id: c6
+    expect:
+      speech_act: [亲历背书]
+      names_brand: true
+      echoes_post: false
+      detail_level: [无]
+      register: [文案腔]
+      reader_value: [只有评价]
+      arranged: true
+    why: 评论里带话题标签本身就是运营动作；「精准定位」「赛道」是机构话术，帖子里没有
+
+  - id: c7
+    expect:
+      speech_act: [亲历背书]
+      names_brand: true
+      echoes_post: false
+      detail_level: [无]
+      register: [文案腔]
+      reader_value: [只有评价]
+      arranged: true
+    why: 原文截断；「找回自信」是情绪结论；账号名「出卡专用号」是人一眼能看见、Jev 看不见的线索（不在题里，交给代码规则）
+
+  # ── 整个评论区（thread_bank.yaml）──────────────────────────────────
+
+  - id: t1
+    expect:
+      praise_share: [多数]
+      same_template: true
+      has_friction: false
+      thread_arranged: true
+    why: 七条里五条夸，五条同一句式「痛点 + 途鸽老师帮我 + 结果」，四条同一天，只有一个「在哪里」是读者，作者本人零回复

@@ -1,0 +1,779 @@
+# ════════════════════════════════════════════════════════════════════
+# 内容特征层 · 问题库 fq-v0.1（草案 · 供讨论，未冻结）
+# ════════════════════════════════════════════════════════════════════
+#
+# 设计与用法: docs/28-content-feature-layer.md
+# 决策草案:   DECISIONS D-065（草案）
+#
+# 这个文件是什么:
+#   一组「能指着原文回答」的闭集小问题。每条笔记（以后也包括写作台草稿）都问一遍，
+#   答案存进 truth_vault.note_feature_answers，当 Layer 1 的事实用（D-004 extract_features）。
+#   它不回答「这条好不好 / 会不会爆」—— 那是 Layer 2 的事，而且要先过三道闸（docs/28 §6）。
+#
+# 出题六条规矩（改题、加题都照这个来）:
+#   1. 一题只问一件事。想问两件就拆成两题，在代码里组合。
+#   2. 能指着原文回答。答「是」必须能从原文里抄出一小段做证据。
+#   3. 闭集。bool 题只答 是/否；choice 题只从 options 里选（R-003: 主字段必须闭集）。
+#   4. 只用发布前就有的东西。只看标题和正文，不看评论、互动、tier、控评、投流（D-017 / D-028）。
+#   5. 边界写清楚。yes_if / no_if 各给例子；标注员（模型或人）把握不准的情况，写进 no_if 或 notes。
+#   6. 方向先写下来。hypothesis 是「有这个特征 → 项目内爆率更高(+) / 更低(-) / 不知道(?)」，
+#      在闸二跑之前写死，跑完不许回头改（l2-feasibility §8.3 的教训）。
+#
+# 字段说明（questions 下每一题）:
+#   id               稳定的英文 id，永远不改名；废弃就留着并标 retired: true
+#   version          改题干或边界 = 版本 +1；旧版本答案保留、不覆盖、不混用
+#   family           六个家族之一（见 families）
+#   group            一次模型调用问哪一组（见 call_groups）
+#   layer            surface / essence —— 三层原则（README 原则 2）每题只属于一层
+#   halflife_months  时间衰减半衰期（月），检索和训练加权用；30 = 时代语言范式档，60 = essence 档
+#                    已定（D-065 续）: 18 道结构类题 surface/30; judged_by_others、negative_outcome_happened
+#                    对应 essence 词表的恐惧/羞耻撬动, essence/60。闸二跑完再议要不要单开「结构」档。
+#   type             bool / choice
+#   scope            看哪一段输入（见 spans），题目只看这一段
+#   ask              问题本身，要像问一个认真的实习生那样问
+#   yes_if / no_if   判「是」「否」的标准 + 例子（choice 题用 options 里每项的 means + example）
+#   evidence         什么时候必须给证据、抄哪一段
+#   hypothesis       预注册方向 + / - / ?（choice 题按选项写）
+#   why              为什么觉得有关系（一句话，给讨论用）
+#   aw_instruction   如果过了闸，写作台拿到的是哪句可执行的话；never = 过了闸也绝不下发
+#   aw_instruction_values  仅 choice 题: 这句话对哪几个取值成立（闸二按取值下结论, 一句话不该套到
+#                    所有取值上）。不声明 = 过了闸也不自动下发, 由 owner 判
+#   cross_check      可以拿来和 essence 标注互相核对的地方（只报告，不当闸）
+#
+# 答题契约（抽取 pass 必须遵守，docs/28 §5）:
+#   · 模型只输出 JSON: {"answers":[{"id":"...","answer":"...","evidence":"..."}]}
+#   · 需要证据时，evidence 必须是 scope 那段原文的原样片段（≤ 30 字）。
+#     代码去掉空白后做子串校验；对不上 → 重问一次 → 仍对不上记 answer=NULL,
+#     invalid_reason='evidence_not_found'。这是防「模型凭印象答」的硬闸。
+#   · answer 不在闭集里 → 重问一次 → 仍不在记 NULL, invalid_reason='out_of_vocab'。
+#   · scope 那段切不出来（比如这个项目拿不到标题）→ 不问，直接记 NULL,
+#     invalid_reason='no_title' / 'text_too_short'。
+#   · body / full 被截断（超过 1,500 字）时，scope 为 body / full 的题答「否」记 NULL,
+#     invalid_reason='span_truncated'；答「是」照常（证据在前缀里就成立）。「否」不能来自
+#     没看全的片段（docs/28 §5.3）。今天生产没有一篇正文超过 1,500 字（最长 1,013），这是防御。
+#   · 不同 group 绝不合并进一次调用；同组最多 4 题。闸一会比「分组问」和「单题问」
+#     的一致率，低于 0.90 的题改为单独问（docs/28 §6.1）。
+#
+# 冻结: 闸二预注册那天把 status 改成 frozen、记下 frozen_sha256 ——【剔掉 frozen_sha256 和
+#       status 这两行之后】再算的规范化 sha256(feature_bank.bank_digest)。直接 hash 整个文件
+#       是自指的: 写回去文件就变了。这两行都是「冻结」这个动作自己写的, 不算题目内容, 所以
+#       冻结前后 digest 不变, 落库的 bank_sha256 也不会因为冻结劈成两批。
+#       之后改任何一题都要升
+#       question_version 并在 DECISIONS 记一笔。下游（写作台）要用就原样 vendor 本文件
+#       并记校验和，不手抄（同 D-041 对词表的纪律）。
+# ════════════════════════════════════════════════════════════════════
+
+bank_version: fq-v0.1
+status: draft
+essence_vocab: v0.2
+label_view: truth_vault.v_l2_labels
+
+# ── 输入片段: 代码先切好，模型只看题目 scope 指定的那段 ──
+spans:
+  title: >-
+    标题。按 mapping 的 title_extraction 切（docs/28 §3 第 4 条, 09-19 实查 17 张表）:
+    column = TGV 的独立「笔记标题」列; markers = 其余 16 张, 文案里带标记, 两种写法
+    「【标题】…【正文】…」和「标题：…\n正文：…」（冒号全角半角都有, 一个解析器同时认）;
+    none = 都没有。markers 切不出来的单条和 none 的项目, 标题类题目记 NULL, 不猜。
+  first_sentence: >-
+    正文第一句。去掉标题和开头的话题标签、表情后，从正文开头到第一个 。！？!?… 或换行为止；
+    不足 6 个字就并入下一句。
+  last_para: >-
+    正文最后一段。去掉末尾的话题标签（#…#、#…[话题]#）和 @ 之后，最后一个非空段落；
+    不足 10 个字就往上再并一段。
+  body: >-
+    正文全文，去掉标题，截断到 1,500 字（与 essence 标注同一截断）。被截断时代码要记下来：
+    该篇 scope 为 body / full 的题，「否」记 NULL + span_truncated（见上面答题契约）。
+  full: >-
+    标题 + 正文全文（截断规则同 body，截断标记同 body）。
+
+families:
+  - name: 开头
+    means: 读者第一眼看到什么，决定停不停下来
+  - name: 具体性
+    means: 有没有能让人信、能让人对照的具体细节
+  - name: 评论诱导
+    means: 这篇给了读者什么理由去评论（判爆口径就是评论数，D-062）
+  - name: 身份代入
+    means: 读者能不能对上号：这是谁、我是不是其中一个
+  - name: 冲突转折
+    means: 有没有事情发生、有没有代价
+  - name: 产品露出
+    means: 产品在文中是什么角色；用来看爆款是不是拿品牌露出换来的
+
+call_groups:
+  G1_opening:
+    - title_is_question
+    - opening_type
+  G2_specificity:
+    - has_specific_time
+    - has_specific_place
+    - has_direct_quote
+    - has_body_sensation
+  G3_engagement:
+    - ending_asks_reader
+    - invites_sharing
+    - asks_for_help
+  G4_stance_product:
+    - withholds_product_name
+    - divisive_claim
+    - product_role
+    - efficacy_promise
+  G5_identity:
+    - narrator_identity
+    - own_experience
+    - comparison_group
+    - calls_out_reader_group
+  G6_conflict:
+    - turning_point
+    - judged_by_others
+    - negative_outcome_happened
+
+questions:
+
+  # ═══ 开头 ═══════════════════════════════════════════════════════
+
+  - id: title_is_question
+    version: 1
+    family: 开头
+    group: G1_opening
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: title
+    ask: 标题是不是一个问句？
+    yes_if: 标题整体是疑问语气，包括设问、反问、求助式问句，有没有问号都算。
+    yes_examples:
+      - 戒烟第几天最难熬？
+      - 有没有跑步不岔气的办法
+      - 按摩椅到底值不值得买
+    no_if: 陈述句、感叹句、清单式标题。
+    no_examples:
+      - 戒烟 30 天，我身上的 5 个变化
+      - 按摩椅我终于买对了
+    evidence: 答「是」时抄标题里的问句部分。
+    hypothesis: "+"
+    why: 问句标题等于先抛了一个读者能回答的问题；判爆看的是评论数。
+    aw_instruction: 标题写成一个读者能直接回答的问题。
+    cross_check: null
+
+  - id: opening_type
+    version: 1
+    family: 开头
+    group: G1_opening
+    layer: surface
+    halflife_months: 30
+    type: choice
+    scope: first_sentence
+    ask: 正文第一句属于哪一种？只选最贴近的一种。
+    options:
+      - value: 具体事件
+        means: 讲一件已经发生的具体事，出现具体的人、时间、地点之一。
+        example: 上周相亲，对方坐下两分钟就问我是不是抽烟。
+      - value: 身份自述
+        means: 先交代自己是谁、处境如何。
+        example: 32 岁，程序员，烟龄 8 年。
+      - value: 观点断言
+        means: 直接下判断或给结论。
+        example: 戒烟最难的根本不是第一周。
+      - value: 提问
+        means: 向读者或向自己提问。
+        example: 你们跑步会带能量胶吗？
+      - value: 数据事实
+        means: 用数字或客观事实开头。
+        example: 一支能量胶大概 100 大卡。
+      - value: 感叹情绪
+        means: 只有情绪或感叹，既没有事件也没有判断。
+        example: 破防了家人们。
+      - value: 其他
+        means: 以上都不是，比如直接列清单、贴产品参数。
+        example: 1. 口味 2. 包装 3. 价格
+    evidence: 不需要（这一段就是第一句本身）。
+    hypothesis:
+      具体事件: "+"
+      提问: "+"
+      数据事实: "-"
+      身份自述: "?"
+      观点断言: "?"
+      感叹情绪: "?"
+      其他: "?"
+    why: 具体事件开头让人想看下去、也更像真人；数据开头偏信息型，信息差利用这一档爆率低（l2-feasibility §2）。
+    aw_instruction: 第一句写一件已经发生的具体事，带上人、时间或地点之一。
+    aw_instruction_values: [具体事件]   # choice 题: 这句话只对这个取值成立; 其余取值过闸也不下发
+    cross_check: null
+
+  # ═══ 具体性 ═════════════════════════════════════════════════════
+
+  - id: has_specific_time
+    version: 1
+    family: 具体性
+    group: G2_specificity
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: body
+    ask: 正文里有没有具体的时间点或时长？
+    yes_if: 能定位到某一天、某一时刻，或给出一段具体的时长。
+    yes_examples:
+      - 上周三
+      - 凌晨两点
+      - 戒烟第 17 天
+      - 坚持了三个月
+    no_if: 只有模糊时间。
+    no_examples:
+      - 以前
+      - 最近
+      - 很久了
+      - 有一段时间
+    evidence: 答「是」时抄那个时间表达。
+    hypothesis: "+"
+    why: 具体时间让经历可信，也方便读者对照自己（「我第几天了」）。
+    aw_instruction: 写清一个具体的时间点或时长。
+    cross_check: null
+
+  - id: has_specific_place
+    version: 1
+    family: 具体性
+    group: G2_specificity
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: body
+    ask: 正文里有没有具体的地点或场合？
+    yes_if: 能想象出画面的具体场所或场合。
+    yes_examples:
+      - 地铁上
+      - 公司茶水间
+      - 马拉松第 30 公里的补给站
+      - 相亲的那家咖啡馆
+    no_if: 只有泛泛的地方。
+    no_examples:
+      - 外面
+      - 生活中
+      - 平时
+    evidence: 答「是」时抄那个地点表达。
+    hypothesis: "+"
+    why: 场合让读者代入画面。
+    aw_instruction: 给经历一个具体的场合。
+    cross_check: null
+
+  - id: has_direct_quote
+    version: 1
+    family: 具体性
+    group: G2_specificity
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: body
+    ask: 正文里有没有某个人说的原话？
+    yes_if: 能明显看出是原话：有引号，或「他说：」「来了一句」后面直接跟着原话。
+    yes_examples:
+      - 我妈：你身上什么味儿？
+      - 同事来了一句「你最近气色好多了」
+    no_if: 只是转述大意。
+    no_examples:
+      - 我妈说我身上有味道
+      - 同事建议我少熬夜
+    evidence: 答「是」时抄那句原话。
+    hypothesis: "+"
+    why: 原话是最便宜的真实感来源。
+    aw_instruction: 放一句别人说的原话。
+    cross_check: 取代 note_features.has_dialogue（该列从未被写过）。
+
+  - id: has_body_sensation
+    version: 1
+    family: 具体性
+    group: G2_specificity
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: body
+    ask: 正文有没有写出具体的身体感受？
+    yes_if: 写到某个身体部位具体怎么样、像什么。
+    yes_examples:
+      - 嗓子像被砂纸磨过
+      - 最后五公里腿抖得下不了台阶
+      - 鼻子堵到只能张嘴睡
+    no_if: 只有笼统的感受词。
+    no_examples:
+      - 很难受
+      - 不舒服
+      - 好累
+    evidence: 答「是」时抄那处身体感受描写。
+    hypothesis: "+"
+    why: 大健康品类里，具体的身体感受最容易让同病的人认出自己。非健康品类可能大多答「否」，属正常。
+    aw_instruction: 写一处具体的身体感受，别只写「难受」。
+    cross_check: null
+
+  # ═══ 评论诱导 ═══════════════════════════════════════════════════
+
+  - id: ending_asks_reader
+    version: 1
+    family: 评论诱导
+    group: G3_engagement
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: last_para
+    ask: 结尾有没有直接问读者、等读者回答？
+    yes_if: 结尾向读者提出一个可以回答的问题，或明确征求读者意见、推荐。
+    yes_examples:
+      - 你们戒烟第几天了？
+      - 有人和我一样吗
+      - 求推荐
+    no_if: 自问自答；反问式感叹；号召行动。
+    no_examples:
+      - 为什么我能坚持？因为……
+      - 谁能不爱呢
+      - 冲就完了
+    evidence: 答「是」时抄结尾那句问话。
+    hypothesis: "+"
+    why: 判爆就是看评论数（D-062），结尾提问直接给了留言的理由。
+    aw_instruction: 结尾留一个读者能直接回答的问题。
+    cross_check: null
+
+  - id: invites_sharing
+    version: 1
+    family: 评论诱导
+    group: G3_engagement
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: full
+    ask: 有没有明确邀请读者在评论区讲出自己的某个具体经历、做法或数字？
+    yes_if: 说清楚了请读者分享什么。
+    yes_examples:
+      - 评论区说说你是怎么戒的
+      - 留下你的踩坑经历
+      - 你们比赛都带几支胶，打在评论区
+    no_if: 只是问一句是非或求推荐（那归 ending_asks_reader）；「欢迎交流」「评论区见」这种没说分享什么的客套话。
+    no_examples:
+      - 有人和我一样吗
+      - 欢迎交流
+    evidence: 答「是」时抄那句邀请。
+    hypothesis: "+"
+    why: 请读者说自己的事，比问一句是非更容易换来长评论和互相回复。
+    aw_instruction: 明确请读者在评论区说出自己的某个具体经历或数字。
+    cross_check: null
+
+  - id: asks_for_help
+    version: 1
+    family: 评论诱导
+    group: G3_engagement
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: full
+    ask: 整篇是不是在求助或求推荐——作者自己有个问题，希望别人来回答？
+    yes_if: 全篇的目的就是请别人帮忙解决作者的问题。
+    yes_examples:
+      - 有没有姐妹知道戒烟后长胖怎么办
+      - 第一次跑全马，补给到底该怎么带
+    no_if: 在分享经验、给建议；只在结尾顺口问一句的不算（那归 ending_asks_reader）。
+    no_examples:
+      - 分享我戒烟 30 天的方法……最后问一句你们呢
+    evidence: 答「是」时抄提出求助的那句。
+    hypothesis: "+"
+    why: 求助帖天然请人作答。
+    aw_instruction: 用一个真实的求助问题组织全篇。
+    cross_check: 应与 essence 的 content_format = 提问求助 高度一致；不一致的行值得人工看。
+
+  # ═══ 产品露出 & 立场（同一调用组 G4）═════════════════════════════
+
+  - id: withholds_product_name
+    version: 1
+    family: 评论诱导
+    group: G4_stance_product
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: body
+    ask: 正文是不是提到了自己在用、或者在推荐某个东西，却故意不说它叫什么？
+    yes_if: 明显指向某个具体产品，但没写出名字，或说名字放在评论区。
+    yes_examples:
+      - 后来朋友塞给我一个小绿瓶，一周就缓过来了（名字就不说了）
+      - 具体哪款我放评论区
+      - 就是那个蓝色包装的
+    no_if: 直接写出了产品名或品牌名；或者根本没提到任何产品。
+    no_examples:
+      - 后来换了 XX 牌的鼻喷，一周就缓过来了
+      - 全文只讲自己怎么调整作息
+    evidence: 答「是」时抄那处暗示。
+    hypothesis: "+"
+    why: 不点名会招来「求名字」「求链接」的评论。但它是拿品牌露出换评论，要和 product_role 一起看。
+    aw_instruction: （流量型内容）正文不点名，产品名留在评论区。
+    cross_check: 应与 product_role = 只暗示 一致。
+
+  - id: divisive_claim
+    version: 1
+    family: 评论诱导
+    group: G4_stance_product
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: full
+    ask: 有没有抛出一个很可能有读者会反对的明确判断？
+    yes_if: 读者里明显会有人不同意、想反驳的判断。
+    yes_examples:
+      - 戒烟靠的全是意志力，什么辅助都没用
+      - 跑半马不带胶的都是在硬撑
+      - 按摩椅就是智商税
+    no_if: 普遍共识；纯个人口味；自嘲。
+    no_examples:
+      - 熬夜伤身体
+      - 我很喜欢这个味道
+      - 我就是个废物哈哈
+    evidence: 答「是」时抄那个判断。
+    hypothesis: "+"
+    why: 有分歧才有争论，争论就是评论数。对品牌有风险，要和产品露出、风控一起看。
+    aw_instruction: 给出一个明确、会有人不同意的个人判断（不针对任何具体品牌）。
+    cross_check: null
+
+  - id: product_role
+    version: 1
+    family: 产品露出
+    group: G4_stance_product
+    layer: surface
+    halflife_months: 30
+    type: choice
+    scope: full
+    ask: 产品在这篇里是什么角色？只选最贴近的一种。
+    options:
+      - value: 主角
+        means: 整篇围绕产品介绍、测评或推荐。
+        example: 这款鼻喷我用了一个月，说三个优点两个缺点。
+      - value: 解决方案
+        means: 先讲问题或经历，产品作为解决办法出场。
+        example: 连续三晚鼻塞睡不着……后来换了 XX 鼻喷，第二晚就能用鼻子呼吸了。
+      - value: 顺带一提
+        means: 提到了产品，但和主线关系不大。
+        example: 讲完跑步心得，最后顺口说一句补给用的是 XX。
+      - value: 只暗示
+        means: 在用或推荐某个东西，但没写名字（同 withholds_product_name）。
+        example: 后来换了一个东西，名字放评论区。
+      - value: 未出现
+        means: 正文里没有任何产品。
+        example: 全文只讲自己怎么调整作息。
+    evidence: 选「未出现」以外的选项时，抄产品出现（或被暗示）的那一处。
+    hypothesis:
+      主角: "-"
+      解决方案: "?"
+      顺带一提: "?"
+      只暗示: "+"
+      未出现: "?"
+    why: >-
+      把「直接推荐 / 流量型」这根轴补到每一条笔记上（intent 只覆盖 2,303 / 5,949）；
+      看板深挖里直给推荐、横评对比两种形态本来就不出爆款（dashboard_views_v4_mining §9）。
+    aw_instruction: 按过闸结果决定是否下发；不单独下发「别提产品」这类指令，必须和客户的露出要求一起看。
+    # 没有 aw_instruction_values = 任何取值过闸都【不自动下发】, 由 owner 结合客户的露出要求单独判。
+    cross_check: 应与 essence 的 intent 对得上（conversion ↔ 主角 / 解决方案；traffic ↔ 只暗示 / 未出现 / 顺带一提）。
+
+  - id: efficacy_promise
+    version: 1
+    family: 产品露出
+    group: G4_stance_product
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: full
+    ask: 有没有对效果的明确保证或量化承诺？
+    yes_if: 承诺一定有效、给出见效时间或倍数、和别家比出绝对结论。
+    yes_examples:
+      - 三天见效
+      - 百分百有用
+      - 比 XX 强十倍
+      - 用了就能戒
+    no_if: 个人感受式描述。
+    no_examples:
+      - 我用着挺好
+      - 对我来说有用
+    evidence: 答「是」时抄那句承诺。
+    hypothesis: "?"
+    why: 本期只观察。主要留给以后分析「风控」档（被限流 / 删除）用。
+    aw_instruction: never
+    cross_check: null
+    notes: 合规观察项。即使将来数据显示它和爆款正相关，也绝不作为写作台指令下发。
+
+  # ═══ 身份代入 ═══════════════════════════════════════════════════
+
+  - id: narrator_identity
+    version: 1
+    family: 身份代入
+    group: G5_identity
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: full
+    ask: 作者有没有交代自己的具体身份？年龄、职业、家庭角色、所在城市、资历，至少一样。
+    yes_if: 读者能从文中知道「这是个什么人」。
+    yes_examples:
+      - 32 岁程序员
+      - 二胎妈妈
+      - 在杭州跑了三年步
+      - 烟龄 8 年
+    no_if: 只用「我」，看不出是什么人。
+    no_examples:
+      - 我最近在戒烟
+    evidence: 答「是」时抄那个身份表达。
+    hypothesis: "+"
+    why: 身份让同类读者对上号，也是客户追问的「TA 到底是谁」的直接证据。
+    aw_instruction: 交代一个身份：年龄、职业、家庭角色或资历之一。
+    cross_check: 可与 inferred_audience_profile 的 life_stage 对照。
+
+  - id: own_experience
+    version: 1
+    family: 身份代入
+    group: G5_identity
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: body
+    ask: 正文主体是不是作者本人的亲身经历？
+    yes_if: 主要在讲「我」经历了什么。
+    yes_examples:
+      - 我戒烟第十天，半夜两点饿醒……
+    no_if: 主要在讲别人的故事（闺蜜、同事、家人）；泛泛科普；产品介绍。
+    no_examples:
+      - 我闺蜜戒烟那段时间……
+      - 戒烟的三个阶段分别是……
+    evidence: 答「是」时抄一句能说明是本人经历的话。
+    hypothesis: "+"
+    why: 亲历叙事是小红书的基本盘；科普和介绍在现有标签里爆率偏低。
+    aw_instruction: 用第一人称讲自己的一段经历。
+    cross_check: null
+
+  - id: comparison_group
+    version: 1
+    family: 身份代入
+    group: G5_identity
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: full
+    ask: 有没有拿一群人或某个人来和作者自己对照？
+    yes_if: 明确在比：别人怎样，我怎样。
+    yes_examples:
+      - 别的妈妈都给孩子用这个
+      - 跑团里就我一个不吃胶
+      - 我姐比我大两岁，看着比我年轻
+    no_if: 提到了别人，但没有比较。
+    no_examples:
+      - 和同事一起去跑了个步
+    evidence: 答「是」时抄那处对照。
+    hypothesis: "+"
+    why: 现有标签里「同辈比较」原型爆率 11.2%，高于基线（l2-feasibility §2）。
+    aw_instruction: 放一个对照对象，让读者自己代入去比。
+    cross_check: 可与 human_truth_archetype 含「同辈比较」对照。
+
+  - id: calls_out_reader_group
+    version: 1
+    family: 身份代入
+    group: G5_identity
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: full
+    ask: 有没有点名某一类读者？
+    yes_if: 指名道姓地招呼一类具体的人。
+    yes_examples:
+      - 熬夜党看过来
+      - 第一次跑半马的听我一句
+      - 烟龄十年以上的
+    no_if: 泛称。
+    no_examples:
+      - 大家
+      - 姐妹们
+      - 家人们
+    evidence: 答「是」时抄那处点名。
+    hypothesis: "?"
+    why: 可能帮对的人停下来，也可能把其他人挡在外面；没有先验。
+    aw_instruction: 点名一类具体的读者。
+    cross_check: null
+
+  # ═══ 冲突转折 ═══════════════════════════════════════════════════
+
+  - id: turning_point
+    version: 1
+    family: 冲突转折
+    group: G6_conflict
+    layer: surface
+    halflife_months: 30
+    type: bool
+    scope: body
+    ask: 有没有明确的前后转折？以前怎样，发生了某件事，后来怎样。
+    yes_if: 三段都在：以前的状态、引发改变的那件事、之后的状态。
+    yes_examples:
+      - 以前一天一包，直到女儿说我身上臭，现在已经戒了四个月
+    no_if: 只写现在的状态；只列建议；只有「以前」和「现在」但没有中间那件事。
+    no_examples:
+      - 戒烟四个月了，分享几个方法
+    evidence: 答「是」时抄引发改变的那件事。
+    hypothesis: "+"
+    why: 有事情发生才有故事；转折点也是读者最想追问的地方。
+    aw_instruction: 写出以前、转折的那件事、现在三段。
+    cross_check: null
+
+  - id: judged_by_others
+    version: 1
+    family: 冲突转折
+    group: G6_conflict
+    layer: essence
+    halflife_months: 60
+    type: bool
+    scope: body
+    ask: 有没有写到作者被别人评价、嫌弃或质疑的具体场面？
+    yes_if: 已经发生的、有具体对象的场面。
+    yes_examples:
+      - 相亲对象当面问我是不是抽烟
+      - 同事问我是不是没洗头
+    no_if: 只是担心别人会怎么看，没有真的发生。
+    no_examples:
+      - 我怕别人觉得我邋遢
+    evidence: 答「是」时抄那个场面。
+    hypothesis: "+"
+    why: 现有标签里羞耻撬动、恐惧撬动爆率在 11%–12%（l2-feasibility §2），这题把它们落到一个能照着写的场面上。
+    aw_instruction: 写一个作者真的被人评价过的场面。
+    cross_check: 与 emotional_lever 的 羞耻撬动 / 恐惧撬动 对照（词表规则：恐惧 = 具体、已发生、有对象）。
+
+  - id: negative_outcome_happened
+    version: 1
+    family: 冲突转折
+    group: G6_conflict
+    layer: essence
+    halflife_months: 60
+    type: bool
+    scope: body
+    ask: 有没有写到一个已经发生的坏结果？身体、关系、钱、机会上的损失都算。
+    yes_if: 坏结果已经发生，不是假设。
+    yes_examples:
+      - 体检报告上多了两个箭头
+      - 比赛最后五公里抽筋退赛
+      - 面试挂了三次
+    no_if: 只是担心可能发生。
+    no_examples:
+      - 再不戒就晚了
+      - 万一以后……
+    evidence: 答「是」时抄那个坏结果。
+    hypothesis: "+"
+    why: 这就是词表里「恐惧 vs 焦虑」的分界（具体已发生 vs 模糊未来），拆成可以核对的事实。
+    aw_instruction: 写一个已经发生的具体代价，而不是「再不……就晚了」。
+    cross_check: >-
+      emotional_lever = 恐惧撬动 的行，这题应大多为「是」；= 焦虑撬动 的行应大多为「否」。
+      对不上的比例就是 essence 在这条边界上的噪声。
+
+# ═══ 代码直接算的特征（extractor = code:v1，不经过模型）═══════════════
+# 数值原值写 note_features 现有列（title_len / body_len / hashtag_count / mention_count），
+# 分档后的取值写 note_feature_answers，给闸二的对数几率打分器用（分档固定，不按项目分位，
+# 免得同一篇笔记在不同时间落到不同档）。
+code_features:
+
+  - id: body_len_bucket
+    version: 1
+    type: choice
+    options:
+      - "<100"
+      - "100-199"
+      - "200-399"
+      - ">=400"
+    rule: 正文去掉话题标签后的字数，分四档（库里正文中位约 260 字）。
+    hypothesis: "?"
+    why: 控制变量。SPX 爆贴正文中位 118 字、趴贴 253 字，其他项目没有这个规律（l2-feasibility §8.4）。
+    store_raw_in: note_features.body_len
+
+  - id: title_len_bucket
+    version: 1
+    type: choice
+    options:
+      - "<=10"
+      - "11-15"
+      - ">=16"
+    rule: 标题字数，分三档；拿不到标题记 NULL（invalid_reason = no_title）。
+    hypothesis: "?"
+    why: 控制变量。
+    store_raw_in: note_features.title_len
+
+  - id: title_has_digit
+    version: 1
+    type: bool
+    rule: 标题里有阿拉伯数字（含全角）。中文数字误报太多（「一下」「一起」），不认。
+    hypothesis: "?"
+    why: 常见写法，没有先验。
+    store_raw_in: null
+
+  - id: body_question_marks
+    version: 1
+    type: choice
+    options:
+      - "0"
+      - "1"
+      - ">=2"
+    rule: 正文里 ？ 和 ? 的个数。
+    hypothesis: "+"
+    why: 与 ending_asks_reader 互为粗细两版，可看模型题比数问号多出多少。
+    store_raw_in: null
+
+  - id: emoji_bucket
+    version: 1
+    type: choice
+    options:
+      - "0"
+      - "1-3"
+      - ">=4"
+    rule: Unicode 表情 + 小红书方括号表情（形如 [哭惹R]）的个数。
+    hypothesis: "?"
+    why: 平台话术强度的粗代理。
+    store_raw_in: null
+
+  - id: hashtag_bucket
+    version: 1
+    type: choice
+    options:
+      - "0"
+      - "1-3"
+      - ">=4"
+    rule: 从正文里解析话题标签（#…#、#…[话题]#）的个数；notes.hashtags 列是空的，不读它。
+    hypothesis: "?"
+    why: 控制变量。
+    store_raw_in: note_features.hashtag_count
+
+  - id: brand_in_title
+    version: 1
+    type: bool
+    rule: >-
+      标题里出现品牌词或产品词。词典 = projects.brand + projects.product + 该笔记的
+      target_blue_keywords；不够的在项目 mapping 里补可选键 brand_aliases（新键，待拍板）。
+      拿不到标题记 NULL。
+    hypothesis: "-"
+    why: 标题直接点名产品，更像广告。
+    store_raw_in: null
+
+  - id: brand_first_position
+    version: 1
+    type: choice
+    options:
+      - 未出现
+      - 前20%
+      - 中间
+      - 后20%
+    rule: 品牌词或产品词在正文里第一次出现的位置（按字数比例）。词典同 brand_in_title。
+    hypothesis:
+      未出现: "?"
+      前20%: "-"
+      中间: "?"
+      后20%: "?"
+    why: 「先讲问题再引出产品」这种写法在不在起作用，用位置就能粗看。
+    store_raw_in: null
+
+# ═══ 占位题（反证用，不进正式对比）══════════════════════════════════
+# 答案由代码随机但确定地生成，和内容毫无关系。闸二如果在任一方向上判它们「显著且稳定」
+# （满足 docs/28 §6.2 第 1–3 条），说明判据或管道有问题，整轮结论作废。
+placebo:
+  - id: placebo_rand_1
+    rule: sha256(note_id + ':fq-placebo-1') 的最后一位十六进制数 < 8 记「是」，否则「否」。
+    hypothesis: "0"
+  - id: placebo_rand_2
+    rule: sha256(note_id + ':fq-placebo-2') 的最后一位十六进制数 < 8 记「是」，否则「否」。
+    hypothesis: "0"
+  - id: placebo_rand_3
+    rule: sha256(note_id + ':fq-placebo-3') 的最后一位十六进制数 < 8 记「是」，否则「否」。
+    hypothesis: "0"

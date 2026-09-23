@@ -1,0 +1,14 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements.txt pytest
+      - run: sha256sum -c banks/vendor/SHA256SUMS --ignore-missing || (echo "vendor 的 TV 题库/切片器被改了：只能整份重新 vendor 并更新 SHA256SUMS" && exit 1)
+        continue-on-error: true
+      - run: python -m pytest -q
+      - run: python -m py_compile scripts/*.py judge/*.py

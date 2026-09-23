@@ -1,0 +1,66 @@
+# ════════════════════════════════════════════════════════════════════
+# 平台与品类题库 · 大健康（草案）  ph-v0.1
+# ════════════════════════════════════════════════════════════════════
+# 用途：写作台入库判定和三省六部采样判定的硬约束层。只放正则查不了的语义判断；
+# 诊室 / 复诊 / 就医这类风控词、绝对化用语、禁词，归 validator.py 和刑部的 forbidden_words，不进这里。
+# 三题都是「答是即硬伤」（loop.produce 里 hard_rules 期望「否」）。
+# 定义要经合规同事勘误；每个品类（处方药 / OTC / 保健品 / 器械 / 特医）可以各自加严。
+# ════════════════════════════════════════════════════════════════════
+
+bank_version: ph-v0.1
+model: jev-1.13.0
+
+ambiguity:
+  choice_top_min: 0.60
+  choice_margin_min: 0.20
+  noul_band: [0.35, 0.65]
+
+questions:
+
+  - id: efficacy_claim
+    type: noul
+    instructions:
+      zh: 稿子里有没有承诺或明确暗示产品的疗效（用了就好、几天见效、根治、治愈、不复发之类）？
+      en: Does the piece promise or clearly imply a therapeutic effect (works in days, cures, no relapse)?
+    criteria:
+      "true":
+        zh: 有承诺或明确暗示疗效的句子
+        en: A sentence promises or clearly implies a therapeutic outcome
+      "false":
+        zh: 只讲个人使用感受或过程，没有把结果说成必然
+        en: Only personal experience or process; no outcome stated as certain
+    evidence: on_true
+    feeds: 硬约束
+    on_ambiguous: 进人工
+
+  - id: medical_authority
+    type: noul
+    instructions:
+      zh: 作者有没有以医生、药师或专业人士的身份给出诊断、处方或用药指导？
+      en: Does the author give a diagnosis, prescription or dosing guidance in the voice of a doctor, pharmacist or professional?
+    criteria:
+      "true":
+        zh: 以专业身份下诊断、开方或指导用量
+        en: Diagnoses, prescribes or instructs dosage as a professional
+      "false":
+        zh: 只是转述自己被告知的话，或以普通用户身份分享
+        en: Only relays what they were told, or shares as an ordinary user
+    evidence: on_true
+    feeds: 硬约束
+    on_ambiguous: 进人工
+
+  - id: fear_sell
+    type: noul
+    instructions:
+      zh: 稿子有没有用夸大的疾病后果吓读者，再把产品当成唯一出路？
+      en: Does the piece frighten the reader with exaggerated disease outcomes and then present the product as the only way out?
+    criteria:
+      "true":
+        zh: 先渲染严重后果，再把产品说成唯一解决办法
+        en: Dramatises severe outcomes, then frames the product as the only solution
+      "false":
+        zh: 后果讲得克制，或者产品只是选项之一
+        en: Outcomes stated soberly, or the product is one option among others
+    evidence: on_true
+    feeds: 硬约束
+    on_ambiguous: 进人工

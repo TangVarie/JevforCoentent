@@ -1,0 +1,89 @@
+# ════════════════════════════════════════════════════════════════════
+# 评论区级 Jev 判断题 · 整个评论区 4 题  tb-v0.3
+# ════════════════════════════════════════════════════════════════════
+# v0.3 相对 v0.2 只把「这家机构」「机构/老师」改成占位符，定义没动；fill_defaults 是 v0.2 原文，途鸽用例逐字相同。
+#   {subject}   被推的主体：这家机构 / 这个产品 / 这家店
+#   {praised}   同一句式那题里「夸 X 的评论」的 X：机构 / 这个产品 / 这家店（v0.2 原文是「夸机构」，和 {subject} 差两个字，分开留）
+#   {helper}    背书句式里「帮我」的那一方：机构/老师 / 这个产品 / 店家
+# 用途：把一篇帖子下面能看到的评论整体交给 Jev；单条评论再像样，评论区的形状（夸的比例、句式、有没有质疑）也能把它出卖。
+# 生产回路里它判的是「候选评论组」：一组评论选定后先整体过这 4 题，再决定哪一位要换。
+# 不归 Jev 管、用代码确定性地算的：同一天发布占比、含品牌名条数、账号名异常（如「出卡专用号」）。
+# ════════════════════════════════════════════════════════════════════
+
+bank_version: tb-v0.3
+model: jev-1.13.0
+
+fill_defaults:
+  subject: 这家机构
+  praised: 机构
+  helper: 机构/老师
+
+ambiguity:
+  choice_top_min: 0.60
+  choice_margin_min: 0.20
+  noul_band: [0.35, 0.65]
+
+questions:
+
+  - id: praise_share
+    type: choice
+    instructions:
+      zh: 这些评论里，夸{subject}（或说自己用了{subject}很好）的占多大比例？
+      en: What share of these comments praise {subject} (or say they used it and it was good)?
+    options:
+      - label: 少数
+        zh: 不到四分之一
+        en: "Under a quarter"
+      - label: 一半左右
+        zh: 四分之一到四分之三之间
+        en: "Between a quarter and three quarters"
+      - label: 多数
+        zh: 超过四分之三
+        en: "Over three quarters"
+    feeds: 评论区形状
+    on_ambiguous: 按「一半左右」处理
+
+  - id: same_template
+    type: noul
+    instructions:
+      zh: 夸{praised}的那些评论，是不是同一个句式（一句痛点 + 「{helper}帮我」+ 一个结果）？
+      en: Do the praising comments follow one template (a pain point + "{helper} helped me" + an outcome)?
+    criteria:
+      "true":
+        zh: 多数夸的评论套的是同一个句式
+        en: Most praising comments follow the same template
+      "false":
+        zh: 句式各不相同
+        en: They are phrased in varied ways
+    feeds: 评论区形状
+    on_ambiguous: 进人工
+
+  - id: has_friction
+    type: noul
+    instructions:
+      zh: 评论区里有没有质疑、反对、抱怨、追问价格或效果这类审慎的声音，或者帖子作者本人回复读者？只问「在哪里」「怎么联系」这种中性提问不算。
+      en: Is there any sceptical voice — doubt, disagreement, complaint, probing about price or results — or a reply from the post's author? Neutral questions like "where is it" do not count.
+    criteria:
+      "true":
+        zh: 有至少一处质疑、反对、抱怨、追问价格或效果，或作者本人的回复
+        en: At least one instance of doubt, disagreement, complaint, probing about price or results, or an author reply
+      "false":
+        zh: 没有；只有单向的评价，最多有中性的提问
+        en: None; only one-way evaluations, at most neutral questions
+    feeds: 评论区形状
+    on_ambiguous: 进人工
+
+  - id: thread_arranged
+    type: noul
+    instructions:
+      zh: 站在一个普通读者的角度，这个评论区整体像不像安排出来的？
+      en: From an ordinary reader's point of view, does this comment section as a whole look arranged?
+    criteria:
+      "true":
+        zh: 像安排的
+        en: Looks arranged
+      "false":
+        zh: 像自然长出来的
+        en: Looks organic
+    feeds: 总判
+    on_ambiguous: 进人工

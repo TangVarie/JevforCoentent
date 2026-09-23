@@ -1,0 +1,88 @@
+# ════════════════════════════════════════════════════════════════════
+# 外部语料分诊题库（草案）  et-v0.1
+# ════════════════════════════════════════════════════════════════════
+# 用途：搜索结果页上的每条笔记（标题 + 摘要 + 作者昵称）先过这四题，只有「对飞轮有用」的才花钱取全文、跑 fq 题库。
+# 「对飞轮有用」的定义：讲的是这个品类或场景；普通用户视角（BYWOOD 做的是素人，对照组也该是素人）；不是商家 / 品牌号 / 媒体。
+# 达人测评默认不留（可在 config 里放开），广告样的留但打标——它们正是「不像人」的反例，参考分布需要。
+# state：关键词、品类、标题、摘要（搜索页给多少用多少）、作者昵称。互动数不进 state。
+# ════════════════════════════════════════════════════════════════════
+
+bank_version: et-v0.1
+model: jev-1.13.0
+
+ambiguity:
+  choice_top_min: 0.60
+  choice_margin_min: 0.20
+  noul_band: [0.35, 0.65]
+
+questions:
+
+  - id: on_topic
+    type: noul
+    instructions:
+      zh: 这条笔记讲的是不是「品类」那一栏说的东西或场景（哪怕只是提到、吐槽、求助）？
+      en: Is this note about the thing or scene named in the category field (even a mention, complaint or request counts)?
+    criteria:
+      "true":
+        zh: 主题、经历或求助确实落在这个品类或场景上
+        en: Its topic, experience or request falls in that category or scene
+      "false":
+        zh: 只是关键词撞上了，讲的是别的事
+        en: Only the keyword matches; it is about something else
+    feeds: 分诊——否即丢弃
+    on_ambiguous: 按「否」处理
+
+  - id: voice
+    type: choice
+    instructions:
+      zh: 这条笔记是谁在说话？只选最像的一种。
+      en: Whose voice is this note in? Pick the closest.
+    options:
+      - label: 普通用户
+        zh: 普通人讲自己的事、感受、求助，没有商业身份
+        en: "An ordinary person telling their own story, feelings or asking for help; no commercial identity"
+      - label: 达人测评
+        zh: 以测评、种草、合集为业的账号口吻，带专业栏目感
+        en: "A reviewer / recommender account voice, column-like"
+      - label: 商家或品牌
+        zh: 卖家、品牌、门店、机构自己在说话
+        en: "A seller, brand, store or institution speaking"
+      - label: 媒体或科普
+        zh: 新闻、科普、医生或专业号
+        en: "News, popular science, doctor or professional account"
+      - label: 说不清
+        zh: 都不像
+        en: "None fits"
+    unclear_labels: [说不清]
+    feeds: 分诊——默认只留「普通用户」
+    on_ambiguous: 进人工
+
+  - id: ad_like
+    type: noul
+    instructions:
+      zh: 站在普通读者的角度，这条笔记像不像广告或软文？
+      en: From an ordinary reader's view, does this note look like an ad or sponsored post?
+    criteria:
+      "true":
+        zh: 像广告：卖点齐整、品牌反复出现、结尾引导购买
+        en: "Looks like an ad: tidy selling points, brand repeated, ends by steering to buy"
+      "false":
+        zh: 像自发的分享或求助
+        en: Looks like a spontaneous share or request
+    feeds: 只打标不丢弃（参考分布需要反例）
+    on_ambiguous: 进人工
+
+  - id: has_product
+    type: noul
+    instructions:
+      zh: 笔记里有没有出现具体的产品或品牌（写出名字，或者明确指向某个东西）？
+      en: Does the note feature a specific product or brand (named, or clearly pointed to)?
+    criteria:
+      "true":
+        zh: 有具体产品或品牌
+        en: A specific product or brand appears
+      "false":
+        zh: 没有，只讲人、事、感受
+        en: None; only people, events, feelings
+    feeds: 只打标
+    on_ambiguous: 按「否」处理

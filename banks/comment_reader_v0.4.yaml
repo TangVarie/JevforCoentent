@@ -1,0 +1,170 @@
+# ════════════════════════════════════════════════════════════════════
+# 评论级 Jev 判断题 · 读者侧 7 题  cb-v0.4
+# ════════════════════════════════════════════════════════════════════
+# v0.4 相对 v0.3 只做一件事：把题干里按篇 / 按项目变的词改成占位符，定义本身一个字没动。
+#   {subject}        被推的主体怎么称呼：这家机构 / 这个产品 / 这家店
+#   {arranger}       安排评论的一方：机构 / 商家 / 品牌
+#   {decide}         读者在做的决定：找机构 / 买
+#   {post_points}    本篇帖子的要点（顿号分隔），由代码从正文取，或由 brief 给
+#   {post_examples}  要点里的两三个具体说法（「…」「…」），作 echoes_post 的例子
+# fill_defaults 只给主体称呼的默认值（v0.3 原文：机构）；帖子要点没有默认值，每篇必须由 fill 给，
+# 漏给 banks.unfilled() 会报出来（不会拿别的帖子的要点去判）。途鸽用例的要点在 fixtures/comment_cases.json 的 fill 里，
+# 填进去后 v0.4 生成的题目与 v0.3 逐字相同（tests 钉住），金标准 cg-v0.2 不用重跑；换一篇帖子只换 fill，不改题库版本。
+# 用法：judge_state(..., fill=comments.fill_for(post))。
+# 其余纪律同 v0.3：state 只放 帖子 + 这一条评论（+ 账号名 / 时间地区 / 回复对象）；评论区整体交给 comment_thread。
+# ════════════════════════════════════════════════════════════════════
+
+bank_version: cb-v0.4
+model: jev-1.13.0
+
+fill_defaults:
+  subject: 这家机构
+  arranger: 机构
+  decide: 找机构
+
+ambiguity:
+  choice_top_min: 0.60
+  choice_margin_min: 0.20
+  noul_band: [0.35, 0.65]
+
+questions:
+
+  - id: speech_act
+    type: choice
+    instructions:
+      zh: 这条评论在做什么？只选最主要的一种。
+      en: What is this comment doing? Pick the single main thing.
+    options:
+      - label: 提问
+        zh: 向作者或其他人问事情（在哪里、多少钱、怎么联系、文科能不能做）
+        en: "Asking a question of the author or others (where, how much, how to contact, does it work for my major)"
+      - label: 质疑
+        zh: 表示怀疑、反驳或提醒风险（割韭菜、别信、先看合同）
+        en: "Doubting, pushing back or warning (scam, don't trust it, read the contract first)"
+      - label: 补充经验
+        zh: 讲自己的相关经历或看法，但不对{subject}下结论
+        en: "Sharing their own related experience or view without passing judgment on {subject}"
+      - label: 亲历背书
+        zh: 说自己用过{subject}，并给出好评
+        en: "Claiming to have used {subject} and praising it"
+      - label: 旁观推荐
+        zh: 没说自己用过，但夸{subject}或劝别人去用
+        en: "Praising {subject} or urging others to use it without claiming to have used it"
+      - label: 回复答疑
+        zh: 回答别人的问题、给联系方式或指路
+        en: "Answering someone's question, giving contact details or pointing the way"
+      - label: 闲聊表情
+        zh: 打招呼、表情、感叹，没有实质内容
+        en: "Small talk, emoji or exclamation with no substance"
+      - label: 说不清
+        zh: 上面都不像
+        en: "None of the above fits"
+    unclear_labels: [说不清]
+    feeds: 路由——亲历背书 / 旁观推荐 直接进「高风险复核」，其余按后面几题走
+    on_ambiguous: 进人工
+
+  - id: names_brand
+    type: noul
+    instructions:
+      zh: 评论里有没有直接写出机构或品牌的名字（包括「某某老师」带机构名、@ 机构账号）？
+      en: Does the comment spell out the agency's or brand's name (including "Teacher X" with the agency name, or @-mentioning its account)?
+    criteria:
+      "true":
+        zh: 写出了机构或品牌的名字
+        en: The agency or brand name appears
+      "false":
+        zh: 没写名字，只说「这家」「他们」「机构」，或者根本没提
+        en: No name; only "this one", "they", "the agency", or no mention at all
+    feeds: 可信度线索——普通用户夸一家机构时很少主动打全名
+    on_ambiguous: 按「写出了」处理
+
+  - id: echoes_post
+    type: noul
+    instructions:
+      zh: 这条评论有没有接住这篇帖子里具体说到的事？帖子说了：{post_points}。
+      en: "Does the comment pick up something specific this post said? The post mentioned: {post_points}."
+    criteria:
+      "true":
+        zh: 提到了帖子里的某个具体事实，或者用了帖子里的具体说法（比如接{post_examples}）
+        en: "Mentions a specific fact from the post or reuses its specific wording (e.g. picks up {post_examples})"
+      "false":
+        zh: 只是同一个品类、同一类人群的话（留学生、文科、求职、机构），换到任何一篇同类帖子下面也能贴
+        en: "Only same-category talk (students abroad, humanities, job hunting, agencies); could be pasted under any similar post"
+    feeds: 可信度线索——自发评论是在回这篇帖，安排的评论是在回一个品类
+    on_ambiguous: 按「泛泛」处理
+
+  - id: detail_level
+    type: choice
+    instructions:
+      zh: 评论里可核对的具体细节到什么程度？
+      en: How much checkable detail does the comment contain?
+    options:
+      - label: 无
+        zh: 没有任何情境信息，只有评价、感受或一个结论（专业、靠谱、满意、找回自信、找到赛道）
+        en: "No situational information at all; only an evaluation, a feeling or a bare conclusion"
+      - label: 模糊
+        zh: 点到了一个情境（提前批、回国、文科、被拒过），但没有任何能对上号的东西
+        en: "A situation is named (early batch, returned home, humanities, got rejected) but nothing in it can be checked"
+      - label: 具体
+        zh: 有能对上号的事实：时间、公司或行业、数字、流程步骤。机构名或老师的称呼本身不算细节
+        en: "Checkable facts: dates, company or industry, numbers, process steps. The agency's name or 'teacher' by itself does not count"
+    feeds: 可信度线索
+    on_ambiguous: 按「模糊」处理
+
+  - id: register
+    type: choice
+    instructions:
+      zh: 这条评论的说话方式更像哪一种？
+      en: Which register does the comment read as?
+    options:
+      - label: 随手口语
+        zh: 短、省略、有语气词或错字，像刷手机时随手打的
+        en: "Short, elliptical, with particles or typos, like something typed while scrolling"
+      - label: 认真分享
+        zh: 用自己的话讲一件具体发生过的事，有过程或细节，像认真回陌生人一条
+        en: "Tells a specific thing that happened, in their own words, with some process or detail, like a considered reply to a stranger"
+      - label: 文案腔
+        zh: 没有过程只有结论，句式像感谢信或宣传语：痛点一句 + 机构帮我 + 结果一句，形容词齐整（专业、精准、满意、本土化）
+        en: "No process, only conclusions, phrased like a thank-you note or ad copy: one pain point + the agency helped me + one outcome, with tidy adjectives"
+      - label: 说不清
+        zh: 都不像
+        en: "None fits"
+    unclear_labels: [说不清]
+    feeds: 可信度线索
+    on_ambiguous: 进人工
+
+  - id: reader_value
+    type: choice
+    instructions:
+      zh: 一个正在考虑要不要{decide}的读者，从这条评论能拿到什么？
+      en: What does a reader who is deciding whether to {decide} get from this comment?
+    options:
+      - label: 可行动信息
+        zh: 读者拿了就能用的东西：联系方式、@ 账号、店名、可搜索的关键词、价格、流程、时间线
+        en: "Something the reader can act on directly: contact details, an @ account, a shop name, a searchable keyword, price, process, timeline"
+      - label: 判断依据
+        zh: 有过程或对比的具体经历，能让读者判断适不适合自己；只说一个结果（帮我做好了 X）不算
+        en: "A concrete experience with process or comparison that helps the reader judge fit; a bare outcome (they did X for me) does not count"
+      - label: 只有评价
+        zh: 好、专业、靠谱之类的结论，没有依据
+        en: "Only a verdict (good, professional, reliable) with nothing behind it"
+      - label: 无
+        zh: 什么也拿不到
+        en: "Nothing"
+    feeds: 承接——评论区的营销职能是承接，不是背书
+    on_ambiguous: 进人工
+
+  - id: arranged
+    type: noul
+    instructions:
+      zh: 站在一个普通读者的角度，这条评论像不像{arranger}安排发的？
+      en: From an ordinary reader's point of view, does this comment look arranged by the {arranger}?
+    criteria:
+      "true":
+        zh: 像安排的
+        en: Looks arranged
+      "false":
+        zh: 像普通用户自发写的
+        en: Looks like a spontaneous user comment
+    feeds: 总判——和前六题分开看，用来检验前六题是否解释了总判
+    on_ambiguous: 进人工

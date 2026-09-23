@@ -1,0 +1,63 @@
+# ════════════════════════════════════════════════════════════════════
+# 运营侧评论题库（草案）  co-v0.1
+# ════════════════════════════════════════════════════════════════════
+# 用途：给 truth_vault.comments 里运营写的随贴评论填 comment_intent（D-022 定的六值闭集，D-031 加了 CHECK）。
+# 选项 label 与表的 CHECK 约束逐字相同：补充信息 / 反驳质疑 / 蓝词植入 / 共鸣扩散 / 引导私信 / 其他。
+# D-022 说词表定义写进 docs/05，实际没写；下面的定义是本仓起草的草案，落库前要 TV 侧运营勘误，
+# 勘误后 bank_version 升 co-v0.2，并把定义回写进 TV 的 docs/05。
+# state：帖子标题、帖子正文（前 300 字够用）、评论原文、评论角色（贴主 / 素人 / 运营 / 路人 / 未知）、蓝词清单（有就给）。
+# is_scripted 是对抗性判断，docs/30 §2.3 已定只作参考：这里问的是「像不像按脚本写的」，铺评以「维护情况」和 D-060 来路为准。
+# ════════════════════════════════════════════════════════════════════
+
+bank_version: co-v0.1
+model: jev-1.13.0
+
+ambiguity:
+  choice_top_min: 0.60
+  choice_margin_min: 0.20
+  noul_band: [0.35, 0.65]
+
+questions:
+
+  - id: comment_intent
+    type: choice
+    instructions:
+      zh: 这条评论在帖子下面主要想起什么作用？只选最主要的一种。
+      en: What is this comment mainly trying to do under the post? Pick one.
+    options:
+      - label: 补充信息
+        zh: 给帖子补一个事实、细节、用法、价格、渠道，读者看了多知道一点
+        en: "Adds a fact, detail, usage, price or channel the post did not have"
+      - label: 反驳质疑
+        zh: 对帖子或别的评论表示怀疑、反对、提醒风险，或替帖子回应质疑
+        en: "Pushes back, doubts, warns, or answers a doubt on the post's behalf"
+      - label: 蓝词植入
+        zh: 主要目的是把品牌词、产品词、蓝词写进评论区，内容本身信息量不大
+        en: "Mainly plants a brand / product / target keyword; little other content"
+      - label: 共鸣扩散
+        zh: 表达同感、同款经历、情绪呼应，让帖子看起来有人在共鸣
+        en: "Expresses resonance, same experience or emotion, so the post looks echoed"
+      - label: 引导私信
+        zh: 引导读者私信、点主页、加联系方式、去评论区找链接
+        en: "Steers readers to DM, profile, contact or a link"
+      - label: 其他
+        zh: 上面都不像
+        en: "None of the above"
+    unclear_labels: [其他]
+    feeds: comments.comment_intent
+    on_ambiguous: 进人工
+
+  - id: is_scripted
+    type: noul
+    instructions:
+      zh: 站在普通读者的角度，这条评论像不像按脚本写的（而不是读者随手写的）？
+      en: From an ordinary reader's view, does this comment read as scripted rather than spontaneous?
+    criteria:
+      "true":
+        zh: 像按脚本写的：完整句、形容词齐整、点名品牌、和帖子只有品类关系
+        en: "Reads scripted: full sentences, tidy adjectives, names the brand, only category-level relation to the post"
+      "false":
+        zh: 像读者随手写的：短、口语、有具体所指或提问
+        en: "Reads spontaneous: short, colloquial, refers to something specific or asks"
+    feeds: comments.is_scripted（只作参考）
+    on_ambiguous: 进人工
