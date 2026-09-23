@@ -33,6 +33,16 @@ def test_vendor_checksums_match():
         assert hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() == h, rel
 
 
+def test_workflow_files_parse_as_yaml():
+    """GitHub 对解析不了的 workflow 文件是「每次 push 都起一个立刻失败的 run」，本地先拦：含 ${{ }} 的值不能放在 {…} 流式映射里。"""
+    import yaml
+    for p in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        d = yaml.safe_load(p.read_text(encoding="utf-8"))
+        assert isinstance(d, dict) and "jobs" in d and (True in d or "on" in d), p.name    # YAML 1.1 把裸 on 解析成 True
+        for job in d["jobs"].values():
+            assert isinstance(job.get("steps"), list) and job["steps"], p.name
+
+
 def test_bank_sha256_is_tv_normalized_digest(tmp_path):
     """账本里的 bank_sha256 与 TV 的 bank_digest 同口径：冻结（改 status、写回 frozen_sha256）不改变 digest。"""
     b = B.load_bank(FQ, name="feature_questions_v0_1")

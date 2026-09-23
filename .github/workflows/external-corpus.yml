@@ -1,12 +1,15 @@
 name: external-corpus
 # 每周一 03:00 UTC（北京时间 11:00）抓一次外部语料。量级和预算在 config/external_corpus.yaml，这里只管频率。
 # 顺序：抓取 → 先上传产物（哪怕后面失败）→ 经 PostgREST 写库（没配密钥就跳过并提示；写库失败不让 job 红，state 照样保存）。
+# 注意：含 ${{ … }} 的值不能写在 {…} 流式映射里（YAML 会把 { 当嵌套映射，GitHub 直接拒绝整个文件），一律用块式 + 引号。
 on:
   schedule:
     - cron: "0 3 * * 1"
   workflow_dispatch:
     inputs:
-      dry_run: {description: "只算计划不联网", default: "false"}
+      dry_run:
+        description: "只算计划不联网"
+        default: "false"
 jobs:
   crawl:
     runs-on: ubuntu-latest
@@ -19,11 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.11"}
+        with:
+          python-version: "3.11"
       - run: pip install -r requirements.txt
       - name: restore state
         uses: actions/cache@v4
-        with: {path: state, key: external-corpus-state-${{ github.run_id }}, restore-keys: external-corpus-state-}
+        with:
+          path: state
+          key: "external-corpus-state-${{ github.run_id }}"
+          restore-keys: external-corpus-state-
       - name: plan only (dry run)
         if: github.event.inputs.dry_run == 'true'
         run: python3 scripts/external_corpus.py --dry-run
@@ -35,7 +42,9 @@ jobs:
       - name: upload products (even if a later step fails)
         if: always() && hashFiles('out/**') != ''
         uses: actions/upload-artifact@v4
-        with: {name: external-corpus-${{ github.run_id }}, path: out}
+        with:
+          name: "external-corpus-${{ github.run_id }}"
+          path: out
       - name: write to db via PostgREST (skipped with a notice when the key is absent; needs TV notes_v1_17 + v1_18)
         if: always() && github.event.inputs.dry_run != 'true' && hashFiles('out/rows.json') != ''
         continue-on-error: true
