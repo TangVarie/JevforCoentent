@@ -26,10 +26,35 @@ THREAD = ROOT / "banks" / "comment_thread_v0.2.yaml"
 
 def test_vendor_checksums_match():
     sums = (ROOT / "banks" / "vendor" / "SHA256SUMS").read_text(encoding="utf-8").split()
-    want = {Path(p).name: h for h, p in zip(sums[0::2], sums[1::2])}
+    want = {p: h for h, p in zip(sums[0::2], sums[1::2])}
     import hashlib
-    assert hashlib.sha256(FQ.read_bytes()).hexdigest() == want["feature_questions_v0_1.yaml"]
-    assert hashlib.sha256((ROOT / "banks" / "vendor" / "tv_feature_bank.py").read_bytes()).hexdigest() == want["feature_bank.py"]
+    assert set(want) == {"banks/vendor/feature_questions_v0_1.yaml", "banks/vendor/tv_feature_bank.py"}   # 相对路径，ci.yml 直接 sha256sum -c
+    for rel, h in want.items():
+        assert hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() == h, rel
+
+
+def test_workflow_files_parse_as_yaml():
+    """GitHub 对解析不了的 workflow 文件是「每次 push 都起一个立刻失败的 run」，本地先拦：含 ${{ }} 的值不能放在 {…} 流式映射里。"""
+    import yaml
+    for p in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        d = yaml.safe_load(p.read_text(encoding="utf-8"))
+        assert isinstance(d, dict) and "jobs" in d and (True in d or "on" in d), p.name    # YAML 1.1 把裸 on 解析成 True
+        for job in d["jobs"].values():
+            assert isinstance(job.get("steps"), list) and job["steps"], p.name
+
+
+def test_bank_sha256_is_tv_normalized_digest(tmp_path):
+    """账本里的 bank_sha256 与 TV 的 bank_digest 同口径：冻结（改 status、写回 frozen_sha256）不改变 digest。"""
+    b = B.load_bank(FQ, name="feature_questions_v0_1")
+    raw = FQ.read_bytes()
+    assert b.sha256 == S._tv.bank_digest(raw) and b.sha256 != __import__("hashlib").sha256(raw).hexdigest()
+    assert raw.endswith(b"\n") and b"\nstatus: draft\n" in raw
+    frozen = raw.replace(b"status: draft", b"status: frozen", 1) + f"frozen_sha256: {b.sha256}\n".encode("utf-8")
+    p = tmp_path / "fq_frozen.yaml"; p.write_bytes(frozen)
+    assert B.load_bank(p, name="feature_questions_v0_1").sha256 == b.sha256
+    inline = B.load_bank_data({"bank_version": "x-v1", "questions": [{"id": "q", "type": "noul", "instructions": {"zh": "问"},
+                                                                     "criteria": {"true": {"zh": "是"}, "false": {"zh": "否"}}}]}, "inline")
+    assert inline.fmt == "jev" and len(inline.sha256) == 64 and inline.path is None
 
 
 @pytest.mark.parametrize("path,fmt,n", [(FQ, "tv", 20), (READER, "jev", 7), (OPS, "jev", 2), (THREAD, "jev", 4)])
@@ -411,3 +436,223 @@ def test_mcp_comment_tools_mock(monkeypatch):
     assert set(r) >= {"passed", "plan", "profile", "hard_fails"} and "speech_act" in r["profile"]
     t = M.judge_thread("标题", "戒烟第三天，嘴里没味，靠嗑瓜子撑着。", [{"text": "在哪里买的", "role": "读者位"}, {"text": "药店就有", "role": "贴主", "reply_to_text": "在哪里买的"}])
     assert set(t) >= {"passed", "items", "code", "comments"} and t["code"]["n"] == 2 and "praise_share" in t["items"]
+
+
+# ── API：鉴权 fail-closed、并行与部分失败、/judge_draft ──
+
+def test_api_auth_fail_closed(monkeypatch):
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.delenv("JUDGE_API_KEY", raising=False); monkeypatch.delenv("JUDGE_ALLOW_ANONYMOUS", raising=False)
+    from fastapi.testclient import TestClient
+    from judge.api import app
+    c = TestClient(app)
+    assert c.get("/health").json()["auth"] == {"mode": "unconfigured", "required": False}
+    assert c.get("/banks").status_code == 503                                  # 没配 key：拒绝，不放行
+    assert c.get("/banks", headers={"X-Judge-Key": "anything"}).status_code == 503
+    monkeypatch.setenv("JUDGE_ALLOW_ANONYMOUS", "1")
+    assert c.get("/banks").status_code == 200 and c.get("/health").json()["auth"]["mode"] == "anonymous"
+    monkeypatch.setenv("JUDGE_API_KEY", "k")
+    assert c.get("/banks").status_code == 401 and c.get("/banks", headers={"X-Judge-Key": "k"}).status_code == 200
+
+
+def test_api_judge_parallel_partial_errors_and_rows(monkeypatch):
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k"); monkeypatch.setenv("JUDGE_WORKERS", "3")
+    from fastapi.testclient import TestClient
+    from judge import api as A
+    c = TestClient(A.app); H = {"X-Judge-Key": "k"}
+    subs = [{"subject_type": "note", "subject_id": f"n{i}", "raw_content": f"标题：测试{i}？\n正文：昨天在药店买了一盒东西，嚼了几口辣嗓子，有点想戒了。大家怎么看第{i}次？"} for i in range(6)]
+    d = c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs, "run_tag": "t"}, headers=H).json()
+    assert [r["subject_id"] for r in d["results"]] == [f"n{i}" for i in range(6)] and d["errors"] == 0   # 并行仍按原顺序返回
+    assert d["rows"] == 120 and len(d["ledger_rows"]) == 120 and d["ledger_rows"][0]["run_tag"] == "t"
+    r = c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": [dict(subs[0], title_extraction="nope")]}, headers=H)
+    assert r.status_code == 422                                                # 形状错误整批先拒，不调 Jev
+    # 真实的 JevError 路径：judge_note 在线程里抛，_judge_one 只让那个 subject 带 error；n0/n1 用 Barrier 证明确实并行
+    # （串行时 n0 会在 Barrier 上超时，被 _judge_one 兜成第二个 error，errors 变 2，测试就红）
+    import threading
+    from judge.jev_client import JevError
+    barrier = threading.Barrier(2, timeout=5)
+    real_note = A.judge_note
+
+    def wrapped(client, bank, subject_id, raw, **kw):
+        if subject_id in ("n0", "n1"):
+            barrier.wait()
+        if subject_id == "n2":
+            raise JevError("boom")
+        return real_note(client, bank, subject_id, raw, **kw)
+
+    monkeypatch.setattr(A, "judge_note", wrapped)
+    d2 = c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs}, headers=H).json()
+    assert d2["errors"] == 1 and d2["results"][2] == {"subject_type": "note", "subject_id": "n2", "error": "Jev 调用失败：boom"}
+    assert d2["rows"] == 100 and [r["subject_id"] for r in d2["results"]] == [f"n{i}" for i in range(6)]
+    # 不是 JevError 的异常也只影响那一个 subject，标成「判定失败」
+    monkeypatch.setattr(A, "judge_note", lambda client, bank, subject_id, raw, **kw: (_ for _ in ()).throw(KeyError("noul")) if subject_id == "n1" else real_note(client, bank, subject_id, raw, **kw))
+    d3 = c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:3]}, headers=H).json()
+    assert d3["errors"] == 1 and d3["results"][1]["error"].startswith("判定失败（KeyError）")
+    # 全部失败才 502
+    monkeypatch.setattr(A, "judge_note", lambda *a, **k: (_ for _ in ()).throw(JevError("down")))
+    assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:2]}, headers=H).status_code == 502
+    # write=true 而没配 Supabase：调 Jev 之前就 503
+    monkeypatch.delenv("SUPABASE_URL", raising=False); monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    calls = []
+    monkeypatch.setattr(A, "judge_note", lambda *a, **k: calls.append(1) or real_note(*a, **k))
+    assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:1], "write": True}, headers=H).status_code == 503 and calls == []
+
+
+def test_api_judge_draft_with_brief(monkeypatch):
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k")
+    from fastapi.testclient import TestClient
+    from judge.api import app
+    c = TestClient(app); H = {"X-Judge-Key": "k"}
+    body = {"title": "健身房教练劝我先戒烟", "body": "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？",
+            "subject_id": "11111111-2222-3333-4444-555555555555",
+            "brief": {"intents": [{"label": "烟瘾场景", "means": "想抽烟的时刻"}],
+                      "hard_rules": [{"id": "must_ask", "ask": "有没有向读者提问？", "yes": "问了", "no": "没问", "want": True}]},
+            "judge_paras": "always", "run_tag": "aw-shadow"}
+    d = c.post("/judge_draft", json=body, headers=H).json()
+    assert set(d) >= {"passed", "profile", "hard_fails", "plan", "para_stats", "detail", "ledger_rows", "banks", "hard_rules", "ignored_banks"}
+    assert set(d["detail"]) == {"feature_questions_v0_1", "platform_health_v0.1", "project"} and d["para_stats"]["n"] == 4
+    assert "must_ask" in d["detail"]["project"] and "efficacy_promise" in d["detail"]["feature_questions_v0_1"]
+    rows = d["ledger_rows"]
+    assert rows and {r["subject_id"] for r in rows} == {body["subject_id"]} and {r["subject_type"] for r in rows} == {"aw_version"}
+    assert {r["run_tag"] for r in rows} == {"aw-shadow"} and any(r["question_id"] == "must_ask" for r in rows)
+    # brief 的 want 接到了判定：期望「是」，答案不是「是」就是硬伤，修改单里有它（mock 对这段稿的答案是确定的）
+    assert d["hard_rules"]["project:must_ask"] == "是"
+    ans = d["detail"]["project"]["must_ask"]["answer"]
+    hf = [f for f in d["hard_fails"] if f[1] == "must_ask"]
+    assert (len(hf) == 1 and hf[0][:3] == ["project", "must_ask", ans]) == (ans != "是")
+    # 再发一次、want 取答案的反面：mock 对同一 state + 题目的答案是确定的，所以这次必有硬伤、修改单必有它（无条件断言）
+    body_opp = dict(body, brief={"hard_rules": [dict(body["brief"]["hard_rules"][0], want=(ans != "是"))]})
+    d_opp = c.post("/judge_draft", json=body_opp, headers=H).json()
+    assert d_opp["detail"]["project"]["must_ask"]["answer"] == ans and d_opp["hard_rules"]["project:must_ask"] != ans
+    assert [f[:3] for f in d_opp["hard_fails"] if f[1] == "must_ask"] == [["project", "must_ask", ans]] and not d_opp["passed"]
+    assert any(p["qid"] == "must_ask" and p["now"] == ans for p in d_opp["plan"])
+    # HTTP hard_rules 的布尔值按同一口径归一：false → 「否」，不会把答「否」判成硬伤
+    d2 = c.post("/judge_draft", json=dict(body, hard_rules={"platform_health_v0.1:medical_authority": False, "feature_questions_v0_1:product_role": "未出现"}), headers=H).json()
+    assert d2["hard_rules"]["platform_health_v0.1:medical_authority"] == "否" and d2["hard_rules"]["feature_questions_v0_1:product_role"] == "未出现"
+    assert not any(f[1] == "medical_authority" and f[2] == "否" for f in d2["hard_fails"])
+    # 形状错误是 422 不是 500；同名覆盖、两种项目题库同时给、一份题库都没有，都是 422
+    assert c.post("/judge_draft", json=dict(body, hard_rules={"bad": "否"}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, hard_rules={"a:b": 3}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, judge_paras="sometimes"), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, brief={"hard_rules": [{"id": "x"}]}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, brief={"hard_rules": [{"id": "intent_of_para", "ask": "?"}], "intents": [{"label": "a"}]}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, project_bank={"questions": None}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, project_bank={"questions": []}), headers=H).status_code == 422       # 与 brief 同时给
+    assert c.post("/judge_draft", json=dict(body, project_bank_name="platform_health_v0.1"), headers=H).status_code == 422
+    assert c.post("/judge_draft", json={"title": "t", "body": "b", "banks": []}, headers=H).status_code == 422
+    d3 = c.post("/judge_draft", json={"title": "t", "body": "正文有二十个字以上才不会被当成太短的稿子来跳题。", "banks": ["feature_questions_v0_1", "comment_reader_v0.4", "external_triage_v0.1"]}, headers=H).json()
+    assert d3["ignored_banks"] == ["comment_reader_v0.4", "external_triage_v0.1"] and set(d3["detail"]) == {"feature_questions_v0_1"}
+    # Codex 评审那七条：同名题库传两次不再 500；空项目题库 / 空 brief、跨层题号撞车、只有意图题没人感题库、
+    # 指到不存在的题库或题号的 hard_rules、write=true 却没给自己的 subject_id，都是 422
+    d4 = c.post("/judge_draft", json={"title": "t", "body": body["body"], "banks": ["feature_questions_v0_1", "feature_questions_v0_1"]}, headers=H)
+    assert d4.status_code == 200 and set(d4.json()["detail"]) == {"feature_questions_v0_1"}
+    base = {"title": "t", "body": body["body"], "banks": ["feature_questions_v0_1"]}
+    assert c.post("/judge_draft", json=dict(base, banks=[], project_bank={"questions": []}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(base, banks=[], brief={}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(base, brief={"hard_rules": [{"id": "efficacy_promise", "ask": "?"}]}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(base, brief={"intents": [{"label": "a"}]}), headers=H).status_code == 422          # 只有意图题、没人感题库
+    assert c.post("/judge_draft", json=dict(base, brief={"intents": [{"label": "a"}]}, banks=["feature_questions_v0_1", "human_feel_para_v0.1"]), headers=H).status_code == 200
+    assert c.post("/judge_draft", json=dict(base, hard_rules={"platform_health_v0.1:efficacy_claim": "否"}), headers=H).status_code == 422   # 这次没加载平台层
+    assert c.post("/judge_draft", json=dict(base, hard_rules={"feature_questions_v0_1:efficacy_cliam": "否"}), headers=H).status_code == 422  # 题号拼错
+    d5 = c.post("/judge_draft", json=base, headers=H).json()
+    assert set(d5["hard_rules"]) == {"feature_questions_v0_1:efficacy_promise"}                                                  # 默认硬约束只留加载了的层
+    assert c.post("/judge_draft", json=dict(base, write=True), headers=H).status_code == 422                                   # subject_id 还是默认的 draft
+    assert c.post("/judge_draft", json=dict(base, subject_id="  "), headers=H).status_code == 422
+
+
+def test_repair_plan_uses_configured_want_for_choice_rules():
+    """修改单的「要改成什么」用判这篇时配置的期望答案（choice 题可以是任一选项），定义取目标选项的定义。"""
+    from judge import loop as L
+    client = JevClient(mock=True)
+    fq = B.load_bank(FQ, name="feature_questions_v0_1")
+    draft = {"title": "健身房教练劝我先戒烟", "body": "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？"}
+    ans = L.judge_draft(client, draft, fq=fq).profile["product_role"]
+    want = next(lab for lab in fq.by_id()["product_role"].criteria if lab != ans)      # 取一个和答案不同的选项 → 必是硬伤
+    dj = L.judge_draft(client, draft, fq=fq, hard_rules={("feature_questions_v0_1", "product_role"): want})
+    assert dj.wants == {("feature_questions_v0_1", "product_role"): want} and [tuple(f[:3]) for f in dj.hard_fails] == [("feature_questions_v0_1", "product_role", ans)]
+    plan = L.repair_plan(dj, {"feature_questions_v0_1": fq})
+    assert plan[0]["want"] == want and plan[0]["definition"] == fq.by_id()["product_role"].criteria[want] and f"要改成「{want}」" in plan[0]["instruction"]
+    # 是非题：期望「否」答「是」→ 定义取「否」那一侧；没记录期望时才按是非翻转
+    ph = B.load_bank(ROOT / "banks" / "platform_health_v0.1.yaml", name="platform_health_v0.1")
+    dj2 = L.DraftJudgement(hard_fails=[("platform_health_v0.1", "fear_sell", "是", 0.9, None)], wants={("platform_health_v0.1", "fear_sell"): "否"})
+    p2 = L.repair_plan(dj2, {"platform_health_v0.1": ph})[0]
+    assert p2["want"] == "否" and p2["definition"] == ph.by_id()["fear_sell"].criteria["false"]
+    p3 = L.repair_plan(L.DraftJudgement(hard_fails=[("platform_health_v0.1", "fear_sell", "是", 0.9, None)]), {"platform_health_v0.1": ph})[0]
+    assert p3["want"] == "否"
+
+
+# ── 外部语料：翻页会话、单条失败不中止、seen 只记有结局的 ──
+
+def test_tikhub_pagination_carries_session():
+    from judge import external as E
+    prov = E.TikHubClient(budget=E.Budget(limit_usd=1.0), mock=True)
+    _, raw1 = prov.search("戒烟", 1, "general", None)
+    assert raw1["echo"]["search_id"] is None
+    _, raw2 = prov.search("戒烟", 2, "general", None)
+    assert raw2["echo"] == {"search_id": "sid-戒烟-general", "search_session_id": "ssid-戒烟-general", "page": 2}
+    _, raw3 = prov.search("戒烟", 2, "popularity_descending", None)      # 另一种排序是另一个会话，首页还没搜过就不带
+    assert raw3["echo"]["search_id"] is None
+
+
+def test_external_errors_and_seen_discipline():
+    from judge import external as E
+    import yaml
+    cfg = yaml.safe_load((ROOT / "config" / "external_corpus.yaml").read_text(encoding="utf-8"))
+    cfg["categories"] = cfg["categories"][:1]; cfg["pages_per_sort"] = 2; cfg["max_keep_per_category_per_run"] = 3
+    triage = B.load_bank(ROOT / "banks" / "external_triage_v0.1.yaml", name="external_triage_v0.1")
+    fq = B.load_bank(FQ, name="feature_questions_v0_1")
+
+    class Flaky(E.TikHubClient):
+        def search(self, keyword, page, sort_type, note_type):
+            if keyword == cfg["categories"][0]["keywords"][0] and page == 1:     # 第一页就炸
+                raise RuntimeError("HTTP 502 from provider")
+            return super().search(keyword, page, sort_type, note_type)
+
+    state = {"seen": {}, "monthly": {}}
+    rep = E.run_once(cfg, Flaky(budget=E.Budget(limit_usd=5.0), mock=True), JevClient(mock=True), triage, fq, state)
+    assert rep.stopped_reason == "" and len(rep.errors) == 2 and all("502" in e for _, e in rep.errors)   # 两种排序的第一页都炸，记两条错继续
+    assert rep.searched >= 1 and rep.judged == 3 and rep.per_category[cfg["categories"][0]["name"]]["note"] == "本次上限已到"
+    # seen 里只有有结局的：kept / triage_reject / short；到上限后没看的候选不在里面
+    whys = {v["why"] for v in state["seen"].values()}
+    assert whys <= {"kept", "triage_reject", "short"} and sum(v["kept"] for v in state["seen"].values()) == 3
+    assert rep.candidates > len(state["seen"])
+    # dry_run 不写 seen
+    st2 = {"seen": {}, "monthly": {}}
+    rep2 = E.run_once(cfg, E.TikHubClient(budget=E.Budget(limit_usd=5.0), mock=True), JevClient(mock=True), triage, fq, st2, dry_run=True)
+    assert rep2.candidates > 0 and st2["seen"] == {} and rep2.judged == 0
+    # 报告能渲染，带出错与分诊通过两列
+    md = E.render_report(rep, cfg)
+    assert "出错" in md and "分诊通过" in md
+    # 单条笔记在取全文时报错：记进 errors、不进 seen（下次还会看）、账本里没有它的半截行；四个计数对得上
+    class DetailFails(E.TikHubClient):
+        failed = []
+
+        def detail(self, note_id, note_type=""):
+            if not self.failed:
+                self.failed.append(note_id); raise RuntimeError("detail 502")
+            return super().detail(note_id, note_type)
+
+    st3 = {"seen": {}, "monthly": {}}
+    prov3 = DetailFails(budget=E.Budget(limit_usd=5.0), mock=True)
+    rep3 = E.run_once(cfg, prov3, JevClient(mock=True), triage, fq, st3)
+    bad = prov3.failed[0]
+    assert bad not in st3["seen"] and any(w == bad and "502" in e for w, e in rep3.errors)
+    assert not any(r["subject_id"] == bad for r in rep3.rows)
+    assert rep3.triaged_kept == rep3.judged + rep3.dropped_short
+    assert len(st3["seen"]) == rep3.judged + rep3.dropped_short + sum(1 for v in st3["seen"].values() if v["why"] == "triage_reject")
+    assert rep3.systemic_failure == ""
+    # 系统性故障不能悄悄绿着：所有搜索都失败 / 所有笔记都失败 → systemic_failure（脚本据此让 job 红）
+    class Dead(E.TikHubClient):
+        def search(self, *a, **k):
+            raise RuntimeError("HTTP 401 key expired")
+
+    rep4 = E.run_once(cfg, Dead(budget=E.Budget(limit_usd=5.0), mock=True), JevClient(mock=True), triage, fq, {"seen": {}, "monthly": {}})
+    assert rep4.searched == 0 and rep4.search_attempts > 0 and "搜索请求全部失败" in rep4.systemic_failure and "系统性故障" in E.render_report(rep4, cfg)
+
+    class DeadJev:
+        def call(self, body):
+            from judge.jev_client import JevError
+            raise JevError("Jev 503")
+
+    st5 = {"seen": {}, "monthly": {}}
+    rep5 = E.run_once(cfg, E.TikHubClient(budget=E.Budget(limit_usd=5.0), mock=True), DeadJev(), triage, fq, st5)
+    assert rep5.processed > 0 and rep5.note_errors == rep5.processed and "全部失败" in rep5.systemic_failure and st5["seen"] == {}

@@ -33,18 +33,28 @@ CREATE INDEX IF NOT EXISTS idx_tv_external_notes_cat ON truth_vault.external_not
 ALTER TABLE truth_vault.external_notes ENABLE ROW LEVEL SECURITY;
 
 -- 参考分布视图：每题每取值在「高互动组（同品类互动数前四分之一）」和其余里的占比
-CREATE OR REPLACE VIEW truth_vault.v_external_reference AS
+-- 分位数按品类先 GROUP BY 算成一张 CTE 再 JOIN：PostgreSQL 不允许有序集聚合（percentile_cont）配 OVER 窗口
+-- （报错 "OVER is not supported for ordered-set aggregate percentile_cont"）。PG 16 实跑验证过能建、能查，share 每组求和为 1。
+-- 分组带 question_version / bank_sha256 / extractor：题目改版、题库改字、模型升级后新旧两套行不混在一个分母里
+-- （v_feature_contrast 还多按 bank_version 分，这里 bank_version 由 bank_sha256 蕴含）。
+-- 先 DROP 再建：CREATE OR REPLACE VIEW 不允许改列序 / 在中间插列，从更早的草案版视图升级会报 "cannot change name of view column"。
+DROP VIEW IF EXISTS truth_vault.v_external_reference;
+CREATE VIEW truth_vault.v_external_reference AS
 WITH eng AS (
-    SELECT e.note_id, e.category, (COALESCE(e.liked,0) + COALESCE(e.collected,0) + COALESCE(e.comments,0)) AS engagement,
-           percentile_cont(0.75) WITHIN GROUP (ORDER BY (COALESCE(e.liked,0) + COALESCE(e.collected,0) + COALESCE(e.comments,0)))
-               OVER (PARTITION BY e.category) AS cut
+    SELECT e.note_id, e.category,
+           (COALESCE(e.liked,0) + COALESCE(e.collected,0) + COALESCE(e.comments,0)) AS engagement
     FROM truth_vault.external_notes e
+), cut AS (
+    SELECT category, percentile_cont(0.75) WITHIN GROUP (ORDER BY engagement) AS cut
+    FROM eng GROUP BY category
 ), grp AS (
-    SELECT note_id, category, CASE WHEN engagement >= cut THEN 'top' ELSE 'rest' END AS grp FROM eng
+    SELECT eng.note_id, eng.category,
+           CASE WHEN eng.engagement >= cut.cut THEN 'top' ELSE 'rest' END AS grp
+    FROM eng JOIN cut USING (category)
 )
-SELECT g.category, a.question_id, a.answer, g.grp, COUNT(*) AS n,
-       ROUND(COUNT(*)::numeric / SUM(COUNT(*)) OVER (PARTITION BY g.category, a.question_id, g.grp), 3) AS share
+SELECT g.category, a.question_id, a.question_version, a.bank_sha256, a.extractor, a.answer, g.grp, COUNT(*) AS n,
+       ROUND(COUNT(*)::numeric / SUM(COUNT(*)) OVER (PARTITION BY g.category, a.question_id, a.question_version, a.bank_sha256, a.extractor, g.grp), 3) AS share
 FROM truth_vault.note_feature_answers a
 JOIN grp g ON g.note_id = a.subject_id
 WHERE a.subject_type = 'external_note' AND a.run_tag = 'external' AND a.answer IS NOT NULL
-GROUP BY 1, 2, 3, 4;
+GROUP BY 1, 2, 3, 4, 5, 6, 7;

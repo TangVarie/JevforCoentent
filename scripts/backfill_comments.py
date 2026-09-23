@@ -10,7 +10,7 @@
 
 账本：subject_type = 'comment'（要先跑 migrations/notes_v1_17_judge_subjects.sql），subject_id = comments.comment_id。
 两套题库分别落两批行（question_id 不同，不冲突）。run_tag 默认 primary；先影子跑就传 --run-tag shadow-*。
-只读 comments / notes；写库用 --write（需要 SUPABASE_SERVICE_KEY），否则只出 SQL。
+只读 comments / notes；写库用 --write（需要 SUPABASE_SERVICE_ROLE_KEY），否则只出 SQL。
 """
 from __future__ import annotations
 
@@ -43,9 +43,9 @@ def _pg(url, key, path):
 
 
 def fetch(limit: int, project: str | None):
-    url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
+    url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not (url and key):
-        sys.exit("--from-db 需要 SUPABASE_URL / SUPABASE_SERVICE_KEY")
+        sys.exit("--from-db 需要 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
     q = f"comments?select=comment_id,note_id,content,comment_role,is_pinned&order=note_id,comment_order&limit={limit}"
     if project:
         q += f"&note_id=like.{urllib.parse.quote(project)}*"
@@ -144,9 +144,9 @@ def main():
             for nid, cnt in per_note.items():
                 w.writerow([nid, sum(v for k, v in cnt.items() if not k.startswith("运营:"))] + [cnt.get(k, 0) for k in keys])
     if args.write:
-        url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
+        url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if not (url and key):
-            sys.exit("--write 需要 SUPABASE_URL / SUPABASE_SERVICE_KEY")
+            sys.exit("--write 需要 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
         print("written", postgrest_upsert(rows, url, key))
     print(f"comments {len(comments)} · rows {len(rows)} · notes {len(per_note)}")
 

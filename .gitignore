@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 .env
 raw*.json
 *.sql
 !migrations/*.sql
+state/
+out/

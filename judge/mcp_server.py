@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 from . import comments as CM
 from .banks import discover, load_bank
 from .jev_client import JevClient
-from .loop import judge_draft as _judge_draft, repair_plan as _repair_plan
+from .loop import DEFAULT_HARD_RULES, judge_draft as _judge_draft, repair_plan as _repair_plan
 
 BANKS_DIR = Path(os.environ.get("JUDGE_BANKS_DIR", Path(__file__).resolve().parent.parent / "banks"))
 mcp = FastMCP("judge")
@@ -38,8 +38,7 @@ def _client() -> JevClient:
     return JevClient(mock=os.environ.get("JUDGE_MOCK") == "1")
 
 
-DEFAULT_HARD = {("platform_health_v0.1", "efficacy_claim"): "否", ("platform_health_v0.1", "medical_authority"): "否",
-                ("platform_health_v0.1", "fear_sell"): "否", ("feature_questions_v0_1", "efficacy_promise"): "否"}
+DEFAULT_HARD = DEFAULT_HARD_RULES   # 与 HTTP /judge_draft 共用同一份默认硬约束（loop.DEFAULT_HARD_RULES）
 
 
 @mcp.tool()

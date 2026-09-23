@@ -33,6 +33,12 @@ def build_spans(raw_content: str, mode: str = "markers", title_col: Optional[str
     return _tv.build_spans(raw_content or "", mode=mode, title_col=title_col)
 
 
+def bank_digest(raw: bytes) -> str:
+    """题库校验和：用 TV 的规范化算法（剔掉顶格的 status: / frozen_sha256: 两行再 hash），
+    与 TV 落进 note_feature_answers.bank_sha256 的值同口径；冻结题库那天 digest 不变，账本不会被劈成两批。"""
+    return _tv.bank_digest(raw)
+
+
 def state_from_spans(spans: dict) -> dict:
     st = {"说明": "下面是一篇小红书笔记，代码已切成几段。每道题只看题目指定的那一段，只根据文字判断。"}
     st["标题"] = spans["title"] if spans.get("title") else "（这篇没有标题）"

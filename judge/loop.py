@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -52,7 +53,8 @@ def compile_project_bank(brief: dict, name: str = "project", model: str = "jev-1
                            {"true": "主线就是这个切口", "false": "主线是别的，或者只沾了个边"},
                            feeds="切口对不对得上", on_ambiguous="进人工", ask="是不是按分到的切口写的"))
     return Bank(name=name, version=brief.get("version", "p-v1"), model=model, fmt="jev", questions=qs,
-                ambiguity={"choice_top_min": 0.60, "choice_margin_min": 0.20, "noul_band": [0.35, 0.65]})
+                ambiguity={"choice_top_min": 0.60, "choice_margin_min": 0.20, "noul_band": [0.35, 0.65]},
+                sha256=hashlib.sha256(json.dumps(brief, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest())
 
 
 # ── 生成端适配 ───────────────────────────────────────────────────────
@@ -98,6 +100,8 @@ class EchoGenerator:
 class DraftJudgement:
     profile: dict = field(default_factory=dict)        # qid → answer（篇级，所有题库合并）
     detail: dict = field(default_factory=dict)         # bank → items
+    results: dict = field(default_factory=dict)        # bank → 篇级 JudgeResult（落账本用；段级不落账本）
+    wants: dict = field(default_factory=dict)          # {(bank, qid): 期望答案}，就是判这篇时用的 hard_rules；修改单按它说「要改成什么」
     hard_fails: list = field(default_factory=list)     # [(bank, qid, answer, p, evidence)]
     ambiguous: list = field(default_factory=list)      # [(bank, qid)]
     para_items: list = field(default_factory=list)     # 段级：[{idx, text, items}]
@@ -114,23 +118,38 @@ def _para_split(body: str) -> list:
     return [p for p in paras if not p.startswith("#")]
 
 
+DEFAULT_HARD_RULES = {("platform_health_v0.1", "efficacy_claim"): "否", ("platform_health_v0.1", "medical_authority"): "否",
+                      ("platform_health_v0.1", "fear_sell"): "否", ("feature_questions_v0_1", "efficacy_promise"): "否"}
+
+
+def project_hard_rules(brief: dict, name: str = "project") -> dict:
+    """brief.hard_rules[].want → {(题库名, 题号): 期望答案}，与 compile_project_bank 编出的题配套；
+    want 可写 true/false 或「是」/「否」，不写按 false（答「是」即硬伤）。"""
+    out = {}
+    for r in brief.get("hard_rules") or []:
+        w = r.get("want", False)
+        out[(name, r["id"])] = w if isinstance(w, str) else ("是" if w else "否")
+    return out
+
+
 def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, platform: Optional[Bank] = None,
                 project: Optional[Bank] = None, human: Optional[Bank] = None, judge_paras: str = "on_fail",
-                hard_rules: Optional[dict] = None) -> DraftJudgement:
+                hard_rules: Optional[dict] = None, subject_id: str = "draft", subject_type: str = "aw_version") -> DraftJudgement:
     """draft = {"title": str, "body": str}。hard_rules = {(bank_name, qid): 期望答案}，答案不等于期望即硬伤。
-    judge_paras: always / on_fail / never。"""
+    judge_paras: always / on_fail / never。subject_id 落账本时用（写作台传 versions.id）；段级用 subject_id:pN，不落账本。"""
     dj = DraftJudgement()
     title, body = draft.get("title") or "", draft.get("body") or ""
     raw = (f"标题：{title}\n正文：{body}") if title else body
     hard_rules = hard_rules or {}
+    dj.wants = dict(hard_rules)
 
     def _acc(r):
         dj.usage = {k: dj.usage.get(k, 0) + v for k, v in (r.usage or {}).items()} if r.usage else dj.usage
         dj.calls += r.calls
 
     if fq is not None:
-        r = judge_note(client, fq, "draft", raw, title_extraction="markers", with_evidence=True, subject_type="aw_version")
-        dj.detail[fq.name] = r.items; _acc(r)
+        r = judge_note(client, fq, subject_id, raw, title_extraction="markers", with_evidence=True, subject_type=subject_type)
+        dj.detail[fq.name] = r.items; dj.results[fq.name] = r; _acc(r)
     pseudo_spans = {"title": title, "body": body, "full": raw, "first_sentence": "", "last_para": ""}
     for bank in (platform, project):
         if bank is None:
@@ -139,12 +158,12 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
         if not post_qids:
             continue
         st = {"说明": "下面是一篇待发的小红书稿子。只根据文字判断。", "标题": title or "（无标题）", "正文": body}
-        r = judge_state(client, bank, "draft", st, subject_type="aw_version", qids=post_qids)
+        r = judge_state(client, bank, subject_id, st, subject_type=subject_type, qids=post_qids)
         ev = build_evidence_call(bank, pseudo_spans, r.items)
         if ev:
             ev_body, sent_map = ev; ev_body["model"] = bank.model
             apply_evidence(r.items, client.call(ev_body), sent_map); r.calls += 1
-        dj.detail[bank.name] = r.items; _acc(r)
+        dj.detail[bank.name] = r.items; dj.results[bank.name] = r; _acc(r)
     for bname, items in dj.detail.items():
         for qid, it in items.items():
             if it.get("answer") is None:
@@ -160,10 +179,10 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
         intent_bank = project if (project is not None and "intent_of_para" in project.ids()) else None
         for i, p in enumerate(paras):
             st = {"说明": "下面是一篇小红书稿子里的一段。只看这一段。", "段落": p, "位置": f"第 {i + 1} 段，共 {len(paras)} 段"}
-            r = judge_state(client, human, f"draft:p{i + 1}", st, subject_type="aw_version"); _acc(r)
+            r = judge_state(client, human, f"{subject_id}:p{i + 1}", st, subject_type=subject_type); _acc(r)
             items = dict(r.items)
             if intent_bank is not None:
-                r2 = judge_state(client, intent_bank, f"draft:p{i + 1}", st, subject_type="aw_version", qids=["intent_of_para"]); _acc(r2)
+                r2 = judge_state(client, intent_bank, f"{subject_id}:p{i + 1}", st, subject_type=subject_type, qids=["intent_of_para"]); _acc(r2)
                 items.update(r2.items)
             dj.para_items.append({"idx": i + 1, "text": p, "items": items})
         dj.para_stats = para_stats(dj.para_items)
@@ -200,10 +219,18 @@ def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None
     validated = validated or set()
     for bname, qid, ans, p, ev in dj.hard_fails:
         q = banks[bname].by_id().get(qid)
-        want = "否" if ans == "是" else "是"
+        # 「要改成什么」用判这篇时配置的期望答案（choice 题可以是任一选项）；没记录时才按是非翻转
+        want = dj.wants.get((bname, qid)) or ("否" if ans == "是" else "是")
+        if q is None:
+            definition = ""
+        elif q.jtype == "noul":
+            definition = q.criteria.get("true" if want == "是" else "false", "")
+        else:
+            definition = q.criteria.get(want, "")
         plan.append({"kind": "hard", "bank": bname, "qid": qid, "now": ans, "want": want, "p": p, "evidence": ev,
-                     "definition": (q.criteria.get("true") if ans == "是" else q.criteria.get("false")) if q and q.jtype == "noul" else (q.criteria.get(ans, "") if q else ""),
-                     "instruction": f"「{q.ask if q else qid}」现在判「{ans}」（{p}），要改成「{want}」。" + (f"依据句：{ev}" if ev else "")})
+                     "definition": definition,
+                     "instruction": f"「{q.ask if q else qid}」现在判「{ans}」（{p}），要改成「{want}」" + (f"：{definition}" if definition else "")
+                                    + (f"。依据句：{ev}" if ev else "")})
     for qid, want in (target or {}).items():
         now = dj.profile.get(qid)
         if now is None or now == want:

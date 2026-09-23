@@ -8,7 +8,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements.txt pytest
-      - run: sha256sum -c banks/vendor/SHA256SUMS --ignore-missing || (echo "vendor 的 TV 题库/切片器被改了：只能整份重新 vendor 并更新 SHA256SUMS" && exit 1)
-        continue-on-error: true
+      - name: vendor 棘轮（TV 题库 / 切片器只能整份重新 vendor，不能就地改）
+        run: sha256sum -c banks/vendor/SHA256SUMS || (echo "vendor 的 TV 题库/切片器被改了：只能整份重新 vendor 并更新 SHA256SUMS" && exit 1)
       - run: python -m pytest -q
       - run: python -m py_compile scripts/*.py judge/*.py
