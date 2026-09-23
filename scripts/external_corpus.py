@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -32,7 +33,11 @@ from judge.jev_client import JevClient, JevError  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 CFG = ROOT / "config" / "external_corpus.yaml"
 STATE = ROOT / "state" / "external_corpus_state.json"
-MOCK_STATE = Path(tempfile.gettempdir()) / "judge_external_corpus_mock_state.json"
+
+def mock_state_path() -> Path:
+    """--mock 每次一个新的临时 state 文件：假供应商的 note_id 是确定性的，复用同一份 state 第二次跑就全是重复、零产物。"""
+    fd, name = tempfile.mkstemp(prefix="judge_external_corpus_mock_", suffix=".json"); os.close(fd)
+    return Path(name)
 
 
 def plan(cfg: dict) -> dict:
@@ -48,7 +53,7 @@ def plan(cfg: dict) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(CFG))
-    ap.add_argument("--state", help=f"去重状态文件；默认 {STATE}，--mock 时默认 {MOCK_STATE}（不污染真实 state）")
+    ap.add_argument("--state", help=f"去重状态文件；默认 {STATE}，--mock 时默认每次新建一个临时文件（不污染真实 state）")
     ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--probe", action="store_true"); ap.add_argument("--keyword", default="戒烟")
     ap.add_argument("--mock", action="store_true"); ap.add_argument("--out"); ap.add_argument("--sql"); ap.add_argument("--notes-sql"); ap.add_argument("--raw")
     ap.add_argument("--rows", help="两张表的行写成 JSON（{run_id, external_notes, answers}），给 scripts/apply_rows.py 经 PostgREST 写库")
@@ -59,9 +64,9 @@ def main():
     print(f"计划：{p['categories']} 个品类，搜索 {p['search_calls']} 页，最多取全文 {p['fetch_cap']} 篇，最坏花费 {p['worst_case_usd']} 美元（上限 {p['budget_usd']}），本月最多留 {p['monthly_notes_cap']} 篇")
     if args.dry_run and not args.mock:
         return
-    state_path = Path(args.state) if args.state else (MOCK_STATE if args.mock else STATE)
+    state_path = Path(args.state) if args.state else (mock_state_path() if args.mock else STATE)
     if args.mock and not args.state:
-        print(f"mock：state 落到 {state_path}")
+        print(f"mock：state 落到 {state_path}（每次新建）")
     budget = Budget(limit_usd=float(cfg.get("budget_usd_per_run", 1.0)), price_per_call=float(cfg.get("price_per_call_usd", 0.01)))
     try:
         provider = TikHubClient(budget=budget, mock=args.mock)
@@ -95,8 +100,9 @@ def main():
         Path(args.rows).write_text(json.dumps({"run_id": run_id, "external_notes": note_rows, "answers": rep.rows}, ensure_ascii=False), encoding="utf-8")
     if args.raw:
         Path(args.raw).write_text(json.dumps({"run_id": run_id, "kept": rep.kept_notes}, ensure_ascii=False, indent=1), encoding="utf-8")
-    if rep.stopped_reason.startswith("异常中止"):
-        sys.exit(f"运行没有跑完：{rep.stopped_reason}（产物与 state 已写出）")
+    if rep.stopped_reason:
+        # 只告警不改退出码：job 一红，actions/cache 就不保存 state、写库步也被跳过，这周花钱看过的下周会重看。
+        print(f"::warning::运行提前停止：{rep.stopped_reason}（产物与 state 已写出）", file=sys.stderr)
 
 
 if __name__ == "__main__":

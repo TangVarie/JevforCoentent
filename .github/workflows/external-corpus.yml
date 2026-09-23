@@ -36,7 +36,7 @@ jobs:
         if: always() && hashFiles('out/**') != ''
         uses: actions/upload-artifact@v4
         with: {name: external-corpus-${{ github.run_id }}, path: out}
-      - name: write to db via PostgREST (skipped with a notice when the key is absent)
-        if: github.event.inputs.dry_run != 'true'
+      - name: write to db via PostgREST (skipped with a notice when the key is absent; needs TV notes_v1_17 + v1_18)
+        if: always() && github.event.inputs.dry_run != 'true' && hashFiles('out/rows.json') != ''
         continue-on-error: true
         run: python3 scripts/apply_rows.py out/rows.json

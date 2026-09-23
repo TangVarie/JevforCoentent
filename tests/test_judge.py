@@ -455,19 +455,36 @@ def test_api_judge_parallel_partial_errors_and_rows(monkeypatch):
     assert d["rows"] == 120 and len(d["ledger_rows"]) == 120 and d["ledger_rows"][0]["run_tag"] == "t"
     r = c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": [dict(subs[0], title_extraction="nope")]}, headers=H)
     assert r.status_code == 422                                                # 形状错误整批先拒，不调 Jev
-    # 单个 subject 的 Jev 失败只让它自己带 error，其余照常；全部失败才 502
-    real = A._judge_one
+    # 真实的 JevError 路径：judge_note 在线程里抛，_judge_one 只让那个 subject 带 error；n0/n1 用 Barrier 证明确实并行
+    # （串行时 n0 会在 Barrier 上超时，被 _judge_one 兜成第二个 error，errors 变 2，测试就红）
+    import threading
+    from judge.jev_client import JevError
+    barrier = threading.Barrier(2, timeout=5)
+    real_note = A.judge_note
 
-    def flaky(client, bank, s, with_evidence):
-        if s.subject_id == "n2":
-            return {"subject_type": "note", "subject_id": "n2", "error": "Jev 调用失败：boom"}   # 等价于 _judge_one 捕到 JevError
-        return real(client, bank, s, with_evidence)
+    def wrapped(client, bank, subject_id, raw, **kw):
+        if subject_id in ("n0", "n1"):
+            barrier.wait()
+        if subject_id == "n2":
+            raise JevError("boom")
+        return real_note(client, bank, subject_id, raw, **kw)
 
-    monkeypatch.setattr(A, "_judge_one", flaky)
-    d2 = c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:3]}, headers=H).json()
-    assert d2["errors"] == 1 and d2["results"][2]["error"].endswith("boom") and d2["rows"] == 40
-    monkeypatch.setattr(A, "_judge_one", lambda client, bank, s, we: {"subject_type": "note", "subject_id": s.subject_id, "error": "Jev 调用失败：down"})
+    monkeypatch.setattr(A, "judge_note", wrapped)
+    d2 = c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs}, headers=H).json()
+    assert d2["errors"] == 1 and d2["results"][2] == {"subject_type": "note", "subject_id": "n2", "error": "Jev 调用失败：boom"}
+    assert d2["rows"] == 100 and [r["subject_id"] for r in d2["results"]] == [f"n{i}" for i in range(6)]
+    # 不是 JevError 的异常也只影响那一个 subject，标成「判定失败」
+    monkeypatch.setattr(A, "judge_note", lambda client, bank, subject_id, raw, **kw: (_ for _ in ()).throw(KeyError("noul")) if subject_id == "n1" else real_note(client, bank, subject_id, raw, **kw))
+    d3 = c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:3]}, headers=H).json()
+    assert d3["errors"] == 1 and d3["results"][1]["error"].startswith("判定失败（KeyError）")
+    # 全部失败才 502
+    monkeypatch.setattr(A, "judge_note", lambda *a, **k: (_ for _ in ()).throw(JevError("down")))
     assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:2]}, headers=H).status_code == 502
+    # write=true 而没配 Supabase：调 Jev 之前就 503
+    monkeypatch.delenv("SUPABASE_URL", raising=False); monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    calls = []
+    monkeypatch.setattr(A, "judge_note", lambda *a, **k: calls.append(1) or real_note(*a, **k))
+    assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:1], "write": True}, headers=H).status_code == 503 and calls == []
 
 
 def test_api_judge_draft_with_brief(monkeypatch):
@@ -478,20 +495,42 @@ def test_api_judge_draft_with_brief(monkeypatch):
     body = {"title": "健身房教练劝我先戒烟", "body": "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？",
             "subject_id": "11111111-2222-3333-4444-555555555555",
             "brief": {"intents": [{"label": "烟瘾场景", "means": "想抽烟的时刻"}],
-                      "hard_rules": [{"id": "no_price", "ask": "有没有说便宜？", "yes": "说了", "no": "没说", "want": False}]},
+                      "hard_rules": [{"id": "must_ask", "ask": "有没有向读者提问？", "yes": "问了", "no": "没问", "want": True}]},
             "judge_paras": "always", "run_tag": "aw-shadow"}
     d = c.post("/judge_draft", json=body, headers=H).json()
-    assert set(d) >= {"passed", "profile", "hard_fails", "plan", "para_stats", "detail", "ledger_rows", "banks"}
+    assert set(d) >= {"passed", "profile", "hard_fails", "plan", "para_stats", "detail", "ledger_rows", "banks", "hard_rules", "ignored_banks"}
     assert set(d["detail"]) == {"feature_questions_v0_1", "platform_health_v0.1", "project"} and d["para_stats"]["n"] == 4
-    assert "no_price" in d["detail"]["project"] and "efficacy_promise" in d["detail"]["feature_questions_v0_1"]
+    assert "must_ask" in d["detail"]["project"] and "efficacy_promise" in d["detail"]["feature_questions_v0_1"]
     rows = d["ledger_rows"]
     assert rows and {r["subject_id"] for r in rows} == {body["subject_id"]} and {r["subject_type"] for r in rows} == {"aw_version"}
-    assert {r["run_tag"] for r in rows} == {"aw-shadow"} and any(r["question_id"] == "no_price" for r in rows)
-    # brief 的 want=False 接到了判定：项目题答「是」就是硬伤，修改单里有它
-    if any(f[1] == "no_price" for f in d["hard_fails"]):
-        assert any(p["qid"] == "no_price" for p in d["plan"])
+    assert {r["run_tag"] for r in rows} == {"aw-shadow"} and any(r["question_id"] == "must_ask" for r in rows)
+    # brief 的 want 接到了判定：期望「是」，答案不是「是」就是硬伤，修改单里有它（mock 对这段稿的答案是确定的）
+    assert d["hard_rules"]["project:must_ask"] == "是"
+    ans = d["detail"]["project"]["must_ask"]["answer"]
+    hf = [f for f in d["hard_fails"] if f[1] == "must_ask"]
+    assert (len(hf) == 1 and hf[0][:3] == ["project", "must_ask", ans]) == (ans != "是")
+    # 再发一次、want 取答案的反面：mock 对同一 state + 题目的答案是确定的，所以这次必有硬伤、修改单必有它（无条件断言）
+    body_opp = dict(body, brief={"hard_rules": [dict(body["brief"]["hard_rules"][0], want=(ans != "是"))]})
+    d_opp = c.post("/judge_draft", json=body_opp, headers=H).json()
+    assert d_opp["detail"]["project"]["must_ask"]["answer"] == ans and d_opp["hard_rules"]["project:must_ask"] != ans
+    assert [f[:3] for f in d_opp["hard_fails"] if f[1] == "must_ask"] == [["project", "must_ask", ans]] and not d_opp["passed"]
+    assert any(p["qid"] == "must_ask" and p["now"] == ans for p in d_opp["plan"])
+    # HTTP hard_rules 的布尔值按同一口径归一：false → 「否」，不会把答「否」判成硬伤
+    d2 = c.post("/judge_draft", json=dict(body, hard_rules={"platform_health_v0.1:medical_authority": False, "feature_questions_v0_1:product_role": "未出现"}), headers=H).json()
+    assert d2["hard_rules"]["platform_health_v0.1:medical_authority"] == "否" and d2["hard_rules"]["feature_questions_v0_1:product_role"] == "未出现"
+    assert not any(f[1] == "medical_authority" and f[2] == "否" for f in d2["hard_fails"])
+    # 形状错误是 422 不是 500；同名覆盖、两种项目题库同时给、一份题库都没有，都是 422
     assert c.post("/judge_draft", json=dict(body, hard_rules={"bad": "否"}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, hard_rules={"a:b": 3}), headers=H).status_code == 422
     assert c.post("/judge_draft", json=dict(body, judge_paras="sometimes"), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, brief={"hard_rules": [{"id": "x"}]}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, brief={"hard_rules": [{"id": "intent_of_para", "ask": "?"}], "intents": [{"label": "a"}]}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, project_bank={"questions": None}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(body, project_bank={"questions": []}), headers=H).status_code == 422       # 与 brief 同时给
+    assert c.post("/judge_draft", json=dict(body, project_bank_name="platform_health_v0.1"), headers=H).status_code == 422
+    assert c.post("/judge_draft", json={"title": "t", "body": "b", "banks": []}, headers=H).status_code == 422
+    d3 = c.post("/judge_draft", json={"title": "t", "body": "正文有二十个字以上才不会被当成太短的稿子来跳题。", "banks": ["feature_questions_v0_1", "comment_reader_v0.4", "external_triage_v0.1"]}, headers=H).json()
+    assert d3["ignored_banks"] == ["comment_reader_v0.4", "external_triage_v0.1"] and set(d3["detail"]) == {"feature_questions_v0_1"}
 
 
 # ── 外部语料：翻页会话、单条失败不中止、seen 只记有结局的 ──
@@ -536,3 +575,20 @@ def test_external_errors_and_seen_discipline():
     # 报告能渲染，带出错与分诊通过两列
     md = E.render_report(rep, cfg)
     assert "出错" in md and "分诊通过" in md
+    # 单条笔记在取全文时报错：记进 errors、不进 seen（下次还会看）、账本里没有它的半截行；四个计数对得上
+    class DetailFails(E.TikHubClient):
+        failed = []
+
+        def detail(self, note_id, note_type=""):
+            if not self.failed:
+                self.failed.append(note_id); raise RuntimeError("detail 502")
+            return super().detail(note_id, note_type)
+
+    st3 = {"seen": {}, "monthly": {}}
+    prov3 = DetailFails(budget=E.Budget(limit_usd=5.0), mock=True)
+    rep3 = E.run_once(cfg, prov3, JevClient(mock=True), triage, fq, st3)
+    bad = prov3.failed[0]
+    assert bad not in st3["seen"] and any(w == bad and "502" in e for w, e in rep3.errors)
+    assert not any(r["subject_id"] == bad for r in rep3.rows)
+    assert rep3.triaged_kept == rep3.judged + rep3.dropped_short
+    assert len(st3["seen"]) == rep3.judged + rep3.dropped_short + sum(1 for v in st3["seen"].values() if v["why"] == "triage_reject")

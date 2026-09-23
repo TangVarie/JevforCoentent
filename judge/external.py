@@ -127,7 +127,7 @@ def _find_session(obj: Any, depth: int = 0) -> dict:
     if depth > 5:
         return {}
     if isinstance(obj, dict):
-        got = {k: obj[k] for k in ("search_id", "search_session_id") if isinstance(obj.get(k), str) and obj[k]}
+        got = {k: str(obj[k]) for k in ("search_id", "search_session_id") if isinstance(obj.get(k), (str, int)) and obj[k] not in ("", 0)}
         if got:
             return got
         for v in obj.values():
@@ -165,6 +165,9 @@ class TikHubClient:
         self._last = time.time()
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read().decode("utf-8"))
+
+    def has_session(self, keyword: str, sort_type: str) -> bool:
+        return (keyword, sort_type) in self._sessions
 
     def search(self, keyword: str, page: int, sort_type: str, note_type: Optional[str]) -> tuple:
         params = {"keyword": keyword, "page": page, "sort_type": sort_type, "note_type": note_type}
@@ -253,12 +256,12 @@ def _process_note(n: dict, name: str, cfg: dict, provider: TikHubClient, jev: Je
     if it.get("on_topic", {}).get("answer") != "是" or it.get("voice", {}).get("answer") not in keep_voices:
         return "triage_reject"
     n["triage"] = {k: v["answer"] for k, v in it.items()}
-    rep.triaged_kept += 1; stats["triaged"] += 1
     if len(n["body"]) < min_chars:
         full, _ = provider.detail(n["note_id"], n["note_type"]); rep.fetched += 1; stats["fetched"] += 1
         n["title"] = str(_pick(full, "title", default=n["title"]) or n["title"])
         n["body"] = str(_pick(full, "desc", "content", "body", default=n["body"]) or n["body"])
         n["fetched_full"] = True
+    rep.triaged_kept += 1; stats["triaged"] += 1        # 取全文之后才计，预算在取全文时用完的那条不算「分诊通过」，报告四列对得上
     if len(n["body"]) < min_chars:
         rep.dropped_short += 1; stats["short"] += 1
         return "short"
@@ -312,12 +315,15 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                     for page in range(1, int(cfg.get("pages_per_sort", 1)) + 1):
                         if cap_reached():
                             done = True; break
+                        if page > 1 and not provider.has_session(kw, sort_type):
+                            # 没有首页给的翻页会话就不花钱翻页：TikHub 会把它当新搜索返回首页等价结果
+                            err(f"search {kw}/{sort_type}/p{page}", RuntimeError("首页没有返回 search_id / search_session_id，跳过翻页"), stats); break
                         try:
                             notes, _ = provider.search(kw, page, sort_type, cfg.get("note_type"))
                         except BudgetExceeded:
                             raise
-                        except Exception as exc:  # noqa: BLE001 — 供应商一页失败不中止整次运行
-                            err(f"search {kw}/{sort_type}/p{page}", exc, stats); continue
+                        except Exception as exc:  # noqa: BLE001 — 供应商一页失败不中止整次运行；这个关键词×排序余下的页也不翻
+                            err(f"search {kw}/{sort_type}/p{page}", exc, stats); break
                         rep.searched += 1; stats["searched"] += 1
                         for raw in notes:
                             if not isinstance(raw, dict):
@@ -359,21 +365,22 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
     return rep
 
 
-def external_note_rows(kept: list, run_id: str) -> list:
-    """给 truth_vault.external_notes（migrations/notes_v1_18）的行。"""
+def external_note_rows(kept: list, run_id: str, fetched_at: Optional[str] = None) -> list:
+    """给 truth_vault.external_notes（migrations/notes_v1_18）的行。fetched_at 显式带上，SQL 路径与 PostgREST 路径冲突更新时口径一样。"""
+    fetched_at = fetched_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     return [{"note_id": n["note_id"], "platform": "xiaohongshu", "category": n["category"], "keyword": n["keyword"], "sort_type": n["sort_type"],
              "title": n["title"], "body": n["body"], "author": n["author"], "author_id": n["author_id"],
              "liked": n["liked"], "collected": n["collected"], "comments": n["comments"], "shares": n["shares"],
-             "publish_time": n.get("publish_time"), "voice": (n.get("triage") or {}).get("voice"),
+             "publish_time": None if n.get("publish_time") is None else str(n.get("publish_time")), "voice": (n.get("triage") or {}).get("voice"),
              "ad_like": (n.get("triage") or {}).get("ad_like") == "是", "has_product": (n.get("triage") or {}).get("has_product") == "是",
-             "run_id": run_id, "source": "tikhub"} for n in kept]
+             "run_id": run_id, "source": "tikhub", "fetched_at": fetched_at} for n in kept]
 
 
 def rows_to_sql_external(rows: list, batch: int = 100) -> str:
     if not rows:
         return "-- no rows\n"
     cols = ["note_id", "platform", "category", "keyword", "sort_type", "title", "body", "author", "author_id", "liked", "collected",
-            "comments", "shares", "publish_time", "voice", "ad_like", "has_product", "run_id", "source"]
+            "comments", "shares", "publish_time", "voice", "ad_like", "has_product", "run_id", "source", "fetched_at"]
     def lit(v):
         if v is None: return "NULL"
         if isinstance(v, bool): return "TRUE" if v else "FALSE"
@@ -383,7 +390,7 @@ def rows_to_sql_external(rows: list, batch: int = 100) -> str:
     for i in range(0, len(rows), batch):
         vals = ",\n".join("(" + ", ".join(lit(r.get(c)) for c in cols) + ")" for r in rows[i:i + batch])
         upd = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "note_id")
-        out.append(f"INSERT INTO truth_vault.external_notes ({', '.join(cols)}) VALUES\n{vals}\nON CONFLICT (note_id) DO UPDATE SET {upd}, fetched_at = now();\n")
+        out.append(f"INSERT INTO truth_vault.external_notes ({', '.join(cols)}) VALUES\n{vals}\nON CONFLICT (note_id) DO UPDATE SET {upd};\n")
     return "\n".join(out)
 
 

@@ -54,7 +54,7 @@ def compile_project_bank(brief: dict, name: str = "project", model: str = "jev-1
                            feeds="切口对不对得上", on_ambiguous="进人工", ask="是不是按分到的切口写的"))
     return Bank(name=name, version=brief.get("version", "p-v1"), model=model, fmt="jev", questions=qs,
                 ambiguity={"choice_top_min": 0.60, "choice_margin_min": 0.20, "noul_band": [0.35, 0.65]},
-                sha256=hashlib.sha256(json.dumps(brief, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest())
+                sha256=hashlib.sha256(json.dumps(brief, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest())
 
 
 # ── 生成端适配 ───────────────────────────────────────────────────────

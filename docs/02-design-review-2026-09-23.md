@@ -22,6 +22,7 @@
 
 > **修复记录（同日第二版）**：下面十三项已全部修掉，表格保留作当时的诊断。改了什么：
 > #1 `requirements.txt` 钉 `mcp>=1.2,<2`；#2 v1_18 视图改成分位数 CTE 再 JOIN，并按 `question_version / extractor` 分组（PG 16 连跑两遍、能查）；#3 `banks.bank_sha256` 改用 vendor 进来的 `tv_feature_bank.bank_digest`，内联题库对规范化 JSON 算，测试钉住「冻结不改 digest」；#4 删掉 `apply_sql.py`，新加 `scripts/apply_rows.py` 经 PostgREST upsert（外部笔记表在前、账本行在后），`external_corpus.py --rows` 出 rows.json，workflow 改成 job 级 env、先上传产物再写库、写库失败不让 job 红；#5 `/judge` 按 subject 用线程池并行（`JUDGE_WORKERS`，默认 4），输入形状整批先校验，单个 subject 的 Jev 失败只带 `error`、全部失败才 502；#6 新加 `POST /judge_draft`（多层题库 + brief 现编项目题库 / 内联题库 + hard_rules + 修改单 + 账本行），`loop.judge_draft` 加 `subject_id / subject_type` 并保留每层的 `JudgeResult`，`compile_project_bank` 配套 `project_hard_rules` 把 brief 的 `want` 接到判定，`/judge` 也把账本行原样带回；#7 鉴权 fail-closed（没配 `JUDGE_API_KEY` 一律 503，`JUDGE_ALLOW_ANONYMOUS=1` 才放行，key 比较用 `hmac.compare_digest`），`/health` 回显 auth 模式；#8 `TikHubClient` 记住首页返回的 `search_id / search_session_id`，第 2 页起回传；#9 单页搜索、单条笔记的异常记进 `rep.errors` 继续跑，意外异常也写 `stopped_reason` 并保留产物；#10 `seen` 只在有结局（分诊拒绝 / 太短 / 入账本）后写，因上限、预算、报错没看的不写，每次 / 每月上限到了整个品类停搜；#11 `--mock` 的 state 默认落临时目录，`dry_run` 不写 seen，`state/` `out/` 进 `.gitignore`；#12 `SHA256SUMS` 改相对路径，CI 那步去掉 `--ignore-missing` 与 `continue-on-error`；#13 全仓改用 `SUPABASE_SERVICE_ROLE_KEY`。顺手：`.env.example` 按代码实际读的变量重写（去掉没有读取点的 `JEV_MODEL`、错名的 `SOCIALDATAX_API_KEY`），报告里「分诊通过 / 太短丢弃 / 打标 / 出错」分开计数。测试 22 → 28。
+> **第二轮（对这次修复的对抗评审后）**：`/judge_draft` 的 `hard_rules` 布尔值按 brief 同款口径归一成「是」/「否」（此前 `false` 会把答「否」判成硬伤）；brief / 内联题库形状错、编出的题库 id 撞车、`project_bank_name` 与某层同名、brief 与 `project_bank` 同时给、一份题库都没有，都是 422 而不是 500 或静默通过；认不出层的题库名回显在 `ignored_banks`；`/judge` 里非 `JevError` 的异常也只让那一个 subject 带 error；`write=true` 在调 Jev 前先查写库配置。外部语料：脚本对提前停止只打 `::warning::` 不改退出码（否则 job 红、cache 不存 state）；首页没拿到翻页会话或搜索失败就不再花钱翻这个关键词的后续页；`--mock` 的 state 每次新建临时文件；`fetched_at` 显式写进行里，SQL 与 PostgREST 两条路冲突更新同口径；`apply_rows.py` 写库失败打出前置（v1_17 / v1_18）。视图先 `DROP VIEW IF EXISTS` 再建并多按 `bank_sha256` 分组。三个新测试的断言收紧到「改坏代码测试必红」：真实 `JevError` 路径 + Barrier 证明并行、brief 的 `want` 无条件断言、取全文报错的笔记不进 seen。
 
 | # | 事 | 证据 | 后果 | 修法 |
 |---|---|---|---|---|
@@ -39,7 +40,7 @@
 | 12 | **CI 的 vendor 棘轮空跑** | `banks/vendor/SHA256SUMS` 两条路径是另一台机器的临时绝对路径；`ci.yml:11` `sha256sum -c --ignore-missing` 一个文件都没核到，以「no file was verified」退出 1，被 `:12` 的 `continue-on-error: true` 吞掉 | 谁改了 vendor 的题库或切片器，CI 不会红；这一步现在每次都「失败」且打出「vendor 被改了」的错误结论。真正起钉住作用的只有 `tests/test_judge.py:27-32`（按 basename） | 改相对路径 `banks/vendor/…`，去掉 `continue-on-error` |
 | 13 | **Supabase 密钥变量名与 TV 不一致** | 本仓全部用 `SUPABASE_SERVICE_KEY`（`api.py:125`、`fq_shadow.py:74`、`backfill_comments.py:46`、`external-corpus.yml:26/36`、`.env.example:5`）；TV 全仓 71 处用 `SUPABASE_SERVICE_ROLE_KEY`，且 workflow 里显式 `[ -n "$SUPABASE_SERVICE_ROLE_KEY" ] || exit 1` | README 说 worker 的 `/annotate-features` 改调 `/judge`，两个服务会共用 Railway 变量；名字不同就得双份维护，配错时 `/judge` 的 `write=true` 直接 503、workflow 的写库步安静跳过 | 统一成 `SUPABASE_SERVICE_ROLE_KEY` |
 
-**#2 的改法**（PG 16 已验证能建、能查，`share` 每组求和为 1）：
+**#2 的改法**（当时的草案，已被 `migrations/notes_v1_18_external_notes.sql` 里的正式版取代：正式版多按 `question_version / bank_sha256 / extractor` 分组，并先 `DROP VIEW IF EXISTS` 再建，因为 `CREATE OR REPLACE VIEW` 不允许改列序。**不要直接执行下面这段**，留作说明）：
 
 ```sql
 CREATE OR REPLACE VIEW truth_vault.v_external_reference AS

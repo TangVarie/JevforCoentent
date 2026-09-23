@@ -2,7 +2,7 @@
 """Jev（TypeSafe AI）客户端：一个接口、固定模型版本、重试、确定性 mock。
 
 密钥按顺序找：环境变量 TYPESAFE_API_KEY → TYPESAFE_KEY_FILE 指向的文件 → ~/.config/typesafe/key。
-模型版本由题库指定（bank.model），JEV_MODEL 可覆盖；不用 jev-latest。
+模型版本由题库指定（bank.model），钉死不用 jev-latest；换版本先重跑金标准再改题库里的 model。
 限流按官方口径 250k token/秒、1,200 次/分钟；429 按 retry-after 重试。
 """
 from __future__ import annotations
@@ -62,7 +62,7 @@ def _explain_http(status: int, text: str) -> str:
     if status in (401, 403):
         return f"鉴权失败（HTTP {status}）：检查 TYPESAFE_API_KEY。{snippet}"
     if status == 404:
-        return f"找不到接口或模型（HTTP 404）：检查 JEV_MODEL / TYPESAFE_BASE_URL。{snippet}"
+        return f"找不到接口或模型（HTTP 404）：检查题库里的 model / TYPESAFE_BASE_URL。{snippet}"
     if status in (400, 422):
         return f"请求被拒（HTTP {status}），多半是题库格式问题：{snippet}"
     if status == 429:

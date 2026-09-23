@@ -148,6 +148,7 @@ def _validate_subjects(bank: Bank, subjects: list) -> None:
 
 
 def _judge_one(client: JevClient, bank: Bank, s: Subject, with_evidence: bool):
+    """一个 subject 的判定。任何异常都只让这一个 subject 带 error（Jev 调用失败 / 返回解析失败分开标），不拖累整批。"""
     try:
         if bank.fmt == "tv":
             return judge_note(client, bank, s.subject_id, s.raw_content, title_extraction=s.title_extraction,
@@ -155,6 +156,14 @@ def _judge_one(client: JevClient, bank: Bank, s: Subject, with_evidence: bool):
         return judge_state(client, bank, s.subject_id, s.state, subject_type=s.subject_type, qids=s.qids, fill=s.fill)
     except JevError as exc:
         return {"subject_type": s.subject_type, "subject_id": s.subject_id, "error": f"Jev 调用失败：{exc}"}
+    except Exception as exc:  # noqa: BLE001 — 例如 Jev 200 但 answers 形状异常
+        return {"subject_type": s.subject_type, "subject_id": s.subject_id, "error": f"判定失败（{type(exc).__name__}）：{exc}"}
+
+
+def _write_config_or_503() -> None:
+    """write=true 时先查写库配置，别等 Jev 钱花完了才 503。"""
+    if not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")):
+        raise HTTPException(503, "没配 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY，不能写库（write=true 之前先配）")
 
 
 def _parallel(fn, items: list) -> list:
@@ -191,6 +200,8 @@ def banks():
 def judge(req: JudgeRequest):
     bank = get_bank(req.bank)
     _validate_subjects(bank, req.subjects)
+    if req.write:
+        _write_config_or_503()
     client = _client()
     outs = _parallel(lambda s: _judge_one(client, bank, s, req.with_evidence), req.subjects)
     results, rows, errors = [], [], 0
@@ -228,43 +239,73 @@ class DraftRequest(BaseModel):
 
 
 def _split_banks(names: list) -> tuple:
-    """按名字分层：fq = 第一个 TV 格式；platform / human 按前缀；其余 Jev 格式的当项目题库（最多一份）。"""
+    """按名字分层：fq = 第一个 TV 格式；platform / human 按前缀；其余 Jev 格式的当项目题库（最多一份）。
+    认不出层的名字放进 ignored（响应里回显），不静默吞掉。"""
     fq = platform = human = project = None
-    loaded = {}
+    loaded, ignored = {}, []
     for n in names:
         b = get_bank(n); loaded[n] = b
         if b.fmt == "tv" and fq is None:
             fq = b
-        elif n.startswith("platform"):
+        elif n.startswith("platform") and platform is None:
             platform = b
-        elif n.startswith("human_feel"):
+        elif n.startswith("human_feel") and human is None:
             human = b
         elif b.fmt == "jev" and not n.startswith("comment") and not n.startswith("external") and project is None:
             project = b
-    return loaded, fq, platform, human, project
+        else:
+            ignored.append(n); loaded.pop(n)
+    return loaded, fq, platform, human, project, ignored
+
+
+def _norm_want(k: str, v) -> str:
+    """hard_rules 的期望答案：JSON 布尔按 brief 同款口径转「是」/「否」；字符串原样（choice 题可以是选项名）。"""
+    if isinstance(v, bool):
+        return "是" if v else "否"
+    if isinstance(v, str) and v.strip():
+        return v.strip()
+    raise HTTPException(422, f"hard_rules[{k!r}] 的期望答案要是 true/false 或选项文字，收到 {v!r}")
+
+
+def _project_from_request(req: "DraftRequest", loaded: dict) -> tuple:
+    """项目题库来源：内联 project_bank 或 brief 现编，二选一；形状错误 422 而不是 500。返回 (bank | None, hard_rules_from_brief)。"""
+    if req.project_bank is not None and req.brief is not None:
+        raise HTTPException(422, "project_bank 与 brief 只能给一个（brief 的 want 只能配 brief 编出的题）")
+    if req.project_bank is None and req.brief is None:
+        return None, {}
+    if req.project_bank_name in loaded or req.project_bank_name in req.banks:
+        raise HTTPException(422, f"project_bank_name={req.project_bank_name!r} 与 banks 里的题库同名，会把那一层的判定整层覆盖")
+    try:
+        if req.project_bank is not None:
+            bank, hard = load_bank_data(req.project_bank, req.project_bank_name), {}
+        else:
+            bank, hard = compile_project_bank(req.brief, name=req.project_bank_name), project_hard_rules(req.brief, req.project_bank_name)
+    except (KeyError, TypeError, AttributeError, ValueError) as exc:
+        raise HTTPException(422, f"项目题库 / brief 形状不对（{type(exc).__name__}: {exc}）；brief 要有 intents[].label、hard_rules[].id/ask、angle.label")
+    problems = check_bank(bank)
+    if problems:
+        raise HTTPException(422, f"项目题库有问题：{problems}")
+    return bank, hard
 
 
 @app.post("/judge_draft", dependencies=[Depends(require_key)])
 def judge_draft(req: DraftRequest):
     if req.judge_paras not in ("always", "on_fail", "never"):
         raise HTTPException(422, "judge_paras 只能是 always / on_fail / never")
-    loaded, fq, platform, human, project = _split_banks(req.banks)
+    loaded, fq, platform, human, project, ignored = _split_banks(req.banks)
     hard = dict(DEFAULT_HARD_RULES)
-    if req.project_bank is not None:
-        project = load_bank_data(req.project_bank, req.project_bank_name)
-        problems = check_bank(project)
-        if problems:
-            raise HTTPException(422, f"内联项目题库有问题：{problems}")
-    elif req.brief is not None:
-        project = compile_project_bank(req.brief, name=req.project_bank_name)
-        hard.update(project_hard_rules(req.brief, req.project_bank_name))
-    if project is not None:
-        loaded[project.name] = project
+    inline, brief_hard = _project_from_request(req, loaded)
+    if inline is not None:
+        project = inline; loaded[project.name] = project; hard.update(brief_hard)
+    if fq is None and platform is None and human is None and project is None:
+        raise HTTPException(422, f"一份题库都没有（banks={req.banks}，认不出层的：{ignored}）")
     for k, v in (req.hard_rules or {}).items():
         if ":" not in k:
             raise HTTPException(422, f"hard_rules 的键要写成 题库名:题号，收到 {k!r}")
         bname, qid = k.split(":", 1)
-        hard[(bname, qid)] = v
+        hard[(bname, qid)] = _norm_want(k, v)
+    if req.write:
+        _write_config_or_503()
     client = _client()
     try:
         dj = _judge_draft(client, {"title": req.title, "body": req.body}, fq=fq, platform=platform, project=project, human=human,
@@ -279,4 +320,5 @@ def judge_draft(req: DraftRequest):
     return {"subject_id": req.subject_id, "passed": dj.passed(), "profile": dj.profile, "hard_fails": dj.hard_fails,
             "ambiguous": dj.ambiguous, "para_stats": dj.para_stats, "plan": plan, "detail": dj.detail,
             "calls": dj.calls, "usage": dj.usage, "banks": {n: {"version": b.version, "sha256": b.sha256} for n, b in loaded.items()},
+            "ignored_banks": ignored, "hard_rules": {f"{b}:{q}": w for (b, q), w in hard.items()},
             "rows": len(rows), "ledger_rows": rows if req.return_rows else None, "written": written}
