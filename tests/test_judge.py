@@ -541,6 +541,43 @@ def test_api_judge_draft_with_brief(monkeypatch):
     assert c.post("/judge_draft", json={"title": "t", "body": "b", "banks": []}, headers=H).status_code == 422
     d3 = c.post("/judge_draft", json={"title": "t", "body": "正文有二十个字以上才不会被当成太短的稿子来跳题。", "banks": ["feature_questions_v0_1", "comment_reader_v0.4", "external_triage_v0.1"]}, headers=H).json()
     assert d3["ignored_banks"] == ["comment_reader_v0.4", "external_triage_v0.1"] and set(d3["detail"]) == {"feature_questions_v0_1"}
+    # Codex 评审那七条：同名题库传两次不再 500；空项目题库 / 空 brief、跨层题号撞车、只有意图题没人感题库、
+    # 指到不存在的题库或题号的 hard_rules、write=true 却没给自己的 subject_id，都是 422
+    d4 = c.post("/judge_draft", json={"title": "t", "body": body["body"], "banks": ["feature_questions_v0_1", "feature_questions_v0_1"]}, headers=H)
+    assert d4.status_code == 200 and set(d4.json()["detail"]) == {"feature_questions_v0_1"}
+    base = {"title": "t", "body": body["body"], "banks": ["feature_questions_v0_1"]}
+    assert c.post("/judge_draft", json=dict(base, banks=[], project_bank={"questions": []}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(base, banks=[], brief={}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(base, brief={"hard_rules": [{"id": "efficacy_promise", "ask": "?"}]}), headers=H).status_code == 422
+    assert c.post("/judge_draft", json=dict(base, brief={"intents": [{"label": "a"}]}), headers=H).status_code == 422          # 只有意图题、没人感题库
+    assert c.post("/judge_draft", json=dict(base, brief={"intents": [{"label": "a"}]}, banks=["feature_questions_v0_1", "human_feel_para_v0.1"]), headers=H).status_code == 200
+    assert c.post("/judge_draft", json=dict(base, hard_rules={"platform_health_v0.1:efficacy_claim": "否"}), headers=H).status_code == 422   # 这次没加载平台层
+    assert c.post("/judge_draft", json=dict(base, hard_rules={"feature_questions_v0_1:efficacy_cliam": "否"}), headers=H).status_code == 422  # 题号拼错
+    d5 = c.post("/judge_draft", json=base, headers=H).json()
+    assert set(d5["hard_rules"]) == {"feature_questions_v0_1:efficacy_promise"}                                                  # 默认硬约束只留加载了的层
+    assert c.post("/judge_draft", json=dict(base, write=True), headers=H).status_code == 422                                   # subject_id 还是默认的 draft
+    assert c.post("/judge_draft", json=dict(base, subject_id="  "), headers=H).status_code == 422
+
+
+def test_repair_plan_uses_configured_want_for_choice_rules():
+    """修改单的「要改成什么」用判这篇时配置的期望答案（choice 题可以是任一选项），定义取目标选项的定义。"""
+    from judge import loop as L
+    client = JevClient(mock=True)
+    fq = B.load_bank(FQ, name="feature_questions_v0_1")
+    draft = {"title": "健身房教练劝我先戒烟", "body": "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？"}
+    ans = L.judge_draft(client, draft, fq=fq).profile["product_role"]
+    want = next(lab for lab in fq.by_id()["product_role"].criteria if lab != ans)      # 取一个和答案不同的选项 → 必是硬伤
+    dj = L.judge_draft(client, draft, fq=fq, hard_rules={("feature_questions_v0_1", "product_role"): want})
+    assert dj.wants == {("feature_questions_v0_1", "product_role"): want} and [tuple(f[:3]) for f in dj.hard_fails] == [("feature_questions_v0_1", "product_role", ans)]
+    plan = L.repair_plan(dj, {"feature_questions_v0_1": fq})
+    assert plan[0]["want"] == want and plan[0]["definition"] == fq.by_id()["product_role"].criteria[want] and f"要改成「{want}」" in plan[0]["instruction"]
+    # 是非题：期望「否」答「是」→ 定义取「否」那一侧；没记录期望时才按是非翻转
+    ph = B.load_bank(ROOT / "banks" / "platform_health_v0.1.yaml", name="platform_health_v0.1")
+    dj2 = L.DraftJudgement(hard_fails=[("platform_health_v0.1", "fear_sell", "是", 0.9, None)], wants={("platform_health_v0.1", "fear_sell"): "否"})
+    p2 = L.repair_plan(dj2, {"platform_health_v0.1": ph})[0]
+    assert p2["want"] == "否" and p2["definition"] == ph.by_id()["fear_sell"].criteria["false"]
+    p3 = L.repair_plan(L.DraftJudgement(hard_fails=[("platform_health_v0.1", "fear_sell", "是", 0.9, None)]), {"platform_health_v0.1": ph})[0]
+    assert p3["want"] == "否"
 
 
 # ── 外部语料：翻页会话、单条失败不中止、seen 只记有结局的 ──
@@ -602,3 +639,20 @@ def test_external_errors_and_seen_discipline():
     assert not any(r["subject_id"] == bad for r in rep3.rows)
     assert rep3.triaged_kept == rep3.judged + rep3.dropped_short
     assert len(st3["seen"]) == rep3.judged + rep3.dropped_short + sum(1 for v in st3["seen"].values() if v["why"] == "triage_reject")
+    assert rep3.systemic_failure == ""
+    # 系统性故障不能悄悄绿着：所有搜索都失败 / 所有笔记都失败 → systemic_failure（脚本据此让 job 红）
+    class Dead(E.TikHubClient):
+        def search(self, *a, **k):
+            raise RuntimeError("HTTP 401 key expired")
+
+    rep4 = E.run_once(cfg, Dead(budget=E.Budget(limit_usd=5.0), mock=True), JevClient(mock=True), triage, fq, {"seen": {}, "monthly": {}})
+    assert rep4.searched == 0 and rep4.search_attempts > 0 and "搜索请求全部失败" in rep4.systemic_failure and "系统性故障" in E.render_report(rep4, cfg)
+
+    class DeadJev:
+        def call(self, body):
+            from judge.jev_client import JevError
+            raise JevError("Jev 503")
+
+    st5 = {"seen": {}, "monthly": {}}
+    rep5 = E.run_once(cfg, E.TikHubClient(budget=E.Budget(limit_usd=5.0), mock=True), DeadJev(), triage, fq, st5)
+    assert rep5.processed > 0 and rep5.note_errors == rep5.processed and "全部失败" in rep5.systemic_failure and st5["seen"] == {}

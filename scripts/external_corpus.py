@@ -103,6 +103,10 @@ def main():
     if rep.stopped_reason:
         # 只告警不改退出码：job 一红，actions/cache 就不保存 state、写库步也被跳过，这周花钱看过的下周会重看。
         print(f"::warning::运行提前停止：{rep.stopped_reason}（产物与 state 已写出）", file=sys.stderr)
+    if rep.systemic_failure:
+        # 全部失败时 state 本来就没变化、也没有东西可写库，让 job 红是唯一能被人看见的信号
+        print(f"::error::{rep.systemic_failure}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

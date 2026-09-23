@@ -15,7 +15,7 @@
 | `migrations/` | `notes_v1_17_judge_subjects.sql`（账本加 comment / ssll_sample / external_note，prob 口径统一）· `notes_v1_18_external_notes.sql`（外部笔记表 + 参考分布视图 `v_external_reference`） |
 | `fixtures/` | gate1 的 50 篇笔记 + Opus 答案 + D-081 Jev 表；33 条运营评论；评论用例 |
 | `docs/` | 实跑报告（特征层 50 篇、评论 33 条、评论金标准）与拍板记录 |
-| `tests/` | 29 个测试，全 mock（评论回路用按关键词给答案的假 Jev），不联网 |
+| `tests/` | 30 个测试，全 mock（评论回路用按关键词给答案的假 Jev），不联网 |
 
 ## 跑起来
 

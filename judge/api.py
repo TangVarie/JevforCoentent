@@ -243,7 +243,7 @@ def _split_banks(names: list) -> tuple:
     认不出层的名字放进 ignored（响应里回显），不静默吞掉。"""
     fq = platform = human = project = None
     loaded, ignored = {}, []
-    for n in names:
+    for n in dict.fromkeys(names):          # 去重保序：同名传两次不会先覆盖再弹出，让后面的账本查找 KeyError
         b = get_bank(n); loaded[n] = b
         if b.fmt == "tv" and fq is None:
             fq = b
@@ -285,6 +285,12 @@ def _project_from_request(req: "DraftRequest", loaded: dict) -> tuple:
     problems = check_bank(bank)
     if problems:
         raise HTTPException(422, f"项目题库有问题：{problems}")
+    if not bank.questions:
+        raise HTTPException(422, "项目题库 / brief 一道题都没编出来（intents / hard_rules / angle 至少给一样），不能拿它当「判过了」")
+    used = {qid: n for n, b in loaded.items() for qid in b.ids()}
+    clash = [f"{q}（已在 {used[q]}）" for q in bank.ids() if q in used]
+    if clash:
+        raise HTTPException(422, f"项目题库的题号与已加载的层撞车：{clash}；profile 按题号合并，撞车会把两层的答案混在一起")
     return bank, hard
 
 
@@ -292,17 +298,29 @@ def _project_from_request(req: "DraftRequest", loaded: dict) -> tuple:
 def judge_draft(req: DraftRequest):
     if req.judge_paras not in ("always", "on_fail", "never"):
         raise HTTPException(422, "judge_paras 只能是 always / on_fail / never")
+    if not req.subject_id.strip():
+        raise HTTPException(422, "subject_id 不能为空")
+    if req.write and req.subject_id.strip() == "draft":
+        raise HTTPException(422, "write=true 时 subject_id 必须是这篇稿子自己的 id（写作台传 versions.id）：账本主键含 subject_id，都叫 draft 会互相覆盖")
     loaded, fq, platform, human, project, ignored = _split_banks(req.banks)
-    hard = dict(DEFAULT_HARD_RULES)
     inline, brief_hard = _project_from_request(req, loaded)
     if inline is not None:
-        project = inline; loaded[project.name] = project; hard.update(brief_hard)
+        project = inline; loaded[project.name] = project
     if fq is None and platform is None and human is None and project is None:
         raise HTTPException(422, f"一份题库都没有（banks={req.banks}，认不出层的：{ignored}）")
+    if project is not None and set(project.ids()) <= {"intent_of_para"} and human is None:
+        raise HTTPException(422, "项目题库只有意图题（intent_of_para），它只在判段时问；没有人感题库这次一题都不会判")
+    # 默认硬约束只对这次真的加载了的层生效；调用方给的必须指到会判的题，指错就 422，不能静默放过
+    hard = {k: v for k, v in DEFAULT_HARD_RULES.items() if k[0] in loaded}
+    hard.update(brief_hard)
     for k, v in (req.hard_rules or {}).items():
         if ":" not in k:
             raise HTTPException(422, f"hard_rules 的键要写成 题库名:题号，收到 {k!r}")
         bname, qid = k.split(":", 1)
+        if bname not in loaded:
+            raise HTTPException(422, f"hard_rules[{k!r}]：题库 {bname!r} 不在这次要判的层里（有：{sorted(loaded)}）")
+        if qid not in loaded[bname].ids():
+            raise HTTPException(422, f"hard_rules[{k!r}]：题库 {bname} 没有题 {qid!r}（有：{loaded[bname].ids()}）")
         hard[(bname, qid)] = _norm_want(k, v)
     if req.write:
         _write_config_or_503()

@@ -227,6 +227,10 @@ class RunReport:
     per_category: dict = field(default_factory=dict)
     stopped_reason: str = ""
     errors: list = field(default_factory=list)      # [(哪一步, 错误)]：单条失败不中止整次运行
+    search_attempts: int = 0       # 发出的搜索请求数（含失败的）；searched 只数成功的
+    processed: int = 0             # 走进分诊 / 取全文 / 打标的笔记数（含失败的）
+    note_errors: int = 0
+    systemic_failure: str = ""     # 全部搜索或全部笔记都失败：供应商 / Jev 挂了或密钥失效，脚本要让 job 红
     kept_notes: list = field(default_factory=list)
     rows: list = field(default_factory=list)
 
@@ -318,6 +322,7 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                         if page > 1 and not provider.has_session(kw, sort_type):
                             # 没有首页给的翻页会话就不花钱翻页：TikHub 会把它当新搜索返回首页等价结果
                             err(f"search {kw}/{sort_type}/p{page}", RuntimeError("首页没有返回 search_id / search_session_id，跳过翻页"), stats); break
+                        rep.search_attempts += 1
                         try:
                             notes, _ = provider.search(kw, page, sort_type, cfg.get("note_type"))
                         except BudgetExceeded:
@@ -338,12 +343,13 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                                 continue
                             if cap_reached():
                                 done = True; continue                               # 到上限：本页剩下的只数不看，也不进 seen
+                            rep.processed += 1
                             try:
                                 outcome = _process_note(n, name, cfg, provider, jev, triage_bank, fq_bank, rep, stats, keep_voices, min_chars)
                             except BudgetExceeded:
                                 raise
                             except Exception as exc:  # noqa: BLE001 — 这条不进 seen，下次再看
-                                err(n["note_id"], exc, stats); continue
+                                rep.note_errors += 1; err(n["note_id"], exc, stats); continue
                             seen[n["note_id"]] = {"cat": name, "kw": kw, "at": rep.started, "kept": outcome == "kept", "why": outcome}
                             if outcome == "kept":
                                 kept_this_run += 1; monthly[name] = monthly.get(name, 0) + 1
@@ -362,6 +368,11 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
     except Exception as exc:  # noqa: BLE001 — 意外异常也要把已花钱拿到的产物和 state 写出去
         rep.stopped_reason = f"异常中止：{type(exc).__name__}: {exc}"
     rep.calls = provider.budget.calls; rep.spent_usd = provider.budget.spent
+    # 单条失败继续跑是为了不丢一整周；但「全部失败」是系统性故障（密钥失效 / 供应商或 Jev 挂了），不能悄悄绿着
+    if rep.search_attempts and rep.searched == 0:
+        rep.systemic_failure = f"{rep.search_attempts} 次搜索请求全部失败：TikHub 不可用或 TIKHUB_API_KEY 失效"
+    elif rep.processed and rep.note_errors == rep.processed:
+        rep.systemic_failure = f"{rep.processed} 条笔记的分诊 / 取全文 / 打标全部失败：Jev 或 TikHub 详情接口不可用"
     return rep
 
 
@@ -397,7 +408,8 @@ def rows_to_sql_external(rows: list, batch: int = 100) -> str:
 def render_report(rep: RunReport, cfg: dict) -> str:
     L = [f"# 外部语料运行报告 · {rep.started}", "",
          f"供应商 {cfg.get('provider')} · 调用 {rep.calls} 次 · 花费 {rep.spent_usd:.2f} 美元（上限 {cfg.get('budget_usd_per_run')}）"
-         + (f" · **提前停止：{rep.stopped_reason}**" if rep.stopped_reason else ""), "",
+         + (f" · **提前停止：{rep.stopped_reason}**" if rep.stopped_reason else "")
+         + (f" · **系统性故障：{rep.systemic_failure}**" if rep.systemic_failure else ""), "",
          f"搜索页 {rep.searched} · 候选 {rep.candidates} · 重复 {rep.duplicates} · 分诊通过 {rep.triaged_kept} · 取全文 {rep.fetched} · 太短丢弃 {rep.dropped_short} · 打标 {rep.judged} · 账本行 {len(rep.rows)} · 出错 {len(rep.errors)}", "",
          "| 品类 | 搜索页 | 候选 | 分诊通过 | 取全文 | 太短 | 打标 | 出错 | 备注 |", "|---|---|---|---|---|---|---|---|---|"]
     for name, s in rep.per_category.items():

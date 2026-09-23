@@ -101,6 +101,7 @@ class DraftJudgement:
     profile: dict = field(default_factory=dict)        # qid → answer（篇级，所有题库合并）
     detail: dict = field(default_factory=dict)         # bank → items
     results: dict = field(default_factory=dict)        # bank → 篇级 JudgeResult（落账本用；段级不落账本）
+    wants: dict = field(default_factory=dict)          # {(bank, qid): 期望答案}，就是判这篇时用的 hard_rules；修改单按它说「要改成什么」
     hard_fails: list = field(default_factory=list)     # [(bank, qid, answer, p, evidence)]
     ambiguous: list = field(default_factory=list)      # [(bank, qid)]
     para_items: list = field(default_factory=list)     # 段级：[{idx, text, items}]
@@ -140,6 +141,7 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
     title, body = draft.get("title") or "", draft.get("body") or ""
     raw = (f"标题：{title}\n正文：{body}") if title else body
     hard_rules = hard_rules or {}
+    dj.wants = dict(hard_rules)
 
     def _acc(r):
         dj.usage = {k: dj.usage.get(k, 0) + v for k, v in (r.usage or {}).items()} if r.usage else dj.usage
@@ -217,10 +219,18 @@ def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None
     validated = validated or set()
     for bname, qid, ans, p, ev in dj.hard_fails:
         q = banks[bname].by_id().get(qid)
-        want = "否" if ans == "是" else "是"
+        # 「要改成什么」用判这篇时配置的期望答案（choice 题可以是任一选项）；没记录时才按是非翻转
+        want = dj.wants.get((bname, qid)) or ("否" if ans == "是" else "是")
+        if q is None:
+            definition = ""
+        elif q.jtype == "noul":
+            definition = q.criteria.get("true" if want == "是" else "false", "")
+        else:
+            definition = q.criteria.get(want, "")
         plan.append({"kind": "hard", "bank": bname, "qid": qid, "now": ans, "want": want, "p": p, "evidence": ev,
-                     "definition": (q.criteria.get("true") if ans == "是" else q.criteria.get("false")) if q and q.jtype == "noul" else (q.criteria.get(ans, "") if q else ""),
-                     "instruction": f"「{q.ask if q else qid}」现在判「{ans}」（{p}），要改成「{want}」。" + (f"依据句：{ev}" if ev else "")})
+                     "definition": definition,
+                     "instruction": f"「{q.ask if q else qid}」现在判「{ans}」（{p}），要改成「{want}」" + (f"：{definition}" if definition else "")
+                                    + (f"。依据句：{ev}" if ev else "")})
     for qid, want in (target or {}).items():
         now = dj.profile.get(qid)
         if now is None or now == want:
