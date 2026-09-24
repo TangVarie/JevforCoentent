@@ -1,10 +1,14 @@
 -- ════════════════════════════════════════════════════════════════════
--- truth_vault v1.18 · 外部笔记表（docs/31 §3 位置 ⑧）
+-- truth_vault v1.18 · 外部笔记表（judge 仓 docs/31 §3 位置 ⑧；TV D-085）
 -- ════════════════════════════════════════════════════════════════════
 -- 存外部公开笔记的正文与互动数；判定答案在 note_feature_answers(subject_type='external_note', subject_id=note_id)。
 -- 互动数只在这张表里，参考分布按它分组；任何进 Jev 的 state 都不带它（Mode A）。
 -- 不进 v_l2_labels、不进书架、不进 reference_samples 的自动通道；要给三省六部用时带 source='tikhub' 另走一条。
 -- 幂等：IF NOT EXISTS。RLS 与 TV 其余表同（ENABLE，service_role 写）。
+--
+-- 部署: 在 notes_v1_17 之后（视图读 v1_13 建的 note_feature_answers；external_note 的账本行要先有
+--   v1_17 放宽的 subject_type CHECK 才写得进）。TV 部署链: … → v1_13 → v1_17 → v1_18。
+-- 这份文件由 judge 仓提供，TV 只在头注释加了出处与部署顺序，SQL 一字未改。
 -- ════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS truth_vault.external_notes (
