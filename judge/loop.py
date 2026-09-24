@@ -10,7 +10,9 @@
 
 生成端是可插拔的：任何「prompt → 文本」的可调用对象都行（Anthropic 兼容端点 / OpenAI 兼容端点 / 本地函数）。
 本模块不写字；所有文字改动都由生成端做，Jev 只判。
-修改指令里 fq 题的正向写法（aw_instruction）只对过了闸二的题下发（docs/28 §7）；闸二之前，指令只来自平台层和项目层的硬约束和人感题库。
+修改指令里 fq 题的正向写法（aw_instruction）只对过了闸二的题下发（docs/28 §7）；闸二之前，指令只来自平台层和项目层的硬约束和人感题库：
+没过闸二的 fq 目标题一条都不进修改单（只进 recorded，落轨迹），fq 硬伤只给依据句、不给题干和定义。
+暗题（judge/hidden.py）照判照算，但修改单和给写手看的输出里只说「有一项不公开的检查没过」。
 """
 from __future__ import annotations
 
@@ -23,8 +25,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .banks import Bank, Question
-from .core import apply_evidence, build_evidence_call, judge_note, judge_state
+from .core import add_usage, apply_evidence, build_evidence_call, enforce_evidence, judge_note, judge_state
 from .jev_client import JevClient
+from . import spans as sp
 
 Generator = Callable[..., list]  # (prompt: str, n: int = 1) -> list[str]
 
@@ -60,13 +63,41 @@ def compile_project_bank(brief: dict, name: str = "project", model: str = "jev-1
 # ── 生成端适配 ───────────────────────────────────────────────────────
 
 class AnthropicCompatGenerator:
-    """Anthropic Messages 兼容端点（三省六部走的中转站 / Kimi / DeepSeek 都这么接）。"""
+    """Anthropic Messages 兼容端点（三省六部走的中转站 / Kimi / DeepSeek 都这么接）。
+    base_url 末尾带不带 /v1 都行（同三省六部 agents/__init__.py 的剥法）；密钥按 ANTHROPIC_API_KEY → MOONSHOT_API_KEY 找；
+    429 / 5xx / 529 与连不上按退避重试。"""
+
+    RETRY_STATUSES = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}
 
     def __init__(self, model: str, base_url: Optional[str] = None, api_key: Optional[str] = None,
-                 max_tokens: int = 2000, temperature: float = 1.0, system: str = ""):
+                 max_tokens: int = 2000, temperature: float = 1.0, system: str = "", retries: int = 3, timeout: float = 180.0):
         self.model, self.max_tokens, self.temperature, self.system = model, max_tokens, temperature, system
-        self.base_url = (base_url or os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")).rstrip("/")
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        base = (base_url or os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")).rstrip("/")
+        self.base_url = base[:-3] if base.endswith("/v1") else base
+        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "") or os.environ.get("MOONSHOT_API_KEY", "")
+        self.retries, self.timeout = retries, timeout
+
+    def _post(self, body: dict) -> dict:
+        import time
+        import urllib.error
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        last: Exception = RuntimeError("未知错误")
+        for attempt in range(self.retries + 1):
+            req = urllib.request.Request(self.base_url + "/v1/messages", data=data, headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    return json.loads(r.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                last = exc
+                if exc.code not in self.RETRY_STATUSES or attempt >= self.retries:
+                    raise
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+                last = exc
+                if attempt >= self.retries:
+                    raise
+            time.sleep(min(0.5 * (2 ** attempt), 8.0))
+        raise last
 
     def __call__(self, prompt: str, n: int = 1) -> list:
         out = []
@@ -75,22 +106,25 @@ class AnthropicCompatGenerator:
                     "messages": [{"role": "user", "content": prompt}]}
             if self.system:
                 body["system"] = self.system
-            req = urllib.request.Request(self.base_url + "/v1/messages", data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-                                         headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01",
-                                                  "content-type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=180) as r:
-                data = json.loads(r.read().decode("utf-8"))
+            data = self._post(body)
             out.append("".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"))
         return out
 
 
 class EchoGenerator:
-    """测试用：候选 = prompt 里 ⟪…⟫ 括起来的文本；修补 = 按指令里的「删句」直接删。"""
+    """测试用：候选 = prompt 里 ⟪…⟫ 括起来的文本；修补 = 把修改单里「依据句：…」指到的句子从正文里删掉，其余原样返回。"""
 
     def __call__(self, prompt: str, n: int = 1) -> list:
         m = re.findall(r"⟪(.*?)⟫", prompt, flags=re.S)
         if m:
             return (m * n)[:n] if len(m) < n else m[:n]
+        if "\n修改单：" in prompt:
+            head, plan = prompt.split("\n修改单：", 1)
+            dm = re.search(r"\n标题：(.*?)\n正文：\n(.*)$", head, flags=re.S)
+            title, body = (dm.group(1), dm.group(2).rstrip("\n")) if dm else ("", head)
+            for ev in re.findall(r"依据句：(.+?)(?:\n|$)", plan):
+                body = body.replace(ev.strip(), "")
+            return [f"标题：{title}\n{body.strip()}"] * n
         return [prompt] * n
 
 
@@ -108,9 +142,11 @@ class DraftJudgement:
     para_stats: dict = field(default_factory=dict)     # 段级分布：语域 / 功能 / 摩擦 / 总结收尾
     usage: dict = field(default_factory=dict)
     calls: int = 0
+    unjudged: list = field(default_factory=list)       # [(bank, qid, invalid_reason)]：有硬约束的题没判出有效答案（漏答 / 选项外），不能算过
+    invalid_reason: Optional[str] = None               # 整篇没法判（正文太短）：text_too_short
 
     def passed(self) -> bool:
-        return not self.hard_fails
+        return not self.hard_fails and not self.unjudged and self.invalid_reason is None
 
 
 def _para_split(body: str) -> list:
@@ -142,9 +178,13 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
     raw = (f"标题：{title}\n正文：{body}") if title else body
     hard_rules = hard_rules or {}
     dj.wants = dict(hard_rules)
+    if sp.visible_len(body) < sp.MIN_BODY_CHARS:
+        # 正文太短：fq 会按 text_too_short 全跳，平台 / 项目题库判出来的「过」也没有意义 —— 整篇记无效，不算过，一次调用都不发
+        dj.invalid_reason = "text_too_short"
+        return dj
 
     def _acc(r):
-        dj.usage = {k: dj.usage.get(k, 0) + v for k, v in (r.usage or {}).items()} if r.usage else dj.usage
+        dj.usage = add_usage(dj.usage, r.usage)
         dj.calls += r.calls
 
     if fq is not None:
@@ -162,8 +202,15 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
         ev = build_evidence_call(bank, pseudo_spans, r.items)
         if ev:
             ev_body, sent_map = ev; ev_body["model"] = bank.model
-            apply_evidence(r.items, client.call(ev_body), sent_map); r.calls += 1
+            ev_resp = client.call(ev_body)
+            apply_evidence(r.items, ev_resp, sent_map); r.calls += 1
+            r.usage = add_usage(r.usage, ev_resp.get("usage"))        # 证据调用的用量也算进去，成本估算不再偏低
+        enforce_evidence(bank, r.items)
         dj.detail[bank.name] = r.items; dj.results[bank.name] = r; _acc(r)
+    for (bname, qid), want in hard_rules.items():
+        it = dj.detail.get(bname, {}).get(qid)
+        if it is not None and it.get("answer") is None and it.get("invalid_reason") not in ("no_title", "text_too_short"):
+            dj.unjudged.append((bname, qid, it.get("invalid_reason")))
     for bname, items in dj.detail.items():
         for qid, it in items.items():
             if it.get("answer") is None:
@@ -211,16 +258,37 @@ def para_stats(para_items: list) -> dict:
             "first_product_para": first_product}
 
 
+HIDDEN_INSTRUCTION = "有一项不公开的检查没过"
+PARA_FIELDS_BY_QID = {"para_register": ("register",), "para_function": ("function", "no_product_share", "first_product_para"),
+                      "para_friction": ("has_friction",), "para_summary_close": ("summary_close_paras",),
+                      "para_adjective_pile": ("adjective_pile_paras",)}
+
+
+def _is_fq(bank: Optional[Bank]) -> bool:
+    return bank is not None and bank.fmt == "tv"          # 按格式认 fq，不按写死的名字（换名加载也守得住闸二）
+
+
 def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None,
-                target: Optional[dict] = None) -> list:
+                target: Optional[dict] = None, hidden: Optional[set] = None, recorded: Optional[list] = None) -> list:
     """修改指令 = 题号 + 概率 + 证据句 + 定义。不写改法，只说哪一句、犯了哪条、这条的定义是什么。
-    validated：过了闸二的 fq 题 id，只有它们的 aw_instruction 会下发；target：篇级目标画像 {qid: 期望答案}。"""
+    validated：过了闸二的 fq 题 id。没过闸二的 fq 题：目标画像不进修改单（只追加进 recorded，给轨迹 / 响应记录），
+    硬伤只给依据句、不给题干和定义（通用层的题不原样塞进生成端的 prompt，docs/31 §2.2）。
+    hidden：暗题 id（judge/hidden.py）；它们的条目只说「有一项不公开的检查没过」+ 段号 / 依据句。"""
     plan = []
     validated = validated or set()
+    hidden = hidden or set()
     for bname, qid, ans, p, ev in dj.hard_fails:
-        q = banks[bname].by_id().get(qid)
-        # 「要改成什么」用判这篇时配置的期望答案（choice 题可以是任一选项）；没记录时才按是非翻转
+        bank = banks.get(bname)
+        q = bank.by_id().get(qid) if bank else None
         want = dj.wants.get((bname, qid)) or ("否" if ans == "是" else "是")
+        if qid in hidden:
+            plan.append({"kind": "hard", "bank": bname, "qid": "hidden", "now": None, "want": None, "p": p, "evidence": ev,
+                         "definition": "", "instruction": HIDDEN_INSTRUCTION + (f"。依据句：{ev}" if ev else "")})
+            continue
+        if _is_fq(bank) and qid not in validated:
+            plan.append({"kind": "hard", "bank": bname, "qid": qid, "now": ans, "want": want, "p": p, "evidence": ev,
+                         "definition": "", "instruction": f"有一条合规硬约束没过（{p}）" + (f"。依据句：{ev}" if ev else "")})
+            continue
         if q is None:
             definition = ""
         elif q.jtype == "noul":
@@ -233,28 +301,57 @@ def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None
                                     + (f"。依据句：{ev}" if ev else "")})
     for qid, want in (target or {}).items():
         now = dj.profile.get(qid)
-        if now is None or now == want:
+        if now is None or now == want or qid in hidden:
             continue
         bname = next((b for b, items in dj.detail.items() if qid in items), None)
-        q = banks[bname].by_id().get(qid) if bname else None
-        if bname and q:
-            plan.append({"kind": "target", "bank": bname, "qid": qid, "now": now, "want": want,
-                         "p": dj.detail[bname][qid].get("p"), "evidence": dj.detail[bname][qid].get("evidence"),
-                         "definition": q.criteria.get(want, ""),
-                         "instruction": (f"「{q.ask}」现在是「{now}」，目标是「{want}」：{q.criteria.get(want, '')}") if qid in validated or bname != "feature_questions_v0_1"
-                         else f"「{q.ask}」现在是「{now}」（目标「{want}」，此题未过闸二，只记录不下发）"})
+        bank = banks.get(bname) if bname else None
+        q = bank.by_id().get(qid) if bank else None
+        if not (bname and q):
+            continue
+        entry = {"kind": "target", "bank": bname, "qid": qid, "now": now, "want": want,
+                 "p": dj.detail[bname][qid].get("p"), "evidence": dj.detail[bname][qid].get("evidence")}
+        if _is_fq(bank) and qid not in validated:
+            if recorded is not None:
+                recorded.append(dict(entry, why="未过闸二：只记录，不进修改单、不下发生成端"))
+            continue
+        plan.append(dict(entry, definition=q.criteria.get(want, ""),
+                         instruction=f"「{q.ask}」现在是「{now}」，目标是「{want}」：{q.criteria.get(want, '')}"))
     for p in dj.para_items:
         it = p["items"]
-        if it.get("para_register", {}).get("answer") == "文案腔":
-            plan.append({"kind": "para", "para": p["idx"], "qid": "para_register", "now": "文案腔", "want": "随手口语/认真分享",
-                         "instruction": f"第 {p['idx']} 段读起来像文案（{it['para_register'].get('p')}）：{p['text'][:60]}…"})
-        if it.get("para_summary_close", {}).get("answer") == "是":
-            plan.append({"kind": "para", "para": p["idx"], "qid": "para_summary_close", "now": "是", "want": "否",
-                         "instruction": f"第 {p['idx']} 段以总结或升华收尾，去掉最后那句归纳。"})
-        if it.get("para_adjective_pile", {}).get("answer") == "是":
-            plan.append({"kind": "para", "para": p["idx"], "qid": "para_adjective_pile", "now": "是", "want": "否",
-                         "instruction": f"第 {p['idx']} 段有评价词堆叠，留一个、带上具体所指。"})
+        checks = (("para_register", it.get("para_register", {}).get("answer") == "文案腔", "文案腔", "随手口语/认真分享",
+                   f"第 {p['idx']} 段读起来像文案（{it.get('para_register', {}).get('p')}）：{p['text'][:60]}…"),
+                  ("para_summary_close", it.get("para_summary_close", {}).get("answer") == "是", "是", "否",
+                   f"第 {p['idx']} 段以总结或升华收尾，去掉最后那句归纳。"),
+                  ("para_adjective_pile", it.get("para_adjective_pile", {}).get("answer") == "是", "是", "否",
+                   f"第 {p['idx']} 段有评价词堆叠，留一个、带上具体所指。"))
+        for qid, hit, now, want, instr in checks:
+            if not hit:
+                continue
+            if qid in hidden:
+                plan.append({"kind": "para", "para": p["idx"], "qid": "hidden", "now": None, "want": None,
+                             "instruction": f"第 {p['idx']} 段{HIDDEN_INSTRUCTION}：{p['text'][:60]}…"})
+            else:
+                plan.append({"kind": "para", "para": p["idx"], "qid": qid, "now": now, "want": want, "instruction": instr})
     return plan
+
+
+def redact(dj: DraftJudgement, hidden: set) -> dict:
+    """给写手 / 生成端看的判定视图：去掉暗题的题号、答案与由它算出来的段级分布字段。账本行不经过这里。"""
+    def strip(items: dict) -> dict:
+        return {q: v for q, v in items.items() if q not in hidden}
+    stats = dict(dj.para_stats)
+    for qid, fields_ in PARA_FIELDS_BY_QID.items():
+        if qid in hidden:
+            for f in fields_:
+                stats.pop(f, None)
+    return {"passed": dj.passed(), "invalid_reason": dj.invalid_reason,
+            "profile": {q: a for q, a in dj.profile.items() if q not in hidden},
+            "hard_fails": [(b, "hidden" if q in hidden else q, None if q in hidden else a, pp, ev) for b, q, a, pp, ev in dj.hard_fails],
+            "unjudged": [(b, "hidden" if q in hidden else q, r) for b, q, r in dj.unjudged],
+            "ambiguous": [(b, q) for b, q in dj.ambiguous if q not in hidden],
+            "para_stats": stats,
+            "detail": {b: strip(items) for b, items in dj.detail.items()},
+            "paras": [{"idx": p["idx"], "items": strip(p["items"])} for p in dj.para_items]}
 
 
 def repair_prompt(draft: dict, plan: list) -> str:
@@ -303,17 +400,20 @@ def best_of_k(client: JevClient, generator: Generator, prompt: str, k: int, *, j
 def produce(client: JevClient, generator: Generator, prompt: str, *, k: int = 3, max_repairs: int = 2,
             fq: Optional[Bank] = None, platform: Optional[Bank] = None, project: Optional[Bank] = None,
             human: Optional[Bank] = None, hard_rules: Optional[dict] = None, target: Optional[dict] = None,
-            validated: Optional[set] = None) -> dict:
+            validated: Optional[set] = None, hidden: Optional[set] = None) -> dict:
+    from .hidden import all_hidden
     banks = {b.name: b for b in (fq, platform, project, human) if b is not None}
+    hidden = all_hidden(banks) if hidden is None else hidden
     kw = dict(fq=fq, platform=platform, project=project, human=human, hard_rules=hard_rules, judge_paras="on_fail")
     (draft, dj), ranking = best_of_k(client, generator, prompt, k, judge_kwargs=kw, target=target)
     trail = [{"step": "best_of_k", "ranking": [s for _, s in ranking], "hard_fails": len(dj.hard_fails)}]
     rounds = 0
     while dj.hard_fails and rounds < max_repairs:
-        plan = repair_plan(dj, banks, validated=validated, target=target)
+        recorded: list = []
+        plan = repair_plan(dj, banks, validated=validated, target=target, hidden=hidden, recorded=recorded)
         draft = repair(generator, draft, plan)
         dj = judge_draft(client, draft, **kw)
         rounds += 1
-        trail.append({"step": f"repair_{rounds}", "plan": plan, "hard_fails": len(dj.hard_fails)})
+        trail.append({"step": f"repair_{rounds}", "plan": plan, "recorded": recorded, "hard_fails": len(dj.hard_fails)})
     return {"draft": draft, "passed": dj.passed(), "profile": dj.profile, "para_stats": dj.para_stats,
             "hard_fails": dj.hard_fails, "ambiguous": dj.ambiguous, "trail": trail, "calls": dj.calls, "usage": dj.usage}

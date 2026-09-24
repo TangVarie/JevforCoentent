@@ -1,0 +1,12 @@
+# 数据出境（docs/00 #7）：公开笔记直接跑；未发布稿默认只跑通用层 + 平台层；处方药项目的未发布稿不跑，直到合同确认。
+# 「未发布」按 subject_type 定：aw_version（写作台稿）、ssll_sample（三省六部采样稿）；note / external_note / comment 是公开内容。
+# 未发布稿的请求必须带 project（项目代号）；可再带 category（TV 统一词表：处方药/OTC药/保健品/医疗器械/…）。
+# 通用层 = fq（feature_questions_*）+ 人感（human_feel_*）+ 评论（comment_*）+ 三省六部二审（ssll_critic_*）+ 外部分诊（external_triage_*）；
+# 平台层 = platform_*；其余（brief 现编或内联的项目题库）是项目层。
+rx_categories: [处方药]
+# 处方药项目代号（TV mappings/*.yaml 里 category: 处方药 的项目；写作台 / 三省六部用的代号不同时一并写上）
+rx_projects: [OKMAN, OKMAN_phase1]
+# 处方药项目里合同已确认可以出境的（加进来之前，这些项目的未发布稿一律 403）
+rx_cleared: []
+# 允许未发布稿跑项目层（brief / 项目题库）的项目；不在这里的，项目层整层去掉并在响应的 policy.dropped_banks 里回显
+project_layer_cleared: []

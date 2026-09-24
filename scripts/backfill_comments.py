@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """评论回填：给 truth_vault.comments 跑两套题库，出账本 SQL 和每篇的「评论构成」。
 
-  · 运营侧 banks/comment_ops_v0.1.yaml → comment_intent / is_scripted（表里现有六值闭集）
+  · 运营侧 banks/comment_ops_v0.2.yaml → comment_intent / is_scripted（表里现有六值闭集；state 不带蓝词清单，见题库头注释）
   · 读者侧 banks/comment_reader_v0.3.yaml → 言语行为 / 点名品牌 / 接住帖子 / 细节 / 语域 / 读者用处 / 像不像安排的
 
   python3 scripts/backfill_comments.py --from-db --limit 500 --sql comments.sql --summary summary.csv [--bank both|ops|reader]
@@ -10,6 +10,8 @@
 
 账本：subject_type = 'comment'（要先跑 migrations/notes_v1_17_judge_subjects.sql），subject_id = comments.comment_id。
 两套题库分别落两批行（question_id 不同，不冲突）。run_tag 默认 primary；先影子跑就传 --run-tag shadow-*。
+答案只落账本，不回写 comments 表的 comment_intent / comment_type / is_scripted 三列（docs/31 §3 ② 的决定：
+业务表归 TV 的同步脚本管，judge 不改 TV 业务表；要按列看就从账本 join）。
 只读 comments / notes；写库用 --write（需要 SUPABASE_SERVICE_ROLE_KEY），否则只出 SQL。
 """
 from __future__ import annotations
@@ -32,7 +34,7 @@ from judge.jev_client import JevClient, JevError  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 READER = ROOT / "banks" / "comment_reader_v0.3.yaml"
-OPS = ROOT / "banks" / "comment_ops_v0.1.yaml"
+OPS = ROOT / "banks" / "comment_ops_v0.2.yaml"
 
 
 def _pg(url, key, path):
@@ -54,12 +56,12 @@ def fetch(limit: int, project: str | None):
     notes = {}
     for i in range(0, len(ids), 150):
         chunk = ",".join(urllib.parse.quote(x) for x in ids[i:i + 150])
-        for n in _pg(url, key, f"notes?select=note_id,title,raw_content,target_blue_keywords&note_id=in.({chunk})"):
+        for n in _pg(url, key, f"notes?select=note_id,title,raw_content&note_id=in.({chunk})"):
             notes[n["note_id"]] = n
     for c in comments:
         n = notes.get(c["note_id"], {})
         c["comment_text"] = c.pop("content", None) or ""
-        c["title"] = n.get("title"); c["raw_content"] = n.get("raw_content") or ""; c["blue"] = n.get("target_blue_keywords") or []
+        c["title"] = n.get("title"); c["raw_content"] = n.get("raw_content") or ""
     return comments
 
 
@@ -90,8 +92,7 @@ def state_ops(c: dict) -> dict:
     st = {"说明": "以下是一篇小红书帖子和运营在它下面写的一条评论。判断这条评论在帖子下面想起什么作用。",
           "帖子标题": c.get("title") or "（没有单独的标题）", "帖子正文": head_of(c.get("raw_content"), 300),
           "评论角色": c.get("comment_role") or "未知", "评论原文": c.get("comment_text") or ""}
-    if c.get("blue"):
-        st["蓝词清单"] = "、".join(map(str, c["blue"]))
+    # 不给蓝词清单（co-v0.2）：那是项目 / 品牌层信息（D-079、Mode A）；评论里有没有目标蓝词由 TV 的 contains_blue_keyword 代码列管
     return st
 
 
@@ -105,7 +106,7 @@ def main():
     comments = fetch(args.limit, args.project) if args.from_db else load_input(args.input)
     banks = []
     if args.bank in ("both", "ops"):
-        banks.append((load_bank(OPS, name="comment_ops_v0.1"), state_ops))
+        banks.append((load_bank(OPS, name="comment_ops_v0.2"), state_ops))
     if args.bank in ("both", "reader"):
         banks.append((load_bank(READER, name="comment_reader_v0.3"), state_reader))
     try:

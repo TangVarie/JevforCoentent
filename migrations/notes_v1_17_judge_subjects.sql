@@ -4,10 +4,12 @@
 -- note_feature_answers.subject_type 现在只允许 'note' / 'aw_version'（notes_v1_13:20）。
 -- 加三类：
 --   comment        → truth_vault.comments.comment_id（评论题库：读者侧 7 题 + 运营侧 comment_intent）
---   ssll_sample    → 三省六部批量采样的一篇（sample_one_cell 落库后才有 id；id 形如 <run_id>:<cell>:<seed>）
---   external_note  → 外部语料（SocialDataX 抓的公开笔记，id 用平台 note_id）；不进 v_l2_labels，只做参考分布与闸二外部复核
+--   ssll_sample    → 三省六部批量采样的一篇（sample_one_cell 保留正文后才有 id；id 形如 <run_id>:<cell>:<代际>:<seed>，
+--                    代际区分全局 / cell 级修订后按同一 seed 重采的那一批，否则新旧两批正文会写到同一个 subject_id 上）
+--   external_note  → 外部语料（TikHub 抓的公开小红书笔记，id 用平台 note_id）；不进 v_l2_labels，只做参考分布与闸二外部复核
 -- 幂等：CHECK 约束先删后建；不改主键、不改列。跑两遍结果一样。
--- 这份文件由 judge 仓提供，在 TV 的 schemas/ 里落一份同名文件后按 TV 的部署顺序执行（v1_16 之后）。
+-- 这份文件由 judge 仓提供，在 TV 的 schemas/ 里落一份同名文件后按 TV 的部署顺序执行：在 notes_v1_13（建 note_feature_answers
+-- 的那份，TV 部署链里排在 v1_16 之后、是当前最后一环）之后；照字面放在 v1_16 后面会 relation does not exist。
 -- ════════════════════════════════════════════════════════════════════
 
 ALTER TABLE truth_vault.note_feature_answers

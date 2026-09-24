@@ -18,7 +18,7 @@ from judge.jev_client import JevClient, mock_response  # noqa: E402
 
 FQ = ROOT / "banks" / "vendor" / "feature_questions_v0_1.yaml"
 READER = ROOT / "banks" / "comment_reader_v0.3.yaml"
-OPS = ROOT / "banks" / "comment_ops_v0.1.yaml"
+OPS = ROOT / "banks" / "comment_ops_v0.2.yaml"
 THREAD = ROOT / "banks" / "comment_thread_v0.2.yaml"
 
 
@@ -76,8 +76,15 @@ def test_tv_bank_questions_carry_scope_and_evidence():
 
 
 def test_ops_bank_labels_match_tv_check_constraint():
-    labels = list(B.load_bank(OPS).by_id()["comment_intent"].criteria)
-    assert labels == ["补充信息", "反驳质疑", "蓝词植入", "共鸣扩散", "引导私信", "其他"]
+    for path in (OPS, ROOT / "banks" / "comment_ops_v0.1.yaml"):
+        labels = list(B.load_bank(path).by_id()["comment_intent"].criteria)
+        assert labels == ["补充信息", "反驳质疑", "蓝词植入", "共鸣扩散", "引导私信", "其他"]     # 与 comments.comment_intent 的 CHECK 逐字相同
+    # co-v0.2：蓝词植入留在闭集，定义改成只看文字能判的「点名植入」；回填的 state 不再带蓝词清单（D-079 / Mode A）
+    assert "蓝词" not in B.load_bank(OPS).by_id()["comment_intent"].criteria["蓝词植入"]
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("bf", ROOT / "scripts" / "backfill_comments.py"); bf = importlib.util.module_from_spec(spec); spec.loader.exec_module(bf)
+    st = bf.state_ops({"title": "t", "raw_content": "正文", "comment_role": "运营", "comment_text": "在哪买", "blue": ["某品牌"]})
+    assert "蓝词清单" not in st and "某品牌" not in json.dumps(st, ensure_ascii=False)
 
 
 # ── 解读与歧义 ──
@@ -138,11 +145,17 @@ def test_judge_note_mock_and_ledger_sql():
     r = C.judge_note(client, b, "NUC_phase1_recTEST", "标题：普通朋友住院送什么？\n正文： 一个普通朋友突发阑尾炎割了，预算200左右。水果篮太沉，鲜花不实用。大家平时都送什么啊？", with_evidence=True)
     assert r.subject_type == "note" and len(r.items) == 20 and r.calls in (1, 2)
     rows = C.ledger_rows(r, b, run_tag="shadow-test")
-    assert len(rows) == 20 and {x["run_tag"] for x in rows} == {"shadow-test"} and {x["extractor"] for x in rows} == {"jev:1.13.0"}
+    # mock 判出的行 extractor 一律 mock:<模型>（传了 extractor 也不行），写库直接拒绝：假答案进不了真账本
+    assert len(rows) == 20 and {x["run_tag"] for x in rows} == {"shadow-test"} and {x["extractor"] for x in rows} == {"mock:1.13.0"}
+    assert {x["extractor"] for x in C.ledger_rows(r, b, extractor="jev:1.13.0")} == {"mock:1.13.0"}
+    with pytest.raises(ValueError):
+        C.postgrest_upsert(rows, "http://127.0.0.1:9", "k")
+    r.meta["mock"] = False
+    assert {x["extractor"] for x in C.ledger_rows(r, b)} == {"jev:1.13.0"}
     for x in rows:
         assert set(x) == set(C.LEDGER_COLUMNS) and x["bank_version"] == "fq-v0.1" and x["bank_sha256"] == b.sha256
         if x["invalid_reason"]:
-            assert x["answer"] is None and x["evidence"] is None
+            assert x["answer"] is None and x["evidence"] is None and x["prob"] is None      # 无效行 prob 也是 NULL，同 TV
         elif x["answer"] is not None:
             assert 0 <= x["prob"] <= 1
     sql = C.rows_to_sql(rows)
@@ -222,14 +235,16 @@ def test_loop_compile_judge_repair_produce():
 
 
 def test_mcp_tools_mock(monkeypatch):
-    monkeypatch.setenv("JUDGE_MOCK", "1")
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE")
     from judge import mcp_server as M
     names = {b["name"] for b in M.list_banks()}
-    assert {"feature_questions_v0_1", "comment_reader_v0.3", "platform_health_v0.1", "human_feel_para_v0.1"} <= names
-    d = M.judge_draft("测试标题？", "第一段讲事。\n第二段讲感受。\n大家怎么看？")
-    assert set(d) >= {"passed", "profile", "hard_fails", "para_stats"}
-    plan = M.repair_plan_for("测试标题？", "第一段。\n第二段。")
+    assert {"feature_questions_v0_1", "comment_reader_v0.3", "platform_health_v0.1", "human_feel_para_v0.2"} <= names
+    body = "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？"
+    d = M.judge_draft("测试标题？", body)
+    assert set(d) >= {"passed", "profile", "hard_fails", "para_stats", "policy"} and d["policy"]["project"] == "TUGE"
+    plan = M.repair_plan_for("测试标题？", body)
     assert isinstance(plan, list)
+    assert M.judge_draft("测试标题？", "太短")["invalid_reason"] == "text_too_short"
     cs = M.judge_comments("标题", "正文", [{"id": "c1", "text": "在哪里"}, {"id": "c2", "text": "感谢老师帮我拿到结果"}])
     assert len(cs) == 2 and all("flags" in c and "speech_act" in c["items"] for c in cs)
 
@@ -425,11 +440,13 @@ def test_produce_comments_best_of_k_repair_and_thread_swap():
     tj = CM.judge_thread(jev, POST, [{"text": cj.text} for cj in bad], thread, fill=CM.fill_for(POST), judged=bad, max_named=1)
     assert {f[0] for f in tj.hard_fails} >= {"same_template", "thread_arranged", "named_count"}
     plan = CM.thread_repair_plan(tj, [CM.Slot("a", ["补充经验"]), CM.Slot("b", ["补充经验"]), CM.Slot("c", ["提问"])], bad)
-    assert {p["slot"] for p in plan} == {"a", "b"}
+    # a / b 是背书体；这组没有摩擦（没有贴主回复、没有质疑）→ 提问位 c 也要重出成审慎的追问（摩擦那题也「不过就换位」）
+    assert {p["slot"] for p in plan} == {"a", "b", "c"} and "摩擦" in next(p["why"] for p in plan if p["slot"] == "c")
+    assert "has_friction" in {f[0] for f in tj.hard_fails}
 
 
 def test_mcp_comment_tools_mock(monkeypatch):
-    monkeypatch.setenv("JUDGE_MOCK", "1")
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE")
     from judge import mcp_server as M
     r = M.comment_repair_plan_for("标题", "戒烟第三天，嘴里没味，靠嗑瓜子撑着。", "在哪里买的", {"id": "q1", "speech_act": ["提问"], "must_echo": False,
                                   "value_ok": ["可行动信息", "判断依据", "无"], "min_detail": "无"})
@@ -490,20 +507,24 @@ def test_api_judge_parallel_partial_errors_and_rows(monkeypatch):
     # 全部失败才 502
     monkeypatch.setattr(A, "judge_note", lambda *a, **k: (_ for _ in ()).throw(JevError("down")))
     assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:2]}, headers=H).status_code == 502
-    # write=true 而没配 Supabase：调 Jev 之前就 503
+    # write=true：mock 模式一律 422（假答案不进账本）；非 mock 而没配 Supabase → 503；都在调 Jev 之前
     monkeypatch.delenv("SUPABASE_URL", raising=False); monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     calls = []
     monkeypatch.setattr(A, "judge_note", lambda *a, **k: calls.append(1) or real_note(*a, **k))
+    assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:1], "write": True}, headers=H).status_code == 422 and calls == []
+    monkeypatch.setenv("JUDGE_MOCK", "0")
     assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:1], "write": True}, headers=H).status_code == 503 and calls == []
+    # write=true 又 with_evidence=false：答「是」没证据的行按 TV 契约是无效行，直接 422
+    assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": subs[:1], "write": True, "with_evidence": False}, headers=H).status_code == 422 and calls == []
 
 
-def test_api_judge_draft_with_brief(monkeypatch):
+def test_api_judge_draft_with_brief(monkeypatch, policy_cfg):
     monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k")
     from fastapi.testclient import TestClient
     from judge.api import app
     c = TestClient(app); H = {"X-Judge-Key": "k"}
     body = {"title": "健身房教练劝我先戒烟", "body": "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？",
-            "subject_id": "11111111-2222-3333-4444-555555555555",
+            "subject_id": "11111111-2222-3333-4444-555555555555", "project": "TUGE",
             "brief": {"intents": [{"label": "烟瘾场景", "means": "想抽烟的时刻"}],
                       "hard_rules": [{"id": "must_ask", "ask": "有没有向读者提问？", "yes": "问了", "no": "没问", "want": True}]},
             "judge_paras": "always", "run_tag": "aw-shadow"}
@@ -538,14 +559,14 @@ def test_api_judge_draft_with_brief(monkeypatch):
     assert c.post("/judge_draft", json=dict(body, project_bank={"questions": None}), headers=H).status_code == 422
     assert c.post("/judge_draft", json=dict(body, project_bank={"questions": []}), headers=H).status_code == 422       # 与 brief 同时给
     assert c.post("/judge_draft", json=dict(body, project_bank_name="platform_health_v0.1"), headers=H).status_code == 422
-    assert c.post("/judge_draft", json={"title": "t", "body": "b", "banks": []}, headers=H).status_code == 422
-    d3 = c.post("/judge_draft", json={"title": "t", "body": "正文有二十个字以上才不会被当成太短的稿子来跳题。", "banks": ["feature_questions_v0_1", "comment_reader_v0.4", "external_triage_v0.1"]}, headers=H).json()
+    assert c.post("/judge_draft", json={"title": "t", "body": "b", "banks": [], "project": "TUGE"}, headers=H).status_code == 422
+    d3 = c.post("/judge_draft", json={"title": "t", "body": "正文有二十个字以上才不会被当成太短的稿子来跳题。", "project": "TUGE", "banks": ["feature_questions_v0_1", "comment_reader_v0.4", "external_triage_v0.1"]}, headers=H).json()
     assert d3["ignored_banks"] == ["comment_reader_v0.4", "external_triage_v0.1"] and set(d3["detail"]) == {"feature_questions_v0_1"}
     # Codex 评审那七条：同名题库传两次不再 500；空项目题库 / 空 brief、跨层题号撞车、只有意图题没人感题库、
     # 指到不存在的题库或题号的 hard_rules、write=true 却没给自己的 subject_id，都是 422
-    d4 = c.post("/judge_draft", json={"title": "t", "body": body["body"], "banks": ["feature_questions_v0_1", "feature_questions_v0_1"]}, headers=H)
+    d4 = c.post("/judge_draft", json={"title": "t", "body": body["body"], "project": "TUGE", "banks": ["feature_questions_v0_1", "feature_questions_v0_1"]}, headers=H)
     assert d4.status_code == 200 and set(d4.json()["detail"]) == {"feature_questions_v0_1"}
-    base = {"title": "t", "body": body["body"], "banks": ["feature_questions_v0_1"]}
+    base = {"title": "t", "body": body["body"], "project": "TUGE", "banks": ["feature_questions_v0_1"]}
     assert c.post("/judge_draft", json=dict(base, banks=[], project_bank={"questions": []}), headers=H).status_code == 422
     assert c.post("/judge_draft", json=dict(base, banks=[], brief={}), headers=H).status_code == 422
     assert c.post("/judge_draft", json=dict(base, brief={"hard_rules": [{"id": "efficacy_promise", "ask": "?"}]}), headers=H).status_code == 422
@@ -569,8 +590,11 @@ def test_repair_plan_uses_configured_want_for_choice_rules():
     want = next(lab for lab in fq.by_id()["product_role"].criteria if lab != ans)      # 取一个和答案不同的选项 → 必是硬伤
     dj = L.judge_draft(client, draft, fq=fq, hard_rules={("feature_questions_v0_1", "product_role"): want})
     assert dj.wants == {("feature_questions_v0_1", "product_role"): want} and [tuple(f[:3]) for f in dj.hard_fails] == [("feature_questions_v0_1", "product_role", ans)]
-    plan = L.repair_plan(dj, {"feature_questions_v0_1": fq})
+    plan = L.repair_plan(dj, {"feature_questions_v0_1": fq}, validated={"product_role"})
     assert plan[0]["want"] == want and plan[0]["definition"] == fq.by_id()["product_role"].criteria[want] and f"要改成「{want}」" in plan[0]["instruction"]
+    # 没过闸二的 fq 题：硬伤照记，但修改单只给依据句，不给题干和定义（通用层的题不原样塞进生成端的 prompt）
+    p0 = L.repair_plan(dj, {"feature_questions_v0_1": fq})[0]
+    assert p0["definition"] == "" and fq.by_id()["product_role"].ask not in p0["instruction"] and "合规硬约束" in p0["instruction"]
     # 是非题：期望「否」答「是」→ 定义取「否」那一侧；没记录期望时才按是非翻转
     ph = B.load_bank(ROOT / "banks" / "platform_health_v0.1.yaml", name="platform_health_v0.1")
     dj2 = L.DraftJudgement(hard_fails=[("platform_health_v0.1", "fear_sell", "是", 0.9, None)], wants={("platform_health_v0.1", "fear_sell"): "否"})

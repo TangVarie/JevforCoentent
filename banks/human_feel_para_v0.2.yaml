@@ -1,0 +1,135 @@
+# ════════════════════════════════════════════════════════════════════
+# 人感题库（段级 · 草案）  hf-v0.2
+# ════════════════════════════════════════════════════════════════════
+# 用途：写作台入库判定和三省六部采样判定里，篇级不过时再判段；每段一个 state（段落原文 + 它在全文的位置）。
+# 只问读者用来判「像不像人写的」的线索，不问「好不好」。正则能查的（禁用标点、翻案句、黑名单模板句）
+# 归 human-writing 的 check_prose.py 和三省六部的 prose_gate，不进这里。
+# 篇级的分布约束（无意图句子占比、语域是否均匀、产品第一次出现的位置）由代码在段级答案上算，不单独出题。
+# 这份是草案：金标准要从真实自然帖和自家稿各取几十段，两人对着定义标。
+# v0.2 相对 v0.1：para_function 加出口「说不清」并列进 unclear_labels（docs/31 §2.3 第 2 条「每题留出口」）——
+# 一段既讲事又讲产品时不再硬选，interpret 会把它标歧义送人工。其余题逐字不变。
+# 暗题：本题库每季度 1/3 的题不写进任何 prompt（config/hidden_rotation.yaml、judge/hidden.py）。
+# ════════════════════════════════════════════════════════════════════
+
+bank_version: hf-v0.2
+model: jev-1.13.0
+
+ambiguity:
+  choice_top_min: 0.60
+  choice_margin_min: 0.20
+  noul_band: [0.35, 0.65]
+
+questions:
+
+  - id: para_register
+    type: choice
+    instructions:
+      zh: 这一段的说话方式更像哪一种？
+      en: Which register does this paragraph read as?
+    options:
+      - label: 随手口语
+        zh: 短句、省略、有语气词或错别字，像随手打的
+        en: "Short, elliptical, particles or typos; typed casually"
+      - label: 认真分享
+        zh: 用自己的话讲一件具体的事，有过程或细节
+        en: "Tells something specific in their own words, with process or detail"
+      - label: 文案腔
+        zh: 形容词齐整、句式工整、像宣传语或说明文
+        en: "Tidy adjectives and parallel sentences; reads like copy or a manual"
+      - label: 说不清
+        zh: 都不像
+        en: "None fits"
+    unclear_labels: [说不清]
+    feeds: 篇级语域分布
+    on_ambiguous: 进人工
+
+  - id: para_function
+    type: choice
+    instructions:
+      zh: 这一段在文章里主要起什么作用？只选一种。
+      en: What does this paragraph mainly do in the piece? Pick one.
+    options:
+      - label: 讲事
+        zh: 讲一件发生过的事，有人、时间、地点或过程
+        en: "Narrates something that happened"
+      - label: 讲感受
+        zh: 情绪、身体感觉、心里话
+        en: "Feelings, sensations, inner talk"
+      - label: 讲产品
+        zh: 介绍、评价或推荐某个产品
+        en: "Introduces, evaluates or recommends a product"
+      - label: 讲道理
+        zh: 下判断、给结论、总结经验
+        en: "Judges, concludes, sums up"
+      - label: 问读者
+        zh: 向读者提问或求助
+        en: "Asks the reader"
+      - label: 闲笔
+        zh: 和主线没关系的一句，随口一提
+        en: "An aside unrelated to the main line"
+      - label: 说不清
+        zh: 两种以上作用分量差不多，或者都不像
+        en: "Two or more roles weigh about the same, or none fits"
+    unclear_labels: [说不清]
+    feeds: 篇级功能分布（无产品意图的段落占比、产品第一次出现的位置）
+    on_ambiguous: 进人工
+
+  - id: para_summary_close
+    type: noul
+    instructions:
+      zh: 这一段是不是以一句总结或升华收尾（把前面说的归纳成一个道理或口号）？
+      en: Does the paragraph close with a summarising or uplifting line?
+    criteria:
+      "true":
+        zh: 最后一句是归纳、道理、口号或号召
+        en: Last sentence sums up, moralises, sloganises or calls to action
+      "false":
+        zh: 最后一句仍在讲事或讲感受，没有归纳
+        en: Last sentence is still narrating or feeling; no summary
+    feeds: AI 味线索
+    on_ambiguous: 按「否」处理
+
+  - id: para_adjective_pile
+    type: noul
+    instructions:
+      zh: 这一段有没有把两个以上评价性的形容词或四字词堆在一起（比如「温和不刺激、性价比高、值得推荐」）？
+      en: Does the paragraph pile up two or more evaluative adjectives or four-character phrases?
+    criteria:
+      "true":
+        zh: 有连续的评价词堆叠
+        en: Yes, evaluative words are stacked
+      "false":
+        zh: 没有，评价最多一处且带着具体所指
+        en: No; at most one evaluation, tied to something specific
+    feeds: AI 味线索
+    on_ambiguous: 按「否」处理
+
+  - id: para_friction
+    type: noul
+    instructions:
+      zh: 这一段里有没有犹豫、抱怨、不满意、没解决的地方（哪怕一句）？
+      en: Is there any hesitation, complaint, dissatisfaction or unresolved point in the paragraph?
+    criteria:
+      "true":
+        zh: 有至少一处不顺、不满或没解决
+        en: At least one snag, complaint or open point
+      "false":
+        zh: 全是顺的、满意的、解决了的
+        en: Everything is smooth, satisfied, resolved
+    feeds: 篇级摩擦有无（一篇至少一处）
+    on_ambiguous: 进人工
+
+  - id: para_specific
+    type: noul
+    instructions:
+      zh: 这一段有没有能对上号的具体细节（时间、地点、人、数字、原话）？
+      en: Does the paragraph contain checkable specifics (time, place, person, number, quote)?
+    criteria:
+      "true":
+        zh: 至少一处具体细节
+        en: At least one checkable specific
+      "false":
+        zh: 只有泛泛的说法
+        en: Only generalities
+    feeds: 具体度分布
+    on_ambiguous: 按「否」处理

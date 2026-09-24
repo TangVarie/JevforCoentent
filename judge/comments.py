@@ -8,7 +8,8 @@
                                            修改单每条 = 题号 + 现在的答案与概率 + 要改成什么 + 那个选项的定义。改由生成端做。
   成组  judge_thread() · thread_repair_plan()
                                            一组评论选定后整体过评论区 4 题（夸的比例 / 同一句式 / 有没有摩擦 / 整体像不像安排的），
-                                           不过就指出哪一位要换、为什么；代码另算点名条数。
+                                           四题任一不过就指出哪一位要换、为什么（docs/01 §4「不过就换位」，摩擦那题也算）；代码另算点名条数。
+                                           换谁都修不了的（问题出在评论位配置本身）不换位，只在修改单里写明，不白烧轮次。
   整条  produce_comments()                 逐位 best-of-k + 修补 → 成组判 → 换位重出 → 返回评论组、每条画像、评论区画像、轨迹。
 
 生成端可插拔（同 loop.Generator：prompt, n → [text]）；每一位的生成 prompt 由调用方的 prompt_for(post, slot) 给。
@@ -20,12 +21,12 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
 from . import spans as sp
 from .banks import Bank, fill_text, unfilled
-from .core import judge_state
+from .core import add_usage, judge_state
 from .jev_client import JevClient
 
 Generator = Callable[..., list]
@@ -163,8 +164,12 @@ def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot]
     cj.items.update(r.items); cj.calls += r.calls; cj.usage = dict(r.usage or {})
     if ops is not None:
         r2 = judge_state(client, ops, subject_id, st, subject_type="comment", fill=fill)
-        cj.items.update(r2.items); cj.calls += r2.calls
+        cj.items.update(r2.items); cj.calls += r2.calls; cj.usage = add_usage(cj.usage, r2.usage)
     a = cj.profile()
+    missing = sorted(q for q, it in cj.items.items() if it.get("answer") is None)
+    if missing:
+        # 漏答 / 选项外：是非题和选择题一样处理 —— 不当硬伤（不会下发「现在判『None』」的修改单），整条进复核
+        cj.flags.append("漏答"); cj.needs_review = True
     if a.get("speech_act") in ENDORSE:
         cj.flags.append("背书体"); cj.needs_review = True
     if a.get("register") == "文案腔":
@@ -178,7 +183,8 @@ def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot]
     cj.ambiguous = [q for q, it in cj.items.items() if it.get("ambiguous")]
     if slot is not None:
         p = lambda q: cj.items.get(q, {}).get("p")  # noqa: E731
-        if a.get("speech_act") not in slot.speech_act:
+        known = lambda q: a.get(q) is not None       # noqa: E731 — 没判出来的题不参与硬伤
+        if known("speech_act") and a.get("speech_act") not in slot.speech_act:
             cj.hard_fails.append(("speech_act", a.get("speech_act"), "/".join(slot.speech_act), p("speech_act")))
         if a.get("names_brand") == "是" and not slot.may_name_brand:
             cj.hard_fails.append(("names_brand", "是", "否", p("names_brand")))
@@ -186,9 +192,9 @@ def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot]
             cj.hard_fails.append(("echoes_post", "否", "是", p("echoes_post")))
         if a.get("register") == "文案腔":
             cj.hard_fails.append(("register", "文案腔", "随手口语/认真分享", p("register")))
-        if a.get("reader_value") not in slot.value_ok:
+        if known("reader_value") and a.get("reader_value") not in slot.value_ok:
             cj.hard_fails.append(("reader_value", a.get("reader_value"), "/".join(slot.value_ok), p("reader_value")))
-        if DETAIL_RANK.get(a.get("detail_level"), 0) < DETAIL_RANK.get(slot.min_detail, 0):
+        if known("detail_level") and DETAIL_RANK.get(a.get("detail_level"), 0) < DETAIL_RANK.get(slot.min_detail, 0):
             cj.hard_fails.append(("detail_level", a.get("detail_level"), f"至少{slot.min_detail}", p("detail_level")))
         if ops is not None and slot.intent and a.get("comment_intent") not in (slot.intent, None):
             cj.hard_fails.append(("comment_intent", a.get("comment_intent"), slot.intent, p("comment_intent")))
@@ -212,7 +218,7 @@ def comment_repair_plan(cj: CommentJudgement, banks: dict, fill: Optional[dict] 
         if qid not in byq:
             continue
         q, merged = byq[qid]
-        labels = [w.lstrip("至少") for w in want.split("/")]
+        labels = [w.removeprefix("至少") for w in want.split("/")]   # 按前缀剥，不按字符集（lstrip 会误删以「至」「少」开头的 label）
         if q.jtype == "choice":
             defs = [fill_text(q.criteria[lab], merged) for lab in labels if lab in q.criteria]
         else:
@@ -297,8 +303,11 @@ def judge_thread(client: JevClient, post: dict, comments: list, thread: Bank, *,
         tj.hard_fails.append(("praise_share", "多数", "少数/一半左右", p("praise_share")))
     if a.get("same_template") == "是":
         tj.hard_fails.append(("same_template", "是", "否", p("same_template")))
+    if a.get("has_friction") == "否":
+        tj.hard_fails.append(("has_friction", "否", "是", p("has_friction")))
     if a.get("thread_arranged") == "是":
         tj.hard_fails.append(("thread_arranged", "是", "否", p("thread_arranged")))
+    # praise_share = 一半左右 放行（题库 on_ambiguous 就写「按一半左右处理」，是有意的中间档）；= 评论太少（v0.4 的出口）也放行，按歧义走
     if judged:
         named = sum(1 for cj in judged if cj.profile().get("names_brand") == "是")
         endorse = sum(1 for cj in judged if cj.profile().get("speech_act") in ENDORSE)
@@ -309,26 +318,44 @@ def judge_thread(client: JevClient, post: dict, comments: list, thread: Bank, *,
 
 
 def thread_repair_plan(tj: ThreadJudgement, slots: list, judged: list) -> list:
-    """评论区不过 → 指出哪一位要重出。规则：同一句式 / 夸的太多 → 换掉背书体和文案腔的位；点名太多 → 换掉不该点名却点了名的位；
-    整体像安排的但单条都过 → 换分数最差的一位。"""
+    """评论区不过 → 指出哪一位要重出。每条 = {"slot": 位 id 或 None, "why": …}；slot 为 None = 换谁都修不了，问题在评论位配置，只记录不换。
+    规则：
+      · 同一句式 / 夸的太多 → 换掉背书体和文案腔的位；brief 硬放的背书位（slot 本身就要背书）不换 —— 重出还是同一类，标 needs_review。
+      · 点名太多 → 换掉不该点名却点了名的位；点名的位全是允许点名的 → 配置问题（max_named 与 may_name_brand 打架）。
+      · 没有摩擦 → 有贴主回复位就重出它（要真的回应读者）；没有就重出一个提问位（改成追问价格或效果）；两者都没有 → 配置问题。
+      · 整体像安排的但单条都能过 → 换分数最差的一位。"""
     plan = []
     fails = {f[0] for f in tj.hard_fails}
     by_slot = {s.id: (s, cj) for s, cj in zip(slots, judged)}
     if fails & {"same_template", "praise_share"}:
         for sid, (s, cj) in by_slot.items():
-            if "背书体" in cj.flags or "文案腔" in cj.flags:
+            if "背书体" in cj.flags and set(s.speech_act) & set(ENDORSE):
+                plan.append({"slot": None, "why": f"位 {sid} 是 brief 要求的背书位，重出还是背书体；评论区判同一句式 / 夸的太多时它会一直拖后腿，整组进复核"})
+            elif "背书体" in cj.flags or "文案腔" in cj.flags:
                 plan.append({"slot": sid, "why": "评论区被判同一句式或夸的太多，这一位是背书体 / 文案腔"})
     if "named_count" in fails:
-        for sid, (s, cj) in by_slot.items():
-            if cj.profile().get("names_brand") == "是" and not s.may_name_brand:
-                plan.append({"slot": sid, "why": "点名的评论超过上限，这一位不该点名"})
+        offenders = [sid for sid, (s, cj) in by_slot.items() if cj.profile().get("names_brand") == "是" and not s.may_name_brand]
+        for sid in offenders:
+            plan.append({"slot": sid, "why": "点名的评论超过上限，这一位不该点名"})
+        if not offenders:
+            plan.append({"slot": None, "why": "点名条数超过 max_named，但点了名的都是允许点名的位：是评论位配置和 max_named 打架，换谁都修不了"})
+    if "has_friction" in fails:
+        reply = next((sid for sid, (s, _) in by_slot.items() if s.role == "贴主" or s.reply_to), None)
+        ask = next((sid for sid, (s, _) in by_slot.items() if "提问" in s.speech_act), None)
+        if reply:
+            plan.append({"slot": reply, "why": "评论区没有摩擦：贴主回复这一位要真的回应读者（答疑、承认没做到的地方），不能只是客套"})
+        elif ask:
+            plan.append({"slot": ask, "why": "评论区没有摩擦：这一位改成审慎的追问（问价格、问效果、问适不适合自己），别是中性的「在哪买」"})
+        else:
+            plan.append({"slot": None, "why": "评论区没有摩擦，评论位里既没有贴主回复位也没有提问位，换谁都补不出来：改 brief 的 comment_slots"})
     if tj.hard_fails and not plan:
         worst = max(by_slot.items(), key=lambda kv: score_comment(kv[1][1]))
         plan.append({"slot": worst[0], "why": f"评论区不过（{'、'.join(sorted(fails))}）但没有一位能单独归因：换掉分数最差的一位"})
     seen = set(); out = []
     for p in plan:
-        if p["slot"] not in seen:
-            seen.add(p["slot"]); out.append(p)
+        key = p["slot"] if p["slot"] is not None else ("cfg", p["why"])
+        if key not in seen:
+            seen.add(key); out.append(p)
     return out
 
 
@@ -351,7 +378,9 @@ def produce_comments(client: JevClient, generator: Generator, post: dict, slots:
     def fill_slot(slot: Slot, why: str = "") -> None:
         nonlocal calls
         rt = reply_text(slot)
-        (text, cj), ranking, n_calls = best_of_k_comment(client, generator, prompt_for(post, slot), k, post, slot,
+        # 换位的原因写进这一位的 note 再交给 prompt_for：生成端拿到的 prompt 和上一轮不同，才可能出不同的候选
+        ask_slot = replace(slot, note=(slot.note + "；" if slot.note else "") + f"上一版被换掉的原因：{why}") if why else slot
+        (text, cj), ranking, n_calls = best_of_k_comment(client, generator, prompt_for(post, ask_slot), k, post, slot,
                                                          reader=reader, ops=ops, fill=fill, reply_to_text=rt)
         calls += n_calls
         step = {"step": f"best_of_k:{slot.id}", "ranking": [s for _, s in ranking], "hard_fails": len(cj.hard_fails)}
@@ -380,12 +409,21 @@ def produce_comments(client: JevClient, generator: Generator, post: dict, slots:
                       "hard_fails": [f[0] for f in tj.hard_fails]})
         if tj.passed() or rnd == max_thread_rounds:
             break
-        for p in thread_repair_plan(tj, slots, judged):
-            slot = next(s for s in slots if s.id == p["slot"])
-            fill_slot(slot, why=p["why"])
-            for dep in slots:                       # 被换的位若有人回复，回复位也重出
-                if dep.reply_to == slot.id:
-                    fill_slot(dep, why=f"回复的对象 {slot.id} 换了")
+        tplan = thread_repair_plan(tj, slots, judged)
+        trail[-1]["thread_plan"] = tplan
+        refill: dict = {}                            # 位 id → 原因；被换的位若有人回复，回复位也重出；同一位只重出一次
+        for p in tplan:
+            if p["slot"] is None:
+                continue                             # 配置问题：换谁都修不了，只记在轨迹里
+            refill.setdefault(p["slot"], p["why"])
+            for dep in slots:
+                if dep.reply_to == p["slot"]:
+                    refill.setdefault(dep.id, f"回复的对象 {p['slot']} 换了")
+        if not refill:
+            break
+        for s in sorted(slots, key=lambda s: 1 if s.reply_to else 0):
+            if s.id in refill:
+                fill_slot(s, why=refill[s.id])
     out_comments = []
     for s in slots:
         text, cj = chosen[s.id]
@@ -394,4 +432,5 @@ def produce_comments(client: JevClient, generator: Generator, post: dict, slots:
                              "hard_fails": cj.hard_fails, "ambiguous": cj.ambiguous})
     return {"comments": out_comments, "thread": {"items": {q: {"answer": it.get("answer"), "p": it.get("p")} for q, it in tj.items.items()},
                                                  "code": tj.code, "passed": tj.passed(), "hard_fails": tj.hard_fails},
-            "passed": tj.passed() and all(c["passed"] for c in out_comments), "trail": trail, "calls": calls}
+            "passed": tj.passed() and all(c["passed"] and not c["needs_review"] for c in out_comments),   # 要复核的不算过
+            "needs_review": any(c["needs_review"] for c in out_comments), "trail": trail, "calls": calls}
