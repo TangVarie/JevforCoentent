@@ -533,7 +533,15 @@ def test_api_judge_draft_with_brief(monkeypatch, policy_cfg):
     assert set(d["detail"]) == {"feature_questions_v0_1", "platform_health_v0.1", "project"} and d["para_stats"]["n"] == 4
     assert "must_ask" in d["detail"]["project"] and "efficacy_promise" in d["detail"]["feature_questions_v0_1"]
     rows = d["ledger_rows"]
-    assert rows and {r["subject_id"] for r in rows} == {body["subject_id"]} and {r["subject_type"] for r in rows} == {"aw_version"}
+    # 整篇的行 subject_id 就是这篇；判段的行也进账本（codex review on #2），subject_id 带 :p<段号>，主键不撞
+    sid = body["subject_id"]
+    assert rows and {r["subject_id"] for r in rows} == {sid} | {f"{sid}:p{i}" for i in range(1, 5)}
+    assert {r["subject_type"] for r in rows} == {"aw_version"}
+    from judge.hidden import all_hidden
+    from judge.api import get_bank
+    hf_bank = get_bank("human_feel_para_v0.2"); hid = all_hidden({hf_bank.name: hf_bank})
+    assert hid and {r["question_id"] for r in rows if r["subject_id"] != sid} == {"intent_of_para"} | (set(hf_bank.ids()) - hid)
+    assert d["rows"] > len(rows)                       # 暗题的行写账本，但不回给调用方
     assert {r["run_tag"] for r in rows} == {"aw-shadow"} and any(r["question_id"] == "must_ask" for r in rows)
     # brief 的 want 接到了判定：期望「是」，答案不是「是」就是硬伤，修改单里有它（mock 对这段稿的答案是确定的）
     assert d["hard_rules"]["project:must_ask"] == "是"

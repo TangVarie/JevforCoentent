@@ -240,13 +240,15 @@ def interpret(bank: Bank, resp: dict, asked: Optional[list] = None) -> dict:
         else:
             probs = sorted(((k, float(v)) for k, v in (a.get("probabilities") or {}).items()), key=lambda kv: -kv[1])
             choice = a.get("choice")
-            if q.jtype == "noul" or choice not in q.criteria or not probs:
+            prob_map = dict(probs)
+            # 所选答案自己没有概率（只给了别的选项的）→ out_of_vocab；不拿第一名的概率顶替，那是编出来的数
+            if q.jtype == "noul" or choice not in q.criteria or choice not in prob_map:
                 out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_OUT_OF_VOCAB,
                              "raw": choice}
                 continue
             p1 = probs[0][1]
             p2 = probs[1][1] if len(probs) > 1 else 0.0
-            pc = dict(probs).get(choice, p1)          # prob 口径 = 所选答案的概率（v1_17）；通常就是第一名
+            pc = prob_map[choice]                     # prob 口径 = 所选答案的概率（v1_17）；通常就是第一名
             reasons = []
             if p1 < amb["choice_top_min"]:
                 reasons.append(f"第一名 {p1:.2f} < {amb['choice_top_min']}")

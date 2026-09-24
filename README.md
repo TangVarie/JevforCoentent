@@ -44,7 +44,9 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
   默认只跑通用层（fq、人感、评论、三省六部二审、外部分诊）+ 平台层，项目层只有 `project_layer_cleared` 里的项目才跑，否则整层去掉并在响应的 `policy.dropped_banks` 回显；
   处方药项目（`rx_categories` / `rx_projects`）的未发布稿在合同确认、加进 `rx_cleared` 之前一律 403，一次 Jev 都不调。HTTP 和 MCP 共用这一处。
 - **暗题**（docs/00 #4，`judge/hidden.py` + `config/hidden_rotation.yaml`）：人感题库每季度按 sha256(题号|季度) 自动换 1/3；暗题照判、照落账本、照算硬伤，
-  但不出现在修改单、`/judge_draft` 的 profile / detail / plan、`/banks` 与 MCP `list_banks` 的题号列表里。账本行照带全部题，调用方不得转给写手。
+  但不出现在修改单、`/judge_draft` 的 profile / detail / plan / ledger_rows、`/banks` 与 MCP `list_banks` 的题号列表里。
+  `judge_paras=on_fail`（默认）时篇级没硬伤也要把暗题逐段判一遍（暗题防的就是对着公开题库写、篇级全过的稿子）；`never` 一次段级调用都不发，暗题也不判。
+  段级结果（含暗题）以 `subject_id = <稿 id>:p<段号>` 写进账本；`/judge` 的 ledger_rows 照带全部题，调用方不得转给写手。
 - **闸二门禁**（docs/28 §7）：没过闸二的 fq 目标题不进修改单，只进响应的 `recorded`；fq 硬伤只给依据句，不给题干和定义。
 
 ## 评论怎么写

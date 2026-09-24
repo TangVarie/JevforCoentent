@@ -284,10 +284,16 @@ class ThreadJudgement:
     items: dict = field(default_factory=dict)
     hard_fails: list = field(default_factory=list)     # [(qid, now, want, p)]
     code: dict = field(default_factory=dict)           # 代码算的：点名条数、背书条数、条数
+    unjudged: list = field(default_factory=list)       # [(qid, invalid_reason)]：评论区题没判出有效答案（漏答 / 选项外）
     calls: int = 0
 
+    @property
+    def needs_review(self) -> bool:
+        return bool(self.unjudged)
+
     def passed(self) -> bool:
-        return not self.hard_fails
+        # 漏答不是「没问题」：四题全漏也不能当评论区过了（codex review on #2）
+        return not self.hard_fails and not self.unjudged
 
 
 def judge_thread(client: JevClient, post: dict, comments: list, thread: Bank, *, fill: Optional[dict] = None,
@@ -297,6 +303,8 @@ def judge_thread(client: JevClient, post: dict, comments: list, thread: Bank, *,
     tj = ThreadJudgement()
     r = judge_state(client, thread, subject_id, thread_state(post, comments), subject_type="comment", fill=fill)
     tj.items = r.items; tj.calls = r.calls
+    tj.unjudged = [(q, (r.items.get(q) or {}).get("invalid_reason") or "missing")
+                   for q in thread.ids() if (r.items.get(q) or {}).get("answer") is None]
     a = {k: v.get("answer") for k, v in r.items.items()}
     p = lambda q: r.items.get(q, {}).get("p")  # noqa: E731
     if a.get("praise_share") == "多数":
@@ -431,6 +439,7 @@ def produce_comments(client: JevClient, generator: Generator, post: dict, slots:
                              "flags": cj.flags, "passed": cj.passed(), "needs_review": cj.needs_review,
                              "hard_fails": cj.hard_fails, "ambiguous": cj.ambiguous})
     return {"comments": out_comments, "thread": {"items": {q: {"answer": it.get("answer"), "p": it.get("p")} for q, it in tj.items.items()},
-                                                 "code": tj.code, "passed": tj.passed(), "hard_fails": tj.hard_fails},
+                                                 "code": tj.code, "passed": tj.passed(), "hard_fails": tj.hard_fails,
+                                                 "unjudged": tj.unjudged, "needs_review": tj.needs_review},
             "passed": tj.passed() and all(c["passed"] and not c["needs_review"] for c in out_comments),   # 要复核的不算过
-            "needs_review": any(c["needs_review"] for c in out_comments), "trail": trail, "calls": calls}
+            "needs_review": tj.needs_review or any(c["needs_review"] for c in out_comments), "trail": trail, "calls": calls}

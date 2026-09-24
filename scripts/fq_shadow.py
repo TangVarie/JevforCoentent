@@ -12,7 +12,7 @@
 切标题的方式按项目走 TV 的 mapping（title_extraction：markers / column / none，缺省 none，同 annotate_feature_pass），
 所以 --from-db 必须给 --mappings（TV 仓的 mappings 目录）；不按 mapping 切，一致率会被切法差异污染（D-081 说的「切段差异」）。
 本地文件模式仍用 --title-extraction 一个值。
-现行抽取器的答案取 extractor like llm:* 的 primary 行；同一篇同一题有多个 llm 模型时取 extracted_at 最新的那条，报告里列出用到的 extractor。
+现行抽取器的答案取 extractor like llm:* 的 primary 行，且 question_version 与 vendor 题库一致；同一篇同一题有多个 llm 模型时取 extracted_at 最新的那条，报告里列出用到的 extractor。
 
 Opus/D-081 的 TSV 格式：subject_id<TAB>q=答案[!无效原因][⟨证据⟩][~概率];...（与 note_feature_answers 一一对应）。
 run_tag 用 shadow-*，不进 primary（docs/28：只有 primary 进分析）。
@@ -89,7 +89,8 @@ def load_mappings(dir_: str) -> dict:
     return out
 
 
-def fetch_from_db(limit: int, project: str | None):
+def fetch_from_db(limit: int, project: str | None, versions: dict):
+    """versions = {question_id: 当前题库的 question_version}：只拿同版本的现行答案当参照。"""
     url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not (url and key):
         sys.exit("--from-db 需要 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
@@ -98,15 +99,21 @@ def fetch_from_db(limit: int, project: str | None):
         q += f"&project_id=eq.{urllib.parse.quote(project)}"
     notes = _pg(url, key, q)
     ids = ",".join(urllib.parse.quote(n["note_id"]) for n in notes)
-    ans = _pg(url, key, f"note_feature_answers?select=subject_id,question_id,answer,evidence,invalid_reason,extractor,extracted_at"
+    ans = _pg(url, key, f"note_feature_answers?select=subject_id,question_id,question_version,answer,evidence,invalid_reason,extractor,extracted_at"
                         f"&extractor=like.llm:*&run_tag=eq.primary&subject_id=in.({ids})")
-    return notes, latest_per_cell(ans)
+    return notes, latest_per_cell(ans, versions)
 
 
-def latest_per_cell(ans: list) -> dict:
-    """同一篇同一题有多个 llm:* 模型的 primary 行时取 extracted_at 最新的一条（以前是返回顺序后写覆盖先写）。"""
+def latest_per_cell(ans: list, versions: dict | None = None) -> dict:
+    """同一篇同一题有多个 llm:* 模型的 primary 行时取 extracted_at 最新的一条（以前是返回顺序后写覆盖先写）。
+    versions 给了就先丢掉 question_version 与当前题库不同的行：题干改过（v1 → v2）后库里新旧两版并存，
+    旧版答案不能当新版影子跑的参照（codex review on #2）。"""
     best: dict = {}
     for a in ans:
+        if versions is not None:
+            want, got = versions.get(a["question_id"]), a.get("question_version")
+            if want is None or got is None or int(got) != int(want):
+                continue
         k = (a["subject_id"], a["question_id"])
         if k not in best or str(a.get("extracted_at") or "") > str(best[k].get("extracted_at") or ""):
             best[k] = a
@@ -133,7 +140,7 @@ def main():
         if not args.mappings:
             sys.exit("--from-db 要给 --mappings（TV 仓的 mappings 目录）：切标题按项目的 title_extraction 走，同 TV")
         modes = load_mappings(args.mappings)
-        notes, opus = fetch_from_db(args.limit, args.project)
+        notes, opus = fetch_from_db(args.limit, args.project, {q.id: q.version for q in bank.questions})
         unknown = sorted({n.get("project_id") for n in notes} - set(modes))
         if unknown:
             sys.exit(f"这些项目在 {args.mappings} 里没有 mapping：{unknown}")

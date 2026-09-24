@@ -134,12 +134,14 @@ class EchoGenerator:
 class DraftJudgement:
     profile: dict = field(default_factory=dict)        # qid → answer（篇级，所有题库合并）
     detail: dict = field(default_factory=dict)         # bank → items
-    results: dict = field(default_factory=dict)        # bank → 篇级 JudgeResult（落账本用；段级不落账本）
+    results: dict = field(default_factory=dict)        # bank → 篇级 JudgeResult（落账本用；段级的在 para_results）
     wants: dict = field(default_factory=dict)          # {(bank, qid): 期望答案}，就是判这篇时用的 hard_rules；修改单按它说「要改成什么」
     hard_fails: list = field(default_factory=list)     # [(bank, qid, answer, p, evidence)]
     ambiguous: list = field(default_factory=list)      # [(bank, qid)]
     para_items: list = field(default_factory=list)     # 段级：[{idx, text, items}]
-    para_stats: dict = field(default_factory=dict)     # 段级分布：语域 / 功能 / 摩擦 / 总结收尾
+    para_stats: dict = field(default_factory=dict)     # 段级分布：语域 / 功能 / 摩擦 / 总结收尾（只在整段都判了时算）
+    para_results: list = field(default_factory=list)   # [(bank_name, 段级 JudgeResult)]：落账本用，subject_id = <稿 id>:p<N>
+    para_mode: str = "none"                            # none / all / hidden_only（篇级没硬伤时只判暗题）
     usage: dict = field(default_factory=dict)
     calls: int = 0
     unjudged: list = field(default_factory=list)       # [(bank, qid, invalid_reason)]：有硬约束的题没判出有效答案（漏答 / 选项外），不能算过
@@ -170,9 +172,11 @@ def project_hard_rules(brief: dict, name: str = "project") -> dict:
 
 def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, platform: Optional[Bank] = None,
                 project: Optional[Bank] = None, human: Optional[Bank] = None, judge_paras: str = "on_fail",
-                hard_rules: Optional[dict] = None, subject_id: str = "draft", subject_type: str = "aw_version") -> DraftJudgement:
+                hard_rules: Optional[dict] = None, subject_id: str = "draft", subject_type: str = "aw_version",
+                hidden: Optional[set] = None) -> DraftJudgement:
     """draft = {"title": str, "body": str}。hard_rules = {(bank_name, qid): 期望答案}，答案不等于期望即硬伤。
-    judge_paras: always / on_fail / never。subject_id 落账本时用（写作台传 versions.id）；段级用 subject_id:pN，不落账本。"""
+    judge_paras: always / on_fail（篇级没硬伤时只判暗题）/ never。subject_id 落账本时用（写作台传 versions.id）；
+    段级用 subject_id:pN，结果放在 para_results，HTTP 写库时一并落账本（暗题的答案只在账本里，不在任何给写手看的字段里）。"""
     dj = DraftJudgement()
     title, body = draft.get("title") or "", draft.get("body") or ""
     raw = (f"标题：{title}\n正文：{body}") if title else body
@@ -221,18 +225,33 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
             want = hard_rules.get((bname, qid))
             if want is not None and it["answer"] != want:
                 dj.hard_fails.append((bname, qid, it["answer"], it.get("p"), it.get("evidence")))
-    if human is not None and (judge_paras == "always" or (judge_paras == "on_fail" and dj.hard_fails)):
+    # 段级：always 全判；on_fail 篇级有硬伤才全判，没有硬伤也要把暗题判一遍 —— 暗题防的正是「对着公开题库写、
+    # 篇级全过」的稿子，只在不过时才问就等于从来不问；never = 调用方明确不要段级调用（写作台 8 秒预算内用它），暗题也不判。
+    hidden_h = set()
+    if human is not None:
+        if hidden is None:
+            from .hidden import hidden_ids
+            hidden = hidden_ids(human.name, human.ids())
+        hidden_h = set(hidden) & set(human.ids())
+    run_all = judge_paras == "always" or (judge_paras == "on_fail" and bool(dj.hard_fails))
+    hidden_only = not run_all and judge_paras == "on_fail" and bool(hidden_h)
+    if human is not None and (run_all or hidden_only):
+        dj.para_mode = "all" if run_all else "hidden_only"
         paras = _para_split(body)
-        intent_bank = project if (project is not None and "intent_of_para" in project.ids()) else None
+        intent_bank = project if (run_all and project is not None and "intent_of_para" in project.ids()) else None
+        qids_h = None if run_all else sorted(hidden_h)
         for i, p in enumerate(paras):
             st = {"说明": "下面是一篇小红书稿子里的一段。只看这一段。", "段落": p, "位置": f"第 {i + 1} 段，共 {len(paras)} 段"}
-            r = judge_state(client, human, f"{subject_id}:p{i + 1}", st, subject_type=subject_type); _acc(r)
+            r = judge_state(client, human, f"{subject_id}:p{i + 1}", st, subject_type=subject_type, qids=qids_h); _acc(r)
+            dj.para_results.append((human.name, r))
             items = dict(r.items)
             if intent_bank is not None:
                 r2 = judge_state(client, intent_bank, f"{subject_id}:p{i + 1}", st, subject_type=subject_type, qids=["intent_of_para"]); _acc(r2)
+                dj.para_results.append((intent_bank.name, r2))
                 items.update(r2.items)
             dj.para_items.append({"idx": i + 1, "text": p, "items": items})
-        dj.para_stats = para_stats(dj.para_items)
+        if run_all:
+            dj.para_stats = para_stats(dj.para_items)     # 只判了暗题时不算分布：缺题算出来的比例是错的
     return dj
 
 
@@ -351,7 +370,8 @@ def redact(dj: DraftJudgement, hidden: set) -> dict:
             "ambiguous": [(b, q) for b, q in dj.ambiguous if q not in hidden],
             "para_stats": stats,
             "detail": {b: strip(items) for b, items in dj.detail.items()},
-            "paras": [{"idx": p["idx"], "items": strip(p["items"])} for p in dj.para_items]}
+            "para_mode": "none" if dj.para_mode == "hidden_only" else dj.para_mode,   # 只判了暗题 = 对写手来说段级没判
+            "paras": [v for v in ({"idx": p["idx"], "items": strip(p["items"])} for p in dj.para_items) if v["items"]]}
 
 
 def repair_prompt(draft: dict, plan: list) -> str:
@@ -379,8 +399,10 @@ def repair(generator: Generator, draft: dict, plan: list) -> dict:
 # ── 写中：best-of-k ────────────────────────────────────────────────────
 
 def score(dj: DraftJudgement, target: Optional[dict] = None) -> float:
-    """越小越好：硬伤每条 100，目标画像每处不符 10，歧义每处 1。"""
-    s = 100.0 * len(dj.hard_fails) + 1.0 * len(dj.ambiguous)
+    """越小越好：整篇没法判（正文太短）10000，硬约束没判出有效答案每条 1000，硬伤每条 100，目标画像每处不符 10，
+    歧义每处 1。没法判 / 没判出来的候选不能靠「零硬伤」赢过一篇能修的稿（它们 passed() 也是 False）。"""
+    s = (10000.0 if dj.invalid_reason else 0.0) + 1000.0 * len(dj.unjudged)
+    s += 100.0 * len(dj.hard_fails) + 1.0 * len(dj.ambiguous)
     for qid, want in (target or {}).items():
         if dj.profile.get(qid) is not None and dj.profile[qid] != want:
             s += 10.0

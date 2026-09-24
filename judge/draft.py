@@ -95,12 +95,17 @@ def setup_draft(get_bank: Callable[[str], Bank], names: list, *, subject_type: s
                 project_code: Optional[str] = None, category: Optional[str] = None, brief: Optional[dict] = None,
                 project_bank: Optional[dict] = None, project_bank_name: str = "project",
                 hard_rules: Optional[dict] = None) -> DraftSetup:
-    """policy 的 PolicyBlocked / PolicyInputError 原样抛出（HTTP 分别映射 403 / 422）。"""
-    decision = P.decide([subject_type], project_code, category)
+    """policy 的 PolicyBlocked / PolicyInputError 原样抛出（HTTP 分别映射 403 / 422）。
+    一篇稿子一定是未发布稿：subject_type 只能是 aw_version / ssll_sample，否则调用方写个 note 就绕过了数据出境（codex review on #2）。"""
+    if subject_type not in P.UNPUBLISHED_SUBJECT_TYPES:
+        raise DraftSetupError(f"判稿的 subject_type 只能是 {sorted(P.UNPUBLISHED_SUBJECT_TYPES)}（未发布稿），收到 {subject_type!r}；公开笔记走 /judge")
+    decision = P.decide([subject_type], project_code, category, published=False)
     loaded, fq, platform, human, project, ignored = split_banks(names, get_bank)
     inline, brief_hard = project_from_request(loaded, names, brief=brief, project_bank=project_bank,
                                               project_bank_name=project_bank_name)
     if inline is not None:
+        if project is not None:
+            raise DraftSetupError(f"banks 里已经有项目层题库 {project.name!r}，又给了 brief / project_bank：项目层只能有一份来源")
         project = inline; loaded[project.name] = project
     if project is not None and not decision.project_layer:
         decision.dropped_banks.append(project.name)

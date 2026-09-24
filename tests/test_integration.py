@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -406,3 +407,163 @@ def test_run_gold_report_names_gold_version(tmp_path):
              "--gold", str(ROOT / "banks" / "gold" / "comment_reader_gold_v0.2_proposed.yaml"), "--mock", "--out", str(out)])
     head = out.read_text(encoding="utf-8").splitlines()[:3]
     assert "金标准 cg-v0.2-proposed" in head[0] and "未经勘误" in "\n".join(head)
+
+
+# ── codex review on #2 ──
+
+THREAD_OK = {"praise_share": {"type": "choice", "choice": "少数", "probabilities": {"少数": 0.8, "多数": 0.2}},
+             "same_template": {"type": "noul", "noul": 0.1}, "has_friction": {"type": "noul", "noul": 0.9},
+             "thread_arranged": {"type": "noul", "noul": 0.1}}
+POST = {"title": "t", "body": "戒烟第三天，嘴里没味，靠嗑瓜子撑着。", "kind": "product"}
+
+
+def test_postgrest_upsert_touches_extracted_at_only_on_the_ledger(monkeypatch):
+    import urllib.request
+    sent = []
+
+    class Resp:
+        status = 201
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=60: sent.append((req.full_url, json.loads(req.data))) or Resp())
+    C.postgrest_upsert([{"note_id": "x1", "fetched_at": "2026-09-24"}], "http://h", "k", table="external_notes")
+    assert "external_notes" in sent[0][0] and "extracted_at" not in sent[0][1][0]      # external_notes 没有这一列
+    C.postgrest_upsert([{"subject_id": "x", "extractor": "jev:1.13.0"}], "http://h", "k")
+    assert sent[1][1][0]["extracted_at"]
+
+
+def test_judge_draft_subject_type_is_always_unpublished(monkeypatch, policy_cfg):
+    from judge.draft import DraftSetupError, setup_draft
+    from judge.api import get_bank
+    with pytest.raises(DraftSetupError):
+        setup_draft(get_bank, ["platform_health_v0.1"], subject_type="note", project_code="OKMAN")
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k")
+    from fastapi.testclient import TestClient
+    from judge import api as A
+    called = []
+    real = A._client
+    monkeypatch.setattr(A, "_client", lambda: called.append(1) or real())
+    c = TestClient(A.app); H = {"X-Judge-Key": "k"}
+    for extra in ({}, {"project": "OKMAN"}, {"subject_type": "external_note"}):                # 写个 note 绕不过数据出境
+        r = c.post("/judge_draft", json={"title": "t", "body": BODY, "subject_type": "note", **extra}, headers=H)
+        assert r.status_code == 422 and "subject_type" in r.json()["detail"]
+    assert called == []
+    samp = c.post("/judge_draft", json={"title": "t", "body": BODY, "subject_type": "ssll_sample", "project": "OKMAN"}, headers=H)
+    assert samp.status_code == 403
+
+
+def test_hidden_subset_runs_on_fail_even_without_visible_failures():
+    from judge import loop as L
+    ph, hf = B.load_bank(PH, name="platform_health_v0.1"), B.load_bank(HF2, name="human_feel_para_v0.2")
+    hidden = {"para_register", "para_friction"}
+    n_paras = len(L._para_split(BODY))
+    jev = JevClient(mock=True)
+    dj = L.judge_draft(jev, {"title": "t", "body": BODY}, platform=ph, human=hf, hidden=hidden)           # 默认 on_fail，篇级没硬伤
+    assert not dj.hard_fails and dj.para_mode == "hidden_only" and len(dj.para_results) == n_paras
+    assert all(set(r.items) == hidden for _, r in dj.para_results) and dj.para_stats == {}
+    view = L.redact(dj, hidden)
+    assert view["para_mode"] == "none" and view["paras"] == [] and "para_register" not in json.dumps(view, ensure_ascii=False)
+    # 有硬伤：整段全判
+    now = dj.profile["efficacy_claim"]
+    dj2 = L.judge_draft(jev, {"title": "t", "body": BODY}, platform=ph, human=hf, hidden=hidden,
+                        hard_rules={("platform_health_v0.1", "efficacy_claim"): "否" if now == "是" else "是"})
+    assert dj2.hard_fails and dj2.para_mode == "all" and set(dj2.para_results[0][1].items) == set(hf.ids()) and dj2.para_stats
+    # never：调用方明确不要段级调用，暗题也不判
+    dj3 = L.judge_draft(jev, {"title": "t", "body": BODY}, platform=ph, human=hf, hidden=hidden, judge_paras="never")
+    assert dj3.para_mode == "none" and dj3.para_results == [] and dj3.calls == dj.calls - n_paras
+
+
+def test_paragraph_and_hidden_rows_are_written_but_not_returned(monkeypatch, policy_cfg):
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k")
+    from fastapi.testclient import TestClient
+    from judge import api as A
+    hidden = {"para_register", "para_friction"}
+    written = []
+    monkeypatch.setattr(A, "all_hidden", lambda banks: hidden)
+    monkeypatch.setattr(A, "_write_config_or_503", lambda: None)
+    monkeypatch.setattr(A, "_write_rows", lambda rows: written.extend(rows) or len(rows))
+    c = TestClient(A.app)
+    d = c.post("/judge_draft", json={"title": "t", "body": BODY, "subject_id": "v9", "project": "NRT", "write": True},
+               headers={"X-Judge-Key": "k"}).json()
+    para = [r for r in written if r["subject_id"].startswith("v9:p")]
+    assert hidden <= {r["question_id"] for r in para} and d["written"] == len(written) == d["rows"]    # 段级（含暗题）落账本
+    assert not any(r["question_id"] in hidden for r in d["ledger_rows"]) and len(d["ledger_rows"]) == len(written) - sum(r["question_id"] in hidden for r in para)
+
+
+def test_choice_without_its_own_probability_is_out_of_vocab():
+    b = B.load_bank(FQ)
+    q = b.by_id()["opening_type"]
+    a, other = list(q.criteria)[:2]
+    items = B.interpret(b, {"answers": {"opening_type": {"type": "choice", "choice": a, "probabilities": {other: 0.8}}}},
+                        asked=["opening_type"])
+    assert items["opening_type"]["answer"] is None and items["opening_type"]["invalid_reason"] == "out_of_vocab"
+    ok = B.interpret(b, {"answers": {"opening_type": {"type": "choice", "choice": a, "probabilities": {a: 0.3, other: 0.7}}}},
+                     asked=["opening_type"])
+    assert ok["opening_type"]["answer"] == a and ok["opening_type"]["p"] == 0.3                    # 所选答案自己的概率，不拿别的顶
+
+
+def test_thread_with_unanswered_questions_does_not_pass():
+    from judge import comments as CM
+    thread = B.load_bank(ROOT / "banks" / "comment_thread_v0.4.yaml")
+    comments = [{"text": "在哪买"}, {"text": "我也在戒，第五天了"}]
+    tj = CM.judge_thread(FixedJev({}), POST, comments, thread, fill=CM.fill_for(POST))
+    assert not tj.hard_fails and not tj.passed() and tj.needs_review
+    assert tj.unjudged == [(q, "missing") for q in thread.ids()]
+    part = {k: v for k, v in THREAD_OK.items() if k != "has_friction"}
+    tj2 = CM.judge_thread(FixedJev(part), POST, comments, thread, fill=CM.fill_for(POST))
+    assert tj2.unjudged == [("has_friction", "missing")] and not tj2.passed()
+    tj3 = CM.judge_thread(FixedJev(THREAD_OK), POST, comments, thread, fill=CM.fill_for(POST))
+    assert tj3.passed() and not tj3.needs_review
+    assert CM.thread_repair_plan(tj2, [], []) == []                    # 只是漏答：没有哪一位能换，不白烧重出
+
+
+def test_mcp_judge_thread_folds_comment_review_into_passed(monkeypatch, policy_cfg):
+    monkeypatch.setenv("JUDGE_MOCK", "1")
+    from judge import mcp_server as M
+    monkeypatch.setattr(M, "_client", lambda: FixedJev(THREAD_OK))   # 评论区四题都过；单条评论的读者题全漏答
+    d = M.judge_thread(POST["title"], POST["body"], [{"text": "在哪买"}, {"text": "我也在戒"}], project="NRT")
+    assert not d["hard_fails"] and not d["unjudged"]
+    assert d["needs_review"] and not d["passed"] and all(c["needs_review"] for c in d["comments"])
+    monkeypatch.setattr(M, "_client", lambda: FixedJev({}))
+    d2 = M.judge_thread(POST["title"], POST["body"], [{"text": "在哪买"}], project="NRT")
+    assert not d2["passed"] and d2["needs_review"] and len(d2["unjudged"]) == 4
+
+
+def test_fq_shadow_reference_matches_question_version():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fqs", ROOT / "scripts" / "fq_shadow.py"); fqs = importlib.util.module_from_spec(spec); spec.loader.exec_module(fqs)
+    rows = [{"subject_id": "s", "question_id": "q", "question_version": 2, "answer": "是", "evidence": None, "invalid_reason": None,
+             "extractor": "llm:a", "extracted_at": "2026-09-01"},
+            {"subject_id": "s", "question_id": "q", "question_version": 1, "answer": "否", "evidence": None, "invalid_reason": None,
+             "extractor": "llm:b", "extracted_at": "2026-09-20"},                                      # 更新但是旧版本
+            {"subject_id": "s", "question_id": "gone", "question_version": 1, "answer": "否", "evidence": None, "invalid_reason": None,
+             "extractor": "llm:a", "extracted_at": "2026-09-20"}]
+    assert fqs.latest_per_cell(rows)["s"]["q"]["answer"] == "否"                                   # 不给版本：旧行为
+    got = fqs.latest_per_cell(rows, {"q": 2})
+    assert got == {"s": {"q": {"answer": "是", "evidence": None, "invalid": None, "extractor": "llm:a"}}}
+    assert fqs.latest_per_cell(rows, {"q": 3}) == {}
+
+
+def test_named_project_bank_and_inline_source_are_exclusive(policy_cfg):
+    from judge.draft import DraftSetupError, setup_draft
+    get = lambda n: B.load_bank(PH, name=n)  # noqa: E731 — 任何 Jev 格式、名字不带通用 / 平台前缀的题库都算项目层
+    brief = {"hard_rules": [{"id": "must_ask", "ask": "有没有向读者提问？", "want": True}]}
+    with pytest.raises(DraftSetupError, match="项目层只能有一份来源"):
+        setup_draft(get, ["okman_brand"], project_code="TUGE", brief=brief)
+    with pytest.raises(DraftSetupError, match="项目层只能有一份来源"):
+        setup_draft(get, ["okman_brand"], project_code="TUGE", project_bank=yaml.safe_load(HF2.read_text(encoding="utf-8")))
+    ok = setup_draft(get, ["okman_brand"], project_code="TUGE", hard_rules={"okman_brand:efficacy_claim": False})
+    assert ok.project.name == "okman_brand" and ok.hard[("okman_brand", "efficacy_claim")] == "否"
+
+
+def test_invalid_and_unjudged_candidates_cannot_win_best_of_k():
+    from judge import loop as L
+    ph = B.load_bank(PH, name="platform_health_v0.1")
+    fixable = L.DraftJudgement(hard_fails=[("b", "q", "是", 0.9, None)])
+    assert L.score(L.DraftJudgement(invalid_reason="text_too_short")) > L.score(fixable)
+    assert L.score(L.DraftJudgement(unjudged=[("b", "q", "missing")])) > L.score(fixable)
+    jev = FixedJev({"efficacy_claim": {"type": "noul", "noul": 0.9}})                             # 能判的那篇：答「是」= 硬伤
+    gen = lambda prompt, n=1: ["标题：t\n太短了", "标题：t\n" + BODY]  # noqa: E731
+    (draft, dj), ranking = L.best_of_k(jev, gen, "p", 2, judge_kwargs={"platform": ph, "hard_rules": {(ph.name, "efficacy_claim"): "否"}})
+    assert draft["body"] == BODY and dj.hard_fails and dj.invalid_reason is None and ranking[0][1] < ranking[1][1]

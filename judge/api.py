@@ -32,6 +32,8 @@
     }
     返回 passed / profile / hard_fails / unjudged / ambiguous / para_stats / plan（修改单）/ recorded（未过闸二只记录的目标题）/
     detail / policy / 账本行。暗题（judge/hidden.py）不出现在 profile / detail / plan 等任何字段里；账本行照带全部题，调用方不得转给写手。
+    subject_type 只能是 aw_version / ssll_sample（一篇稿子一定按未发布稿过数据出境）。judge_paras = on_fail 时篇级没有硬伤也会判暗题；
+    段级结果（subject_id = <稿 id>:p<N>）与篇级一起落账本。
 
   数据出境（judge/policy.py，config/data_policy.yaml，docs/00 #7）
     未发布稿（aw_version / ssll_sample）必须带 project；处方药项目没清出境 → 403，detail 以 "policy:" 开头（调用方记 policy_blocked、不重试）；
@@ -296,21 +298,24 @@ def judge_draft(req: DraftRequest):
         _write_config_or_503()
     client = _client()
     try:
+        hidden = all_hidden(ds.loaded)
         dj = _judge_draft(client, {"title": req.title, "body": req.body}, fq=ds.fq, platform=ds.platform, project=ds.project,
                           human=ds.human, judge_paras=req.judge_paras, hard_rules=ds.hard, subject_id=req.subject_id,
-                          subject_type=req.subject_type)
+                          subject_type=req.subject_type, hidden=hidden)
     except JevError as exc:
         raise HTTPException(502, f"Jev 调用失败：{exc}")
-    hidden = all_hidden(ds.loaded)
     recorded: list = []
     plan = repair_plan(dj, ds.loaded, validated=set(req.validated or []), target=req.target, hidden=hidden, recorded=recorded)
     rows = []
     for bname, r in dj.results.items():
         rows.extend(ledger_rows(r, ds.loaded[bname], run_tag=req.run_tag))
+    for bname, r in dj.para_results:                  # 段级（含暗题）：subject_id = <稿 id>:p<N>
+        rows.extend(ledger_rows(r, ds.loaded[bname], run_tag=req.run_tag))
     written = _write_rows(rows) if req.write else None
     view = redact(dj, hidden)
+    shown = [r for r in rows if r["question_id"] not in hidden]    # 暗题的行进账本，但不回给调用方
     return {"subject_id": req.subject_id, **view, "plan": plan, "recorded": recorded,
             "calls": dj.calls, "usage": dj.usage, "banks": {n: {"version": b.version, "sha256": b.sha256} for n, b in ds.loaded.items()},
             "ignored_banks": ds.ignored, "hard_rules": {(f"{b}:hidden" if q in hidden else f"{b}:{q}"): ("hidden" if q in hidden else w) for (b, q), w in ds.hard.items()},
             "policy": ds.decision.as_dict(),
-            "rows": len(rows), "ledger_rows": rows if req.return_rows else None, "written": written}
+            "rows": len(rows), "ledger_rows": shown if req.return_rows else None, "written": written}
