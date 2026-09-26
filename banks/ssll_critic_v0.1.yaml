@@ -1,0 +1,213 @@
+# ════════════════════════════════════════════════════════════════════
+# 三省六部 · 网感二审 + 画像第三路（草案）  sc-v0.1
+# ════════════════════════════════════════════════════════════════════
+# 用途：三省六部 vibe_loop 的二审影子跑（docs/00 #5：记不分流）。主 critic（vibe_critic.md）判的
+#   multiplier_gate 四项 + template_test.still_holds，这里各出一道闭集题，给每一项一个带概率的第二意见。
+#   画像三题（persona_*_action）只给 persona 第三路用（三省六部 ENABLE_JEV_PERSONA_ROUTE，默认关），
+#   调用方用 qids 把两组题分开问，二审那一路不问画像题，画像那一路不问二审题。
+# 题义出处：sanshengliubu pipeline/prompts/vibe_critic.md
+#   第 0.3 步四乘数：reward_signal（对照 reward_type）/ interest_align（对照 stop_trigger）/
+#   gap_tension（对照 gap_direction）/ identity_consistency（对照 advertising_stance + product_role）；
+#   第 2.5 步模板性检测：template_test.still_holds。
+#   选项与 pass / weak / fail 的对应写在每题的 feeds 里；分流规则（任一 fail 即 fail、任一 weak 最多
+#   borderline）留在调用方，本题库只出事实，不出判决。
+# state 由调用方装（三省六部 orchestrator 从 _direction_index 与 cell_plan 取锚点，缺了写「（未标注）」）：
+#   平台 / 正文 / 奖励类型(reward_type) / 触发点(stop_trigger) / 缺口方向(gap_direction) /
+#   广告姿态(advertising_stance) + 姿态说明 / 产品角色(product_role)；画像三题另有 读者A / 读者B / 读者C。
+#   Jev 偏字面：锚点不装进 state，判的就不是主 critic 判的那件事，影子跑一致率会系统性偏低（docs/02 §5）。
+# 每道选择题都留出口（unclear_labels），选了出口按歧义进人工，不硬选。
+# Mode A：题干、定义与 state 里都不放任何表现类字段（D-017 / D-028）。
+# 这份是草案：金标准要从三省六部历次 vibe_critic 的逐 cell 评审里取样，两人对着定义标，再定阈值。
+# ════════════════════════════════════════════════════════════════════
+
+bank_version: sc-v0.1
+model: jev-1.13.0
+
+ambiguity:
+  choice_top_min: 0.60
+  choice_margin_min: 0.20
+  noul_band: [0.35, 0.65]
+
+questions:
+
+  # ── 二审：multiplier_gate 四项 ───────────────────────────────────────
+
+  - id: reward_signal
+    type: choice
+    instructions:
+      zh: 只看【正文】开头两三句：读者能不能一眼认出这条给的是哪一类好处（实用信息、社交信息、情绪共鸣、认知挑战、感官新奇、身份共谋），这一类和【奖励类型】是不是同一类？
+      en: Looking only at the first two or three sentences of the body, can a viewer tell at a glance which kind of payoff this piece offers, and is it the kind named in the reward-type field?
+    options:
+      - label: 一眼可见且对得上
+        zh: 开头两三句就能认出给的是哪一类好处，而且正是【奖励类型】写的那一类
+        en: "The opening makes the kind of payoff obvious, and it is the kind in the reward-type field"
+      - label: 读完才知道
+        zh: 开头看不出，要读到后面才知道能拿到什么
+        en: "Not visible in the opening; only clear after going through the rest"
+      - label: 看不出或对不上
+        zh: 读完都说不出能拿到什么（「今天想和大家分享我的生活」这种开头）；或者开头给的好处和【奖励类型】不是一类
+        en: "No payoff can be named even at the end, or the opening offers a different kind than the reward-type field"
+      - label: 说不清
+        zh: 【奖励类型】写的是「（未标注）」，或者正文太短看不出
+        en: "The reward-type field is unannotated, or the body is too short to tell"
+    unclear_labels: [说不清]
+    feeds: multiplier_gate.reward_signal —— 一眼可见且对得上 = pass，读完才知道 = weak，看不出或对不上 = fail
+    on_ambiguous: 进人工
+
+  - id: interest_align
+    type: choice
+    instructions:
+      zh: 【触发点】写的是让一类读者停下手指的具体心理状态。只看【正文】开头两三句：它能不能激活这个心理状态？
+      en: The trigger field describes the specific state of mind that makes a certain viewer stop scrolling. Looking only at the opening of the body, does it activate that state?
+    options:
+      - label: 激活了
+        zh: 开头的场景、物证或角色正对着【触发点】里那个心理状态，那类读者看到会本能地停下
+        en: "The opening scene, object or character hits that state of mind; such a viewer would stop by instinct"
+      - label: 方向对但不够锐
+        zh: 和【触发点】有关，但那类读者看到不会本能地停下
+        en: "Related to the trigger, but not sharp enough to make such a viewer stop by instinct"
+      - label: 错位
+        zh: 开头激活的是另一种心理状态，和【触发点】对不上
+        en: "The opening activates a different state of mind than the trigger"
+      - label: 锚点不可用
+        zh: 【触发点】写的是「（未标注）」，或者只是年龄、城市、性别这类人群标签，没有写心理状态，没法对照
+        en: "The trigger is unannotated or only a demographic label with no state of mind, so there is nothing to compare against"
+    unclear_labels: [锚点不可用]
+    feeds: multiplier_gate.interest_align —— 激活了 = pass，方向对但不够锐 = weak，错位 = fail；锚点不可用在主 critic 口径里是策略层的漏洞，影子期只记不映射
+    on_ambiguous: 进人工
+
+  - id: gap_tension
+    type: choice
+    instructions:
+      zh: 【正文】留给读者「好像懂了又没完全懂」的那个疑问，指向哪里？判正文实际写成的样子；【缺口方向】是策略层标的应有方向，只作参照。
+      en: Where does the open question the body leaves ("I almost get it, but not quite") point? Judge what the body actually does; the gap-direction field is only the intended direction, for reference.
+    options:
+      - label: 事件本身
+        zh: 疑问是「是谁、发生了什么、后来怎样」，像真人讲自己的事时自然留下的悬念
+        en: "Who it was, what happened, how it ended: the suspense a real person leaves when telling their own story"
+      - label: 方向模糊
+        zh: 既像在吊事件，又像在吊怎么照着做，两头都有
+        en: "Half about the event, half about how to replicate it"
+      - label: 复现方法
+        zh: 疑问是「做了什么就有这效果、在哪买、怎么用」，像在引人照着买、照着做
+        en: "What to do to get the result, where to buy, how to use: steering the viewer to copy or buy"
+      - label: 说不清
+        zh: 正文没留下明显的疑问，或者看不出指向哪里
+        en: "No clear open question, or its direction cannot be told"
+    unclear_labels: [说不清]
+    feeds: multiplier_gate.gap_tension —— 事件本身 = pass，方向模糊 = weak，复现方法 = fail
+    on_ambiguous: 进人工
+
+  - id: identity_consistency
+    type: choice
+    instructions:
+      zh: 按【广告姿态】和【姿态说明】，这篇以什么身份在说话？这个身份和它的真实目的，在普通读者眼里一致吗？
+      en: Given the stance field and its explanation, in what capacity is this piece speaking, and does that capacity match its real purpose in an ordinary viewer's eyes?
+    options:
+      - label: 一致
+        zh: 说话的身份就是【姿态说明】里写的合法身份，读者不会觉得被骗
+        en: "The speaking identity is the legitimate one in the stance explanation; no viewer would feel deceived"
+      - label: 有点别扭
+        zh: 身份大体合法，但有一两处口吻越了界（比如素人口吻里突然冒出一句推销话）
+        en: "Mostly legitimate, but one or two lines overstep (a sales line inside an ordinary user's voice)"
+      - label: 冒充
+        zh: 属于【姿态说明】里写的冒充情形，读者会觉得「你在骗我以为这不是广告」；【产品角色】是「副产品」、正文却通篇是推销口吻，也算（【广告姿态】是品牌自述时除外）
+        en: "One of the impersonation cases in the stance explanation, or the product role is a side item while the whole body is written as a sales pitch (not applicable when the stance is brand speaking for itself)"
+      - label: 说不清
+        zh: 正文看不出是以什么身份在说话
+        en: "Cannot tell in what capacity the piece is speaking"
+    unclear_labels: [说不清]
+    feeds: multiplier_gate.identity_consistency —— 一致 = pass，有点别扭 = weak，冒充 = fail
+    on_ambiguous: 进人工
+
+  # ── 二审：模板性检测 ────────────────────────────────────────────────
+
+  - id: template_still_holds
+    type: choice
+    instructions:
+      zh: 把【正文】里的品类、品牌和产品词换成一个完全无关的品类（护肤换成食品，食品换成数码，数码换成母婴），整篇的结构和情感逻辑还成立吗？
+      en: If the category, brand and product words in the body were swapped for an unrelated category (skincare to food, food to electronics, electronics to baby care), would the structure and emotional logic still hold?
+    options:
+      - label: 仍然成立
+        zh: 换完照样读得通，这是能套到任何品类上的模板话
+        en: "Still works after the swap; a template that fits any category"
+      - label: 部分成立
+        zh: 主体还能用，但有些细节换完就不通了
+        en: "The core survives, but some details stop making sense"
+      - label: 不成立
+        zh: 换完就读不通，内容深深绑在这个品类独有的场景、术语或人物关系上
+        en: "Breaks after the swap; bound to scenes, terms or relationships unique to this category"
+      - label: 说不清
+        zh: 正文里找不到可以替换的品类、品牌或产品词
+        en: "No category, brand or product word to swap"
+    unclear_labels: [说不清]
+    feeds: template_test.still_holds —— 仍然成立 = yes（fail），部分成立 = partially（borderline），不成立 = no（pass）
+    on_ambiguous: 进人工
+
+  # ── 画像第三路（默认关；只用 qids 单独问）────────────────────────────
+
+  - id: persona_core_action
+    type: choice
+    instructions:
+      zh: 假设你就是【读者A】写的那个人，正在【平台】上刷到这条，只看第一屏（开头一句和前两行），半秒之内你会怎么做？
+      en: Suppose you are the person in the viewer-A field, scrolling on the platform named in the state and seeing only the first screen (first sentence and the next two lines). What do you do within half a second?
+    options:
+      - label: 点开
+        zh: 会点进去看
+        en: "Open it"
+      - label: 划走
+        zh: 直接划过去
+        en: "Scroll past"
+      - label: 想留着
+        zh: 不光会点开，还想留着以后再看，或者转给身边的人
+        en: "Open it and also want to keep it for later or pass it to someone"
+      - label: 说不清
+        zh: 【读者A】写得太空，或者第一屏看不出是什么内容
+        en: "The viewer description is too vague, or the first screen gives no idea what this is"
+    unclear_labels: [说不清]
+    feeds: persona 第三路 —— 点开 = click，划走 = skip，想留着 = save；说不清不计入否决
+    on_ambiguous: 按「说不清」处理
+
+  - id: persona_edge_action
+    type: choice
+    instructions:
+      zh: 假设你就是【读者B】写的那个人，正在【平台】上刷到这条，只看第一屏（开头一句和前两行），半秒之内你会怎么做？
+      en: Suppose you are the person in the viewer-B field, scrolling on the platform named in the state and seeing only the first screen (first sentence and the next two lines). What do you do within half a second?
+    options:
+      - label: 点开
+        zh: 会点进去看
+        en: "Open it"
+      - label: 划走
+        zh: 直接划过去
+        en: "Scroll past"
+      - label: 想留着
+        zh: 不光会点开，还想留着以后再看，或者转给身边的人
+        en: "Open it and also want to keep it for later or pass it to someone"
+      - label: 说不清
+        zh: 【读者B】写得太空，或者第一屏看不出是什么内容
+        en: "The viewer description is too vague, or the first screen gives no idea what this is"
+    unclear_labels: [说不清]
+    feeds: persona 第三路 —— 点开 = click，划走 = skip，想留着 = save；说不清不计入否决
+    on_ambiguous: 按「说不清」处理
+
+  - id: persona_anti_action
+    type: choice
+    instructions:
+      zh: 假设你就是【读者C】写的那个人，正在【平台】上刷到这条，只看第一屏（开头一句和前两行），半秒之内你会怎么做？
+      en: Suppose you are the person in the viewer-C field, scrolling on the platform named in the state and seeing only the first screen (first sentence and the next two lines). What do you do within half a second?
+    options:
+      - label: 点开
+        zh: 会点进去看
+        en: "Open it"
+      - label: 划走
+        zh: 直接划过去
+        en: "Scroll past"
+      - label: 想留着
+        zh: 不光会点开，还想留着以后再看，或者转给身边的人
+        en: "Open it and also want to keep it for later or pass it to someone"
+      - label: 说不清
+        zh: 【读者C】写得太空，或者第一屏看不出是什么内容
+        en: "The viewer description is too vague, or the first screen gives no idea what this is"
+    unclear_labels: [说不清]
+    feeds: persona 第三路 —— 点开 = click，划走 = skip，想留着 = save；说不清不计入否决
+    on_ambiguous: 按「说不清」处理

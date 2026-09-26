@@ -1,11 +1,13 @@
 # 31 · Jev for BYWOOD content：一个模型、一套题库纪律、七个位置（说明 · 供讨论）
 
 > **状态**：2026-09-23 拍板版。按三个仓库当天的 main 写（truth-vault `d7615d5`，到 D-081；autowriter `b09df8e`；sanshengliubu `cab7750`，v0.36.1）。三仓没改代码；判定服务的骨架、题库、脚本和实跑结果在独立仓库 `judge`（见 §9）。
-> 它整合三样东西：[docs/30](30-jev-for-tv-and-aw.md)（Jev 在 TV 和写作台的用法）、今天的评论级实跑（`jev-comment-unit` 包，jev-1.13.0）、这几天讨论的「判在写前 / 写中 / 写后」三个参与点。docs/30 里已经写清的段落这里只引不抄。
+> 它整合三样东西：docs/30（Jev 在 TV 和写作台的用法）、今天的评论级实跑（`jev-comment-unit` 包，jev-1.13.0）、这几天讨论的「判在写前 / 写中 / 写后」三个参与点。docs/30 里已经写清的段落这里只引不抄。
+>
+> **勘误（2026-09-24）**：docs/30 与 `jev-comment-unit/`（含 `iteration-log.md`、`raw_comment_v0.3.json`、`comment_bank.yaml`、`thread_bank.yaml`、`jev_unit_judge.py`）没有进本仓、也不在三仓任何一个里，是当时的工作草稿；本文引「docs/30 §x」的地方指的就是那份未入库的草稿，其中用到的数字（单价、限流、延迟）已对照 TypeSafe 官方文档复核，其余以本仓 docs/01 与实跑报告为准（docs/02 §4 #2）。本文也只在本仓，不在 truth-vault。
 >
 > **一句话**：Jev 在 BYWOOD 内容生产里不是一个更快的抽取器，而是把三个仓库里散落的、由大模型顺手做的闭集判断（特征抽取、选卡、批评家的 pass / weak / fail、画像的 click / skip、评论意图）收成一件事：同一个模型、同一套题库纪律、同一张答案账本，把文字变成带概率的闭集事实，把人从「逐条判」换到「判分歧」。它不写字，不替人拍板，也不判「会不会爆」。
 >
-> **配套**：docs/28（特征层与三道闸）· docs/30 · `jev-comment-unit/iteration-log.md` · D-065 / D-072 / D-079 / D-081 · 官方文档 https://docs.typesafe.ai
+> **配套**：docs/28（特征层与三道闸，在 truth-vault）· docs/30（未入库）· `jev-comment-unit/iteration-log.md`（未入库）· D-065 / D-072 / D-079 / D-081 · 官方文档 https://docs.typesafe.ai
 >
 > **怎么读**：只看架构读 §1–§3；TV 读 §4；写作台读 §5；三省六部读 §6；成本与准确性读 §7；要拍板的在 §9。
 
@@ -29,7 +31,7 @@
 
 | 仓库 | 位置 | 现在谁判 | 已记录的问题 |
 |---|---|---|---|
-| TV | 特征层 20 题（`scripts/annotate_feature_pass.py`） | claude-opus-4-6，每篇 6 次分组调用 | 48–81 秒 / 篇；积压约 5,900 篇按 120 篇 / 晚要 49 天，且 on_demand 的 7 个项目约 2,419 篇不在夜跑里（D-076 / D-077） |
+| TV | 特征层 20 题（`scripts/annotate_feature_pass.py`） | claude-opus-4-6，每篇 6 次分组调用 | 48–81 秒 / 篇；积压约 5,900 篇按 120 篇 / 晚要 49 天，且有一批 on_demand 项目不在夜跑里（D-076 / D-077；勘误：原写「7 个项目约 2,419 篇」，TV 仓核不到这个数，D-081 只写 5 个项目 2,592 篇） |
 | TV | 闸一「人工那一半」 | Jev 顶替了人（D-081） | 自己验自己，没有人怎么看这个锚 |
 | TV | `comments` 的 `comment_intent` / `is_scripted` / `comment_type` | 没人填，9,035 行全 NULL | 「留给 LLM pass 填」，这个 pass 从来没做；约 5,000 条真实读者评论还没入库 |
 | TV | 馆员选卡（`librarian/core.py:_select_via_llm`） | sonnet-4-6 从 50 张里挑 3–5 张 | 冷路径 22–50 秒；`cache_key` 含 `draft_topic`，换选题必冷启动（D-074）；模型编造 id → degraded |
@@ -37,7 +39,7 @@
 | 写作台 | 查稿（`check_drafts`） | 只查重，四路指纹 | 除查重外没有任何质量或规则校验；P0 硬约束在 deskcore 里没有事后校验（`validator.py` 未被 import） |
 | 写作台 | 发牌（`draw_angles`） | 均匀随机，14,592 个组合 | 不筛「写不出来」的组合；台账不记结果 |
 | 三省六部 | 批评家 `vibe_critic` 的 `multiplier_gate`（4 项 pass / weak / fail）、`template_test`、`severity`、`root_cause_kind` | kimi-k2.6，一次判全部 cell | 「主 critic 给 AI 腔内容发放水票」（README:189）；输出截断要靠 fail-closed 补回 |
-| 三省六部 | 画像模拟 click / skip / save、消费者模拟 stop / scroll | k2.6 + v4-flash 两路取交集 | 两路都是生成式模型，交集只是把方差对冲掉 |
+| 三省六部 | 画像模拟 click / skip / save、消费者模拟 stop / scroll | 画像：k2.6 + v4-flash 两个 backend，每个 backend 内 ≥3 个画像一致否决才算这个 backend 否决，再对两个 backend 取交集（`orchestrator.py:3178-3198`）；消费者模拟只调一路、只复判 `interest_align = weak` 的 cell（`:4948-5005`） | 都是生成式模型，交集只是把方差对冲掉 |
 | 三省六部 | 结构审 3 项 pass / incomplete | 确定性审计 + k2.6 辅助 | — |
 | 三省六部 | 批量采样 5 篇 / cell | 采样后只跑正则（`check_redlines` / `check_craft`），**正文不落库** | 「11 道闸，1 个样本」（config.py:1700）；采样是唯一多样本的地方却没被判 |
 | 三省六部 | 预埋评论 `comment_seeds` | 工部·构建顺带产出，2–3 条 | 只查「有没有」，内容没人看 |
@@ -73,7 +75,7 @@ Jev 能做的：闭集选择（Choice ≤ 255 项）、有序分档（Score）�
 ### 2.1 服务放在独立仓库，账本留在 TV
 
 - **位置**：独立仓库 `judge`，Railway 单独一个服务。对外一个接口：`POST /judge`，入参 `{bank, subjects: [{subject_type, subject_id, raw_content | state}], run_tag, write}`，出参每个 subject 每题的答案、概率、是否歧义、证据句；`write=true` 直接写账本，否则调用方拿 SQL。密钥只在这个服务的环境变量里（docs/30 §4）。写手侧另有一个 MCP 入口（`judge.mcp_server`：judge_draft / repair_plan_for / judge_comments）。
-- **为什么不放 TV**：TV 已有 worker / librarian / onboarder / dashboard 四个服务，`ci.yml` 离 505,000 字节的棘轮上限只剩约 1.3 KB（D-075），题库又是三仓共用的。深度集成的实质是三样：共用一张账本（`note_feature_answers`，按 D-004 这里存的是事实）、共用一套题库纪律（fq 题库从 TV 原样 vendor 并记校验和，同 D-041）、每仓一个薄客户端。写作台调它就像调馆员（`librarian_client.py`），deskcore 的「一次 LLM 调用都没有」（`docs/deskcore.md:416`）不破：推理仍归调用方模型，deskcore 拿到的是事实。三省六部按 `kimi_client` + `llm_retry` 那套 advisory 写法调它，成本走 `accumulate_auxiliary_cost`。
+- **为什么不放 TV**：TV 已有 worker / librarian / onboarder / dashboard 四个服务，`ci.yml` 离 505,000 字节的棘轮上限只剩约 1.3 KB（上限写在 TV 的 `scripts/check_system_map.py:322`；D-075 正文只记 heredoc 块数棘轮），题库又是三仓共用的。深度集成的实质是三样：共用一张账本（`note_feature_answers`，按 D-004 这里存的是事实）、共用一套题库纪律（fq 题库从 TV 原样 vendor 并记校验和，同 D-041）、每仓一个薄客户端。写作台调它就像调馆员（`librarian_client.py`），deskcore 的「一次 LLM 调用都没有」（`docs/deskcore.md:416`）不破：推理仍归调用方模型，deskcore 拿到的是事实。三省六部按 `kimi_client` + `llm_retry` 那套 advisory 写法调它，成本走 `accumulate_auxiliary_cost`。
 - **失败退回现行路径**：特征层退回 worker 的 Opus 路径，选卡退回大模型选卡，写作台入库判定和三省六部二审直接跳过并记状态，都不阻塞主流程（同 docs/30 §4）。
 
 ### 2.2 题库分三层
@@ -118,10 +120,10 @@ docs/30 §1.3 的五条加上今天迭代日志里学到的，合成一条纪律
 | # | 位置 | 现在 | 用 Jev 之后 | 收益量级 | 前提 |
 |---|---|---|---|---|---|
 | ① | TV 特征层生产抽取 | Opus，6 次分组调用，48–81 秒 / 篇，积压 49 天以上 | 一篇一次调用，20 题一起问，附「依据是哪一句」 | 全库约半美元、一小时内；Railway 5 分钟边缘、409 连坐、假绿在这一步上不存在 | 闸一过线，且闸一有人工锚 |
-| ② | TV 评论三列 + 真实读者评论 | 9,035 行三列全 NULL；约 5,000 条读者评论未入库 | 运营侧填 `comment_intent` / `comment_type` / `is_scripted`；读者侧跑 7 题得到「评论构成」 | 约 1.4 万行、两美元、几分钟；D-062 判爆口径里混着铺评，评论构成比条数更能说明问题 | `comments` 加 `source` / `is_truncated`（评估文档 B2）；`subject_type` 加 `comment` |
+| ② | TV 评论三列 + 真实读者评论 | 9,035 行三列全 NULL；约 5,000 条读者评论未入库 | 运营侧判 `comment_intent` / `is_scripted`，答案落账本、不回写 comments 三列（勘误 2026-09-24，见 §3）；读者侧跑 7 题得到「评论构成」 | 约 1.4 万行、两美元、几分钟；D-062 判爆口径里混着铺评，评论构成比条数更能说明问题 | `comments` 加 `source` / `is_truncated`（评估文档 B2）；`subject_type` 加 `comment` |
 | ③ | 写作台借卡 | 馆员 LLM 冷路径 22–50 秒，换选题必冷 | 每张候选卡一道是非题，50 题一次调用，按概率取前 3–5；「为什么、借什么」用卡上现成的字段 | 一两秒；超时和「TV 干完了写手挂断」不复存在 | 影子跑：对 `flywheel_librarian_cache` 里的历史 brief 比重合度 |
 | ④ | 写作台发牌筛组合 | 14,592 个组合均匀随机 | 发牌前对 60 个候选各问一道「写得出来吗」，筛掉拧巴的再随机 | 多一秒 | 只筛「写不出」，不筛「不够爆」；按规律加权等闸二，且保留 15% 纯随机（D-065 续） |
-| ⑤ | 写作台入库判定 | `check_drafts` 只查重；`commit_drafts` 交付即入库 | 入库时对每篇跑特征题库 + 人感题库 + 平台题库 + 项目题库，结果与「退回理由」（题号 + 概率）一起返回写手；答案落 `note_feature_answers(aw_version)` | 每篇一两次调用；两千篇 / 月连句级修补几美元 | 影子期只记不拦（docs/28 §7.3 与 §11 第 8 条：最低档 `revise`，TV 不拦发布）；写手多在发牌后散场（D-071），所以判必须挂在入库而不是新工具 |
+| ⑤ | 写作台入库判定 | `check_drafts` 只查重；`commit_drafts` 交付即入库 | 入库时对每篇跑特征题库 + 人感题库 + 平台题库 + 项目题库，结果与「退回理由」（题号 + 概率）一起返回写手；答案落 `note_feature_answers(aw_version)` | 每篇一两次调用；两千篇 / 月连句级修补几美元 | 影子期只记不拦（docs/28 §7.3 与 §11 第 8 条：最低档 `revise`，TV 不拦发布）；D-071 原文是写手没散场、稿子在外面写完经 tv-sync 补录（本文 §5.1 勘误），所以挂在 commit_drafts 只覆盖走写作台交付的稿，补录稿由 ① 事后抽取覆盖 |
 | ⑥ | 三省六部 | 批评家、画像、结构审、二审全是生成式模型；采样 5 篇不落库；预埋评论没人看 | Jev 做批评家的二审并给 `multiplier_gate` / `template_test` 出概率；采样正文落库后用同一题库判，每 cell 得到分布而不是 1 个样本；预埋评论过评论题库 | 每次 run 约 150 次调用、几美分、几十秒 | 新 stage_log 要登记进 `PIPELINE_STAGE_ORDER`；`sample_one_cell` 要保留正文；`subject_type` 加 `ssll_sample` |
 | ⑦ | 素人初稿入口 | 在三仓之外（企微 / 飞书链路） | 同一服务、同一套通用 + 平台 + 项目题库，初稿先判再改 | — | 这条链路不在三仓里，要单独定接口 |
 | ⑧ | 外部语料 | 飞轮里只有自家发过的笔记；三省六部的 SocialDataX 只给策略辩论看 10 条热帖，不进特征层 | TikHub 每周一定时按关键词抓公开笔记（高互动一半、综合排序一半），搜索页先过分诊四题再花钱取全文，同一套 fq 题库打标，落 `external_notes` 表 + 账本 `external_note`；参考分布由视图 `v_external_reference` 算；做闸二的外部复核、给经验卡和 reference_samples 加外部来源 | 每次运行硬上限 4 美元（默认配置最坏 2.8 美元：80 页搜索 + 最多 200 篇全文），每品类每月 160 篇，约 12 美元 / 月；Jev 费用忽略 | 不进 `v_l2_labels`；互动数只在 `external_notes` 里，不进 state |
@@ -140,7 +142,8 @@ docs/30 §2 已经写了特征抽取（§2.1）、闸一人工锚（§2.2）、�
 
 TV 里的评论是两种东西，题库也分两套：
 
-- **运营侧**：`comments` 表现有 9,035 行全是运营写的随贴评论。题就是表里的闭集：`comment_intent`（补充信息 / 反驳质疑 / 蓝词植入 / 共鸣扩散 / 引导私信 / 其他）、`comment_type`（贴主评论 / 素人评论 / 控评植入 / 其他）。`is_scripted` 是对抗性判断，docs/30 §2.3 已定只作参考，铺评以「维护情况」和 D-060 的来路为准。
+- **运营侧**：`comments` 表现有 9,035 行全是运营写的随贴评论。题就是表里的闭集：`comment_intent`（补充信息 / 反驳质疑 / 蓝词植入 / 共鸣扩散 / 引导私信 / 其他）。`is_scripted` 是对抗性判断，docs/30 §2.3 已定只作参考，铺评以「维护情况」和 D-060 的来路为准。
+  **勘误（2026-09-24，docs/02 §4 #6）**：答案只落账本（`note_feature_answers`，subject_type = comment），**不回写** comments 表的 `comment_intent` / `comment_type` / `is_scripted` 三列——业务表归 TV 的同步脚本管，judge 不改 TV 的业务表；要按列看就从账本 join。`comment_type` 不出题（它是运营自己标的来路，不是从文字判的）。「蓝词植入」留在闭集里（与表的 CHECK 逐字相同），定义改成只看文字能判的「点名植入」，有没有目标蓝词由代码列 `contains_blue_keyword` 管（co-v0.2）。
 - **读者侧**：「评论区快照」里约 5,000 条真实读者评论，跑今天的 7 题（言语行为 / 点名品牌 / 接住帖子 / 细节程度 / 语域 / 读者用处 / 像不像安排的），得到每篇的评论构成：提问几条、质疑几条、背书几条。这才是 D-062 说的「评论构成比评论条数更能说明问题」能落地的形式，也是评论侧第一个可以进闸二的特征（例：评论区有提问和质疑的帖子是否更常爆）。
 
 `echoes_post` 那道题的题干里要塞进本篇的要点，代码从 `raw_content` 取前几句即可；这是评论题库里唯一按篇变的部分。判定服务里已做成题库 v0.4 的占位符（`{post_points}` 等），由 `comments.fill_for(post)` 填，漏填报错；途鸽用例填回去与 v0.3 逐字相同，金标准不重跑。
@@ -166,7 +169,9 @@ docs/30 §3 已写借卡（§3.1）、发牌（§3.2）、查稿（§3.3）、�
 
 ### 5.1 判挂在入库，不挂在新工具
 
-D-071 的实查是写手「抽完就散场」，`review_drafts` 一次没被调用过，`check_drafts` 也被跳过（途鸽 09-10 那天 66 条里 49 条没带 angle_key）。09-18 起「交付即入库」，`commit_drafts` 成了每篇稿必经的唯一一步。所以入库判定挂在 `commit_drafts`：入库闸跑完、指纹写完之后，把本批稿子（标题、第一句、最后一段、正文，按 fq 的 `build_spans` 同样切法）发给 TV 的 `/judge`，题库是 fq + 人感 + 平台 + 项目四层的公开题部分；答案落 `note_feature_answers(subject_type='aw_version', subject_id=versions.id)`；返回里带每篇的答案表和「退回理由」：不过的题号、概率、以及项目题库对应的 P0 条目。
+**勘误（2026-09-24，docs/02 §4 #1）**：这一段原先把 D-071 读反了。D-071 原文是「第一版写的是『会话停在发牌之后就散了』——那是猜的，而且错了」：写手没散场，继续用写作台发牌，但写稿和交付走了别的路，成品发布后由 tv-sync 倒灌回来（`_ingest_published_unlocked`，明写「没走 commit_drafts 的稿子补进库…不过闸」）；`review_drafts` 一次没被调用过在 D-072。所以 `commit_drafts` **不是**每篇稿必经的一步，入库判定只覆盖走写作台交付的那部分稿。定下来的覆盖面：只挂 `commit_drafts`；补录进来的稿已经发布，是公开笔记，由 TV ① 的特征层事后抽取覆盖，不另挂判定。
+
+入库判定挂在 `commit_drafts`：入库闸跑完、指纹写完、项目写锁释放之后（锁内多等 8 秒会占同项目其它 commit / ingest 的时间预算，异常还会触发整批 stash 回滚），把本批稿子发给 judge 服务的 `/judge_draft`（带项目代号，数据出境规则见 docs/00 #7），题库是 fq + 人感 + 平台三层，项目层只在项目放行时加上；答案落 `note_feature_answers(subject_type='aw_version', subject_id=versions.id)`；返回里带每篇的答案表和「退回理由」：不过的题号、概率、以及项目题库对应的 P0 条目。
 
 影子期只记不拦。docs/28 §7.3 和 §11 第 8 条定过：最低档用 `revise`，TV 不拦发布（R-007）。等闸二有了验证过的特征，再把「落在历史最低 20%」和「平台题库硬命中」两类标成 `revise`，仍然不拦。
 
@@ -174,7 +179,7 @@ D-071 的实查是写手「抽完就散场」，`review_drafts` 一次没被调�
 
 - **「服务端不调 LLM」**（`core.py:2642-2654`）：入库判定是 HTTP 调 TV，deskcore 不引入任何模型 SDK。和借卡是同一种关系。
 - **fail-open 白名单**被 `ci.yml` 的 `SAFE_OK` 钉死（`list_projects` / `borrow_lessons` / `my_style` / `my_rules`）：`commit_drafts` 不在名单里，写类工具出错必须抛。所以判这一步在 `commit_drafts` 内部要单独包一层：判失败只在返回里记 `judge_status = timeout / error`，不影响入库成功。这一层不改 `SAFE_OK`。
-- **延迟预算**：`open_project` 已挂着最长 60 秒的借阅；`commit_drafts` 现在约 1–2 秒。判每篇一次调用（20 + 十几题一起问）约 1 秒，一批 10 篇并行也是一两秒，超时定 8 秒，超时即跳过。
+- **延迟预算**：`open_project` 已挂着最长 60 秒的借阅；「`commit_drafts` 现在约 1–2 秒」在仓库里没有依据（函数内无计时），写作台已加 `elapsed_ms` 攒样本再定。判每篇一次调用（20 + 十几题一起问）约 1 秒，一批 10 篇并行也是一两秒，超时定 8 秒，超时即跳过。
 
 ### 5.3 台账要记结果
 
@@ -205,7 +210,7 @@ D-071 的实查是写手「抽完就散场」，`review_drafts` 一次没被调�
 
 现在网感循环每轮：主 critic（k2.6，一次判全部 cell）→ fail-closed 补回 → 二审 `run_kimi_critic`（v4-flash，只判主 critic 放过的）→ prose_gate 硬命中强制 fail → 结构 hint 强制 borderline → 按 `root_cause_kind` 分流重写。二审的职责就是「专治主 critic 给 AI 腔发放水票」，它本身也是生成式模型。
 
-换法：二审由 Jev 做，题就是 `multiplier_gate` 的四项（reward_signal / interest_align / gap_tension / identity_consistency，各 pass / weak / fail）、`template_test.still_holds`（yes / partially / no）和人感题库。每个 cell 单独判、并行、不看其他 cell，没有截断，没有放水。主 critic 保留，因为 `rewrite_directives` 和 `root_cause_kind` 的解释仍要它写；分流规则改成：Jev 任一项 fail 即 fail，任一 weak 最多 borderline，与现有规则同口径。`persona_simulator` 的 click / skip / save 同理可以加一路 Jev 作第三方，弱 cell 的判据从「两个后端都判 skip」改成「两个生成式后端加 Jev 至少两路判 skip」。
+换法：二审由 Jev 做，题就是 `multiplier_gate` 的四项（reward_signal / interest_align / gap_tension / identity_consistency，各 pass / weak / fail）、`template_test.still_holds`（yes / partially / no）和人感题库。每个 cell 单独判、并行、不看其他 cell，没有截断，没有放水。主 critic 保留，因为 `rewrite_directives` 和 `root_cause_kind` 的解释仍要它写。**勘误（2026-09-24）**：「任一 fail 即 fail」只存在于提示词（`vibe_critic.md:210-213`），orchestrator 原样取二审的 severity，Jev 的 `interest_align / reward_signal = fail` 若归 strategic 会触发整轮回中书省重跑，误报代价极不对称；所以影子期 Jev 的结果只写进 `critic_result["_jev_arbitration"]` 与 stage_log，不改分流；切换时 Jev 只产生 surface / template / structural_* 三类，strategic 仍由主 critic 定。二审的 state 要装上方向锚点（stop_trigger、reward_type、gap_direction、advertising_stance / product_role），否则判的不是同一件事。`persona_simulator` 的 click / skip / save 同理可以加一路 Jev 作第三方，弱 cell 的判据从「两个后端都判 skip」改成「两个生成式后端加 Jev 至少两路判 skip」。
 
 接入方式照 `kimi_client` + `llm_retry`：advisory，失败降级为现行二审，成本走 `accumulate_auxiliary_cost`；新 stage_log 名登记进 `PIPELINE_STAGE_ORDER` / `REFINEMENT_MARKER_ANCHORS`，否则 resume 会用旧快照盖掉。
 
@@ -217,9 +222,9 @@ D-071 的实查是写手「抽完就散场」，`review_drafts` 一次没被调�
 
 `comment_seeds` 由工部·构建顺带产出，2–3 条，只查有没有。改走 `comments.produce_comments`：工部·构建按评论位出候选，判定服务判、下修改单、成组判、换位；言语行为落在「亲历背书 / 旁观推荐」的进高风险复核，落在「提问 / 补充经验 / 回复答疑」的放行；`register` 判文案腔、`reader_value` 判只有评价的一并退回构建。评论区的营销职能是承接，不是背书，这条口径和 secretariat.md「经得起发出去评论区会怎么回的检验」一致。
 
-### 6.4 顺手：一份黑名单变两份
+### 6.4 顺手：一份黑名单变五份
 
-`_validate_prompt_cell` 自带 11 条 ai_cliches，`prose_gate.AI_CLICHE_BLACKLIST` 15 条，两份不同，与 architecture.md「单一来源」不符；`_prose_soft_flags` 写了但全仓没有地方读。这两处和 Jev 无关，但人感题库从这些清单起草时要先合并成一份。
+`_validate_prompt_cell` 自带 11 条 ai_cliches，`prose_gate.AI_CLICHE_BLACKLIST` 15 条，另有 `vibe_critic.md:252-255`、`vibe_rewriter.md:82`、`works_builder.md:130` 三份写在提示词里，一共五份（勘误：原文写两份），与 architecture.md「单一来源」不符；`_prose_soft_flags` 写了但全仓没有地方读。这两处和 Jev 无关，但人感题库从这些清单起草时要先合并成一份。
 
 ---
 
@@ -321,4 +326,4 @@ Ziao 定了两条：服务不放 TV、闸一不补；其余按 Claude 判断。�
 
 包内（judge 仓）用同一题库重跑对修订金标准 49/49；`echoes_post` 那格在 0.5 上下，state 里多一个字段就会翻，属于歧义带内的正常波动。
 
-修订金标准改了 7 处，每一处都能用 v0.3 的定义说通，但它是看过模型答案之后改的，按 §2.3 第 4 条要经人勘误才算数。完整过程、逐条归因和脚本在 `jev-comment-unit/`。
+修订金标准改了 8 处（勘误：原写 7 处，漏数了 c3 的 arranged），每一处都能用 v0.3 的定义说通，但它是看过模型答案之后改的，按 §2.3 第 4 条要经人勘误才算数。完整过程、逐条归因和脚本在 `jev-comment-unit/`。

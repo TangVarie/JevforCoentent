@@ -8,6 +8,7 @@
       "write": false,                            # true = 直接写 note_feature_answers（需要 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY）
       "return_rows": true,                       # 把账本行原样带回（调用方自己落库时用）
       "with_evidence": true,                     # note 类：是否做「依据是哪一句」
+      "project": "TUGE", "category": "教育",        # 有未发布 subject（aw_version / ssll_sample）时必填 project，见「数据出境」
       "subjects": [
         {"subject_type": "note", "subject_id": "NUC_phase1_recv…", "raw_content": "…", "title_extraction": "markers"},
         {"subject_type": "comment", "subject_id": "…", "state": {"帖子标题": "…", "评论原文": "…"},
@@ -16,18 +17,28 @@
     }
     subjects 并行判（JUDGE_WORKERS，默认 4 路），单个 subject 的 Jev 失败只让它自己带 error，不拖累整批；全部失败才 502。
     返回每个 subject 的 items（答案、概率、歧义、证据）、歧义题列表、用量与延迟；write=true 时另返回写入行数。
+    write=true 时 with_evidence 必须为 true（TV 契约：答「是」要有证据，否则账本 answer 为 NULL）。
 
   POST /judge_draft   （一篇稿子、多层题库、带修改单；写作台 commit_drafts 挂的是它）
     {
       "title": "…", "body": "…", "subject_id": "<versions.id>", "subject_type": "aw_version",
-      "banks": ["feature_questions_v0_1", "platform_health_v0.1", "human_feel_para_v0.1"],
+      "project": "<项目代号，必填>", "category": "<可选，TV 统一词表>",
+      "banks": ["feature_questions_v0_1", "platform_health_v0.1", "human_feel_para_v0.2"],   # 默认就是这三层
       "brief": {"intents": [...], "hard_rules": [{"id": "no_price", "ask": "…", "want": false}], "angle": {...}},   # 可选：按 brief 现编项目题库
       "project_bank": {…Jev 格式题库内容…},       # 可选：或直接内联一份项目题库
       "hard_rules": {"platform_health_v0.1:efficacy_claim": "否"},   # 可选：不给用默认（平台三题 + fq efficacy_promise 为「否」）+ brief 的 want
       "target": {"opening_type": "具体事件"}, "validated": ["opening_type"],   # 可选：目标画像 / 过了闸二的 fq 题
       "judge_paras": "on_fail", "run_tag": "primary", "write": false, "return_rows": true
     }
-    返回 passed / profile / hard_fails / ambiguous / para_stats / plan（修改单）/ detail / 账本行。
+    返回 passed / profile / hard_fails / unjudged / ambiguous / para_stats / plan（修改单）/ recorded（未过闸二只记录的目标题）/
+    detail / policy / 账本行。暗题（judge/hidden.py）不出现在 profile / detail / plan 等任何字段里；账本行照带全部题，调用方不得转给写手。
+    subject_type 只能是 aw_version / ssll_sample（一篇稿子一定按未发布稿过数据出境）。judge_paras = on_fail 时篇级没有硬伤也会判暗题；
+    段级结果（subject_id = <稿 id>:p<N>）与篇级一起落账本。
+
+  数据出境（judge/policy.py，config/data_policy.yaml，docs/00 #7）
+    未发布稿（aw_version / ssll_sample）必须带 project；处方药项目没清出境 → 403，detail 以 "policy:" 开头（调用方记 policy_blocked、不重试）；
+    项目层没放行 → 整层去掉，回显在 policy.dropped_banks / dropped_hard_rules。公开内容（note / external_note / comment）不受限。
+  JUDGE_MOCK=1 时判出来的行 extractor 是 mock:<模型>，任何 write=true 一律 422：假答案绝不进真账本。
 
 鉴权：X-Judge-Key 必须等于 JUDGE_API_KEY；没配 JUDGE_API_KEY 时默认一律 503 拒绝（fail-closed），本地开发显式设 JUDGE_ALLOW_ANONYMOUS=1。
 /health 不鉴权（Railway 探活），只回布尔与题库名，不回密钥。Jev 密钥不出服务端；调用方自己 fail-open。
@@ -44,13 +55,17 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from . import __version__
+from . import policy as P
 from . import spans as sp
-from .banks import Bank, check_bank, discover, load_bank, load_bank_data, unfilled
+from .banks import Bank, check_bank, discover, load_bank, unfilled
 from .core import judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
+from .draft import DraftSetupError, setup_draft
+from .hidden import all_hidden
 from .jev_client import JevClient, JevError
-from .loop import DEFAULT_HARD_RULES, compile_project_bank, judge_draft as _judge_draft, project_hard_rules, repair_plan
+from .loop import judge_draft as _judge_draft, redact, repair_plan
 
 BANKS_DIR = Path(os.environ.get("JUDGE_BANKS_DIR", Path(__file__).resolve().parent.parent / "banks"))
+DEFAULT_DRAFT_BANKS = ("feature_questions_v0_1", "platform_health_v0.1", "human_feel_para_v0.2")
 TITLE_MODES = set(getattr(sp._tv, "TITLE_EXTRACTION_MODES", ("column", "markers", "none")))
 _BANK_CACHE: dict = {}
 
@@ -129,6 +144,9 @@ class JudgeRequest(BaseModel):
     with_evidence: bool = True
     extractor: Optional[str] = None
     return_rows: bool = True
+    project: Optional[str] = None           # 有未发布 subject 时必填（数据出境）
+    category: Optional[str] = None
+    published: Optional[bool] = None        # 显式 false = 按未发布稿处理（例如三省六部预埋评论：subject_type 是 comment，但帖子没发）
 
 
 def _validate_subjects(bank: Bank, subjects: list) -> None:
@@ -161,9 +179,20 @@ def _judge_one(client: JevClient, bank: Bank, s: Subject, with_evidence: bool):
 
 
 def _write_config_or_503() -> None:
-    """write=true 时先查写库配置，别等 Jev 钱花完了才 503。"""
+    """write=true 时先查写库配置，别等 Jev 钱花完了才 503；mock 模式一律不许写。"""
+    if os.environ.get("JUDGE_MOCK") == "1":
+        raise HTTPException(422, "JUDGE_MOCK=1：mock 判出来的是假答案，不能写进账本（去掉 write 或关掉 mock）")
     if not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")):
         raise HTTPException(503, "没配 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY，不能写库（write=true 之前先配）")
+
+
+def _policy(subject_types, project, category, published=None) -> "P.Decision":
+    try:
+        return P.decide(subject_types, project, category, published=published)
+    except P.PolicyBlocked as exc:
+        raise HTTPException(403, str(exc))
+    except P.PolicyInputError as exc:
+        raise HTTPException(422, str(exc))
 
 
 def _parallel(fn, items: list) -> list:
@@ -188,18 +217,26 @@ def health():
 
 @app.get("/banks", dependencies=[Depends(require_key)])
 def banks():
+    """题库清单。暗题（judge/hidden.py）只报个数不报题号：调用方可能把这份清单转给写手。"""
+    from .hidden import hidden_ids
     out = []
     for name, path in discover(BANKS_DIR).items():
         b = load_bank(path, name=name)
-        out.append({"name": name, "version": b.version, "model": b.model, "format": b.fmt,
-                    "questions": b.ids(), "sha256": b.sha256, "problems": check_bank(b)})
+        h = hidden_ids(name, b.ids())
+        out.append({"name": name, "version": b.version, "model": b.model, "format": b.fmt, "layer": P.layer_of(name),
+                    "questions": [q for q in b.ids() if q not in h], "hidden": len(h), "sha256": b.sha256, "problems": check_bank(b)})
     return out
 
 
 @app.post("/judge", dependencies=[Depends(require_key)])
 def judge(req: JudgeRequest):
+    decision = _policy([s.subject_type for s in req.subjects], req.project, req.category, req.published)
     bank = get_bank(req.bank)
+    if not decision.published and P.layer_of(bank.name) == "project" and not decision.project_layer:
+        raise HTTPException(403, f"policy: 项目 {decision.project} 的未发布稿不能跑项目层题库 {bank.name}（没进 project_layer_cleared，docs/00 #7）")
     _validate_subjects(bank, req.subjects)
+    if req.write and not req.with_evidence:
+        raise HTTPException(422, "write=true 时 with_evidence 必须为 true：答「是」没有证据的行按 TV 契约是无效行（evidence_not_found）")
     if req.write:
         _write_config_or_503()
     client = _client()
@@ -215,7 +252,8 @@ def judge(req: JudgeRequest):
         raise HTTPException(502, results[0]["error"])
     written = _write_rows(rows) if req.write else None
     return {"bank": bank.name, "bank_version": bank.version, "model": bank.model, "results": results,
-            "rows": len(rows), "errors": errors, "ledger_rows": rows if req.return_rows else None, "written": written}
+            "rows": len(rows), "errors": errors, "ledger_rows": rows if req.return_rows else None, "written": written,
+            "policy": decision.as_dict()}
 
 
 # ── /judge_draft ─────────────────────────────────────────────────────────
@@ -225,7 +263,9 @@ class DraftRequest(BaseModel):
     body: str
     subject_id: str = "draft"
     subject_type: str = "aw_version"
-    banks: list[str] = Field(default_factory=lambda: ["feature_questions_v0_1", "platform_health_v0.1", "human_feel_para_v0.1"])
+    project: Optional[str] = None           # 未发布稿必填（数据出境，docs/00 #7）
+    category: Optional[str] = None
+    banks: list[str] = Field(default_factory=lambda: list(DEFAULT_DRAFT_BANKS))
     brief: Optional[dict] = None
     project_bank: Optional[dict] = None
     project_bank_name: str = "project"
@@ -238,62 +278,6 @@ class DraftRequest(BaseModel):
     return_rows: bool = True
 
 
-def _split_banks(names: list) -> tuple:
-    """按名字分层：fq = 第一个 TV 格式；platform / human 按前缀；其余 Jev 格式的当项目题库（最多一份）。
-    认不出层的名字放进 ignored（响应里回显），不静默吞掉。"""
-    fq = platform = human = project = None
-    loaded, ignored = {}, []
-    for n in dict.fromkeys(names):          # 去重保序：同名传两次不会先覆盖再弹出，让后面的账本查找 KeyError
-        b = get_bank(n); loaded[n] = b
-        if b.fmt == "tv" and fq is None:
-            fq = b
-        elif n.startswith("platform") and platform is None:
-            platform = b
-        elif n.startswith("human_feel") and human is None:
-            human = b
-        elif b.fmt == "jev" and not n.startswith("comment") and not n.startswith("external") and project is None:
-            project = b
-        else:
-            ignored.append(n); loaded.pop(n)
-    return loaded, fq, platform, human, project, ignored
-
-
-def _norm_want(k: str, v) -> str:
-    """hard_rules 的期望答案：JSON 布尔按 brief 同款口径转「是」/「否」；字符串原样（choice 题可以是选项名）。"""
-    if isinstance(v, bool):
-        return "是" if v else "否"
-    if isinstance(v, str) and v.strip():
-        return v.strip()
-    raise HTTPException(422, f"hard_rules[{k!r}] 的期望答案要是 true/false 或选项文字，收到 {v!r}")
-
-
-def _project_from_request(req: "DraftRequest", loaded: dict) -> tuple:
-    """项目题库来源：内联 project_bank 或 brief 现编，二选一；形状错误 422 而不是 500。返回 (bank | None, hard_rules_from_brief)。"""
-    if req.project_bank is not None and req.brief is not None:
-        raise HTTPException(422, "project_bank 与 brief 只能给一个（brief 的 want 只能配 brief 编出的题）")
-    if req.project_bank is None and req.brief is None:
-        return None, {}
-    if req.project_bank_name in loaded or req.project_bank_name in req.banks:
-        raise HTTPException(422, f"project_bank_name={req.project_bank_name!r} 与 banks 里的题库同名，会把那一层的判定整层覆盖")
-    try:
-        if req.project_bank is not None:
-            bank, hard = load_bank_data(req.project_bank, req.project_bank_name), {}
-        else:
-            bank, hard = compile_project_bank(req.brief, name=req.project_bank_name), project_hard_rules(req.brief, req.project_bank_name)
-    except (KeyError, TypeError, AttributeError, ValueError) as exc:
-        raise HTTPException(422, f"项目题库 / brief 形状不对（{type(exc).__name__}: {exc}）；brief 要有 intents[].label、hard_rules[].id/ask、angle.label")
-    problems = check_bank(bank)
-    if problems:
-        raise HTTPException(422, f"项目题库有问题：{problems}")
-    if not bank.questions:
-        raise HTTPException(422, "项目题库 / brief 一道题都没编出来（intents / hard_rules / angle 至少给一样），不能拿它当「判过了」")
-    used = {qid: n for n, b in loaded.items() for qid in b.ids()}
-    clash = [f"{q}（已在 {used[q]}）" for q in bank.ids() if q in used]
-    if clash:
-        raise HTTPException(422, f"项目题库的题号与已加载的层撞车：{clash}；profile 按题号合并，撞车会把两层的答案混在一起")
-    return bank, hard
-
-
 @app.post("/judge_draft", dependencies=[Depends(require_key)])
 def judge_draft(req: DraftRequest):
     if req.judge_paras not in ("always", "on_fail", "never"):
@@ -302,41 +286,36 @@ def judge_draft(req: DraftRequest):
         raise HTTPException(422, "subject_id 不能为空")
     if req.write and req.subject_id.strip() == "draft":
         raise HTTPException(422, "write=true 时 subject_id 必须是这篇稿子自己的 id（写作台传 versions.id）：账本主键含 subject_id，都叫 draft 会互相覆盖")
-    loaded, fq, platform, human, project, ignored = _split_banks(req.banks)
-    inline, brief_hard = _project_from_request(req, loaded)
-    if inline is not None:
-        project = inline; loaded[project.name] = project
-    if fq is None and platform is None and human is None and project is None:
-        raise HTTPException(422, f"一份题库都没有（banks={req.banks}，认不出层的：{ignored}）")
-    if project is not None and set(project.ids()) <= {"intent_of_para"} and human is None:
-        raise HTTPException(422, "项目题库只有意图题（intent_of_para），它只在判段时问；没有人感题库这次一题都不会判")
-    # 默认硬约束只对这次真的加载了的层生效；调用方给的必须指到会判的题，指错就 422，不能静默放过
-    hard = {k: v for k, v in DEFAULT_HARD_RULES.items() if k[0] in loaded}
-    hard.update(brief_hard)
-    for k, v in (req.hard_rules or {}).items():
-        if ":" not in k:
-            raise HTTPException(422, f"hard_rules 的键要写成 题库名:题号，收到 {k!r}")
-        bname, qid = k.split(":", 1)
-        if bname not in loaded:
-            raise HTTPException(422, f"hard_rules[{k!r}]：题库 {bname!r} 不在这次要判的层里（有：{sorted(loaded)}）")
-        if qid not in loaded[bname].ids():
-            raise HTTPException(422, f"hard_rules[{k!r}]：题库 {bname} 没有题 {qid!r}（有：{loaded[bname].ids()}）")
-        hard[(bname, qid)] = _norm_want(k, v)
+    try:
+        ds = setup_draft(get_bank, req.banks, subject_type=req.subject_type, project_code=req.project, category=req.category,
+                         brief=req.brief, project_bank=req.project_bank, project_bank_name=req.project_bank_name,
+                         hard_rules=req.hard_rules)
+    except P.PolicyBlocked as exc:
+        raise HTTPException(403, str(exc))
+    except (P.PolicyInputError, DraftSetupError) as exc:
+        raise HTTPException(422, str(exc))
     if req.write:
         _write_config_or_503()
     client = _client()
     try:
-        dj = _judge_draft(client, {"title": req.title, "body": req.body}, fq=fq, platform=platform, project=project, human=human,
-                          judge_paras=req.judge_paras, hard_rules=hard, subject_id=req.subject_id, subject_type=req.subject_type)
+        hidden = all_hidden(ds.loaded)
+        dj = _judge_draft(client, {"title": req.title, "body": req.body}, fq=ds.fq, platform=ds.platform, project=ds.project,
+                          human=ds.human, judge_paras=req.judge_paras, hard_rules=ds.hard, subject_id=req.subject_id,
+                          subject_type=req.subject_type, hidden=hidden)
     except JevError as exc:
         raise HTTPException(502, f"Jev 调用失败：{exc}")
-    plan = repair_plan(dj, loaded, validated=set(req.validated or []), target=req.target)
+    recorded: list = []
+    plan = repair_plan(dj, ds.loaded, validated=set(req.validated or []), target=req.target, hidden=hidden, recorded=recorded)
     rows = []
     for bname, r in dj.results.items():
-        rows.extend(ledger_rows(r, loaded[bname], run_tag=req.run_tag))
+        rows.extend(ledger_rows(r, ds.loaded[bname], run_tag=req.run_tag))
+    for bname, r in dj.para_results:                  # 段级（含暗题）：subject_id = <稿 id>:p<N>
+        rows.extend(ledger_rows(r, ds.loaded[bname], run_tag=req.run_tag))
     written = _write_rows(rows) if req.write else None
-    return {"subject_id": req.subject_id, "passed": dj.passed(), "profile": dj.profile, "hard_fails": dj.hard_fails,
-            "ambiguous": dj.ambiguous, "para_stats": dj.para_stats, "plan": plan, "detail": dj.detail,
-            "calls": dj.calls, "usage": dj.usage, "banks": {n: {"version": b.version, "sha256": b.sha256} for n, b in loaded.items()},
-            "ignored_banks": ignored, "hard_rules": {f"{b}:{q}": w for (b, q), w in hard.items()},
-            "rows": len(rows), "ledger_rows": rows if req.return_rows else None, "written": written}
+    view = redact(dj, hidden)
+    shown = [r for r in rows if r["question_id"] not in hidden]    # 暗题的行进账本，但不回给调用方
+    return {"subject_id": req.subject_id, **view, "plan": plan, "recorded": recorded,
+            "calls": dj.calls, "usage": dj.usage, "banks": {n: {"version": b.version, "sha256": b.sha256} for n, b in ds.loaded.items()},
+            "ignored_banks": ds.ignored, "hard_rules": {(f"{b}:hidden" if q in hidden else f"{b}:{q}"): ("hidden" if q in hidden else w) for (b, q), w in ds.hard.items()},
+            "policy": ds.decision.as_dict(),
+            "rows": len(rows), "ledger_rows": shown if req.return_rows else None, "written": written}

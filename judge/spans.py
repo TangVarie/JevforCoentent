@@ -15,7 +15,6 @@ from typing import Optional
 _VENDOR = Path(__file__).resolve().parent.parent / "banks" / "vendor" / "tv_feature_bank.py"
 _WS = re.compile(r"\s+")
 _SENT_SPLIT = re.compile(r"(?<=[。！？!?；;\n])")
-MIN_BODY_CHARS = 20
 
 
 def _load_tv_module():
@@ -26,6 +25,8 @@ def _load_tv_module():
 
 
 _tv = _load_tv_module()
+MIN_BODY_CHARS = _tv.MIN_BODY_CHARS          # 20；直接用 TV 的常量，不各写一份
+EVIDENCE_MAX_CHARS = _tv.EVIDENCE_MAX_CHARS  # 30；本仓的证据是整句，见 core.py 顶部说明
 
 
 def build_spans(raw_content: str, mode: str = "markers", title_col: Optional[str] = None) -> dict:
@@ -49,21 +50,27 @@ def state_from_spans(spans: dict) -> dict:
 
 
 def askable(bank, spans: dict) -> tuple:
-    """按 TV 的答题契约决定哪些题不问：no_title / text_too_short。返回 (要问的 id 列表, {跳过 id: 原因})。"""
+    """按 TV 的答题契约决定哪些题不问（逐字照 feature_bank.render_call 的跳题循环）：
+    标题为 None → no_title；scope 那一段的可见字数不够（body / full 用 MIN_BODY_CHARS，其余 2 字）→ text_too_short。
+    full 看的是「标题 + 正文」合起来的长度，标题不足 2 个可见字也记 text_too_short，与 TV 同口径，影子跑不会出现一边 NULL 一边有答案。
+    返回 (要问的 id 列表, {跳过 id: 原因})。"""
     qids, skipped = [], {}
-    body_len = len(_WS.sub("", spans.get("body") or ""))
     for q in bank.questions:
         sc = q.scope
         if sc is None:
             qids.append(q.id); continue
-        if sc == "title" and not spans.get("title"):
-            skipped[q.id] = "no_title"; continue
-        if sc in ("body", "full") and body_len < MIN_BODY_CHARS:
-            skipped[q.id] = "text_too_short"; continue
-        if sc in ("first_sentence", "last_para") and len(_WS.sub("", spans.get(sc) or "")) < 2:
-            skipped[q.id] = "text_too_short"; continue
+        if sc == "title" and spans.get("title") is None:
+            skipped[q.id] = _tv.INVALID_NO_TITLE; continue
+        need = _tv.MIN_BODY_CHARS if sc in ("body", "full") else 2
+        if _tv.visible_len(spans.get(sc) or "") < need:
+            skipped[q.id] = _tv.INVALID_TEXT_TOO_SHORT; continue
         qids.append(q.id)
     return qids, skipped
+
+
+def visible_len(text: str) -> int:
+    """TV 的可见字数口径（去空白等），给本仓其他地方判「太短」用，别各算各的。"""
+    return _tv.visible_len(text or "")
 
 
 def scope_text(spans: dict, scope: Optional[str]) -> str:
@@ -74,8 +81,12 @@ def scope_text(spans: dict, scope: Optional[str]) -> str:
     return spans.get(scope or "body") or ""
 
 
-def split_sentences(text: str, cap: int = 120) -> list:
-    """按 。！？!?；; 和换行切句，太短的（<6 字）并入前一句。选句证据用。"""
+EVIDENCE_SENT_CAP = 254     # 证据选句是一道 choice 题：Jev 一题最多 255 个选项，留一个给「没有」
+
+
+def split_sentences(text: str, cap: int = EVIDENCE_SENT_CAP) -> list:
+    """按 。！？!?；; 和换行切句，太短的（<6 字）并入前一句。选句证据用。
+    上限按 Jev 选项数定（254 句 + 「没有」）；清单体长文后段的句子也能被选中。"""
     parts = [p.strip() for p in _SENT_SPLIT.split(text or "") if p and p.strip()]
     out = []
     for p in parts:

@@ -1,6 +1,7 @@
 name: external-corpus
 # 每周一 03:00 UTC（北京时间 11:00）抓一次外部语料。量级和预算在 config/external_corpus.yaml，这里只管频率。
-# 顺序：抓取 → 先上传产物（哪怕后面失败）→ 经 PostgREST 写库（没配密钥就跳过并提示；写库失败不让 job 红，state 照样保存）。
+# 顺序：从 TV 拉已入库的外部笔记 id（第二道去重）→ 抓取 → 先上传产物（哪怕后面失败）→ 经 PostgREST 写库（没配密钥就跳过并提示；写库失败不让 job 红，state 照样保存）。
+# state 靠 actions/cache：每次存一个新 key、按前缀恢复最近一份；GitHub 会淘汰 7 天没访问的缓存，周更卡在线上，所以另有 known_ids 兜底。
 # 注意：含 ${{ … }} 的值不能写在 {…} 流式映射里（YAML 会把 { 当嵌套映射，GitHub 直接拒绝整个文件），一律用块式 + 引号。
 on:
   schedule:
@@ -31,6 +32,9 @@ jobs:
           path: state
           key: "external-corpus-state-${{ github.run_id }}"
           restore-keys: external-corpus-state-
+      - name: known ids from TV (second dedupe; state cache can be evicted after 7 idle days)
+        if: github.event.inputs.dry_run != 'true'
+        run: python3 scripts/known_external_ids.py state/known_ids.txt
       - name: plan only (dry run)
         if: github.event.inputs.dry_run == 'true'
         run: python3 scripts/external_corpus.py --dry-run
@@ -38,7 +42,7 @@ jobs:
         if: github.event.inputs.dry_run != 'true'
         run: |
           mkdir -p out
-          python3 scripts/external_corpus.py --out out/report.md --sql out/answers.sql --notes-sql out/external_notes.sql --rows out/rows.json --raw out/kept.json
+          python3 scripts/external_corpus.py --known-ids state/known_ids.txt --out out/report.md --sql out/answers.sql --notes-sql out/external_notes.sql --rows out/rows.json --raw out/kept.json
       - name: upload products (even if a later step fails)
         if: always() && hashFiles('out/**') != ''
         uses: actions/upload-artifact@v4

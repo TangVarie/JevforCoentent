@@ -3,7 +3,7 @@
 
 密钥按顺序找：环境变量 TYPESAFE_API_KEY → TYPESAFE_KEY_FILE 指向的文件 → ~/.config/typesafe/key。
 模型版本由题库指定（bank.model），钉死不用 jev-latest；换版本先重跑金标准再改题库里的 model。
-限流按官方口径 250k token/秒、1,200 次/分钟；429 按 retry-after 重试。
+限流按官方口径 250k token/秒、1,200 次/分钟；429 按 retry-after 重试，529（Jev 过载，官方文档要求退避重试）同样重试。
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from typing import Optional
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
 ENDPOINT = "/v1/systemone"
 USER_AGENT = "bywood-judge/0.1"
-RETRY_STATUSES = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524}  # 5xx 含 Cloudflare 的 52x
+RETRY_STATUSES = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}  # 5xx 含 Cloudflare 的 52x；529 = Jev 过载
 
 
 class JevError(Exception):
@@ -67,6 +67,8 @@ def _explain_http(status: int, text: str) -> str:
         return f"请求被拒（HTTP {status}），多半是题库格式问题：{snippet}"
     if status == 429:
         return f"限流（HTTP 429），重试后仍失败：{snippet}"
+    if status == 529:
+        return f"Jev 过载（HTTP 529），退避重试后仍失败：{snippet}"
     return f"Jev 返回 HTTP {status}：{snippet}"
 
 
@@ -112,12 +114,14 @@ class JevClient:
 
 
 def mock_response(body: dict) -> dict:
-    """确定性的假结果：同一 state + 同一题目集合永远同一答案。数字没有意义，只用来测流程。"""
+    """确定性的假结果：同一 state + 同一题目集合永远同一答案（与题目在 dict 里的先后无关）。数字没有意义，只用来测流程。"""
     seed = hashlib.sha256(json.dumps({"s": body.get("state"), "q": sorted(body.get("questions", {}))},
                                      ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     rnd = random.Random(int(seed, 16))
     answers = {}
-    for name, q in body.get("questions", {}).items():
+    qs = body.get("questions", {})
+    for name in sorted(qs):                 # 按题号顺序消耗随机数：调用方换了题目插入顺序，答案不变
+        q = qs[name]
         if q["type"] == "choice":
             labels = list(q["criteria"])
             weights = [rnd.random() ** 3 for _ in labels]

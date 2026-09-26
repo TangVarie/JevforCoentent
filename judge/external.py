@@ -72,11 +72,11 @@ def _find_notes(obj: Any, depth: int = 0) -> list:
         def is_note(x):
             if not isinstance(x, dict):
                 return False
-            card = x.get("note_card") if isinstance(x.get("note_card"), dict) else x
+            card = _card(x)
             return _pick(card, "note_id", "id") is not None and _pick(card, "title", "desc", "display_title", "content") is not None
         hits = [x for x in obj if is_note(x)]
         if hits:
-            return obj
+            return hits                     # 只回认得出的笔记：列表里混进的广告位 / 非 dict 元素不再让 normalize_note 崩
         for x in obj:
             r = _find_notes(x, depth + 1)
             if r:
@@ -95,8 +95,16 @@ def _find_notes(obj: Any, depth: int = 0) -> list:
     return []
 
 
+def _card(x: dict) -> dict:
+    """笔记本体可能包在 note_card（web 端）或 note（app_v2 的 items[].note）里；都不是就是它自己。"""
+    for k in ("note_card", "note"):
+        if isinstance(x.get(k), dict):
+            return x[k]
+    return x
+
+
 def normalize_note(n: dict, keyword: str, category: str, sort_type: str) -> dict:
-    card = n.get("note_card") if isinstance(n.get("note_card"), dict) else n
+    card = _card(n)
     user = _pick(card, "user", "author", default={}) or {}
     inter = _pick(card, "interact_info", "interactions", default={}) or {}
     def num(*ks):

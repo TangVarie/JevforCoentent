@@ -1,0 +1,8 @@
+# 暗题轮换（docs/00 #4、docs/31 §8）：这些题照判、照落账本、照算硬伤，但题号、题干、定义、答案不出现在任何给写手或生成端看的输出里
+# （修改单、MCP 的 list_banks / judge_draft / repair_plan_for、HTTP /judge_draft 的 profile / detail / plan）。
+# 默认每个季度按 sha256(题号|季度) 自动换 fraction 那么多道（四舍五入，至少 1 道；人感 6 题 → 2 道）；要手工指定某季度，在 override 下写「2026Q4: [题号, ...]」。
+# 前缀匹配题库名：human_feel_para 覆盖 human_feel_para_v0.1 / v0.2 …
+banks:
+  human_feel_para:
+    fraction: 0.3333
+    override: {}

@@ -14,13 +14,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
-from .spans import bank_digest
+from .spans import _tv, bank_digest
+
+# invalid_reason 用 TV 的闭集（feature_bank.INVALID_*），账本两边同一套值
+INVALID_MISSING = _tv.INVALID_MISSING                  # Jev 返回里没有这题
+INVALID_OUT_OF_VOCAB = _tv.INVALID_OUT_OF_VOCAB        # 答案不在选项里 / 概率缺失
+_EXEMPT_RE = re.compile(r"选「(.+?)」以外")            # 与 TV feature_bank.evidence_required 同一条规则
 
 SCOPE_LABEL = {"title": "标题", "first_sentence": "正文第一句", "last_para": "正文最后一段",
                "body": "正文", "full": "标题和正文"}
@@ -85,6 +91,16 @@ def _fmt_examples(xs) -> str:
     return ("例如：" + "／".join(xs)) if xs else ""
 
 
+def _tv_choice_evidence(text: str) -> str:
+    """TV 的 choice 题证据规则（feature_bank.evidence_required）的通用解析：
+    「不需要…」→ 永不要证据；「选『X』以外…」→ 除 X 以外都要；其余 → 任何答案都要证据。
+    以前只对 product_role 硬编码，新增一道 choice 题就会和 TV 分叉。"""
+    t = text.strip()
+    if t.startswith("不需要"):
+        return "never"
+    return "on_choice_except:" + ",".join(_EXEMPT_RE.findall(t))
+
+
 def _load_tv(raw: dict, path: Path, name: str) -> Bank:
     qs = []
     for q in raw.get("questions", []):
@@ -101,12 +117,7 @@ def _load_tv(raw: dict, path: Path, name: str) -> Bank:
         else:
             crit = {o["value"]: ((o.get("means") or "") + (f" 例如：{o['example']}" if o.get("example") else "")).strip()
                     for o in q["options"]}
-            if str(q.get("evidence", "")).startswith("不需要"):
-                ev = "never"
-            elif q["id"] == "product_role":
-                ev = "on_choice_except:未出现"
-            else:
-                ev = "never"
+            ev = _tv_choice_evidence(str(q.get("evidence") or ""))
             qs.append(Question(q["id"], "choice", look + q["ask"], crit, scope=sc, evidence=ev,
                                ask=q["ask"], version=int(q.get("version", 1)), aw_instruction=str(q.get("aw_instruction") or "")))
     return Bank(name=name, version=raw.get("bank_version", "?"), model=raw.get("model") or "jev-1.13.0",
@@ -199,34 +210,53 @@ def build_questions(bank: Bank, qids: Optional[list] = None, fill: Optional[dict
     return out
 
 
-def interpret(bank: Bank, resp: dict) -> dict:
-    """Jev 原始答案 → {qid: {answer, p(所选答案概率), p_yes(是非题), top3, ambiguous, why}}"""
+def interpret(bank: Bank, resp: dict, asked: Optional[list] = None) -> dict:
+    """Jev 原始答案 → {qid: {answer, p(所选答案概率), p_yes(是非题), top3, ambiguous, why}}
+    asked：这次真的问了的题。问了却没返回 → invalid_reason = missing（与 TV 同口径，续跑按「已答」判时不会漏）；
+    是非题没有数值、选择题答案不在选项里或没有概率 → out_of_vocab，answer 与 p 都是 None（不落「无原因的 NULL 行」）。"""
     amb = bank.ambiguity
     lo, hi = amb["noul_band"]
     raw = resp.get("answers") or {}
     out = {}
+    asked_set = set(asked) if asked is not None else None
     for q in bank.questions:
+        if asked_set is not None and q.id not in asked_set:
+            continue
         a = raw.get(q.id)
         if not a:
+            if asked_set is not None:
+                out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_MISSING}
             continue
         if a.get("type") == "noul" or (q.jtype == "noul" and "noul" in a):
-            p = float(a.get("noul", 0.5))
+            try:
+                p = float(a["noul"])
+            except (KeyError, TypeError, ValueError):
+                out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_OUT_OF_VOCAB}
+                continue
             yes = p > 0.5
             reasons = [f"概率 {p:.2f} 落在 {lo}–{hi}"] if lo <= p <= hi else []
             out[q.id] = {"answer": "是" if yes else "否", "raw": yes, "p": round(max(p, 1 - p), 3),
                          "p_yes": round(p, 3), "ambiguous": bool(reasons), "why": "；".join(reasons)}
         else:
             probs = sorted(((k, float(v)) for k, v in (a.get("probabilities") or {}).items()), key=lambda kv: -kv[1])
-            p1 = probs[0][1] if probs else 0.0
+            choice = a.get("choice")
+            prob_map = dict(probs)
+            # 所选答案自己没有概率（只给了别的选项的）→ out_of_vocab；不拿第一名的概率顶替，那是编出来的数
+            if q.jtype == "noul" or choice not in q.criteria or choice not in prob_map:
+                out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_OUT_OF_VOCAB,
+                             "raw": choice}
+                continue
+            p1 = probs[0][1]
             p2 = probs[1][1] if len(probs) > 1 else 0.0
+            pc = prob_map[choice]                     # prob 口径 = 所选答案的概率（v1_17）；通常就是第一名
             reasons = []
             if p1 < amb["choice_top_min"]:
                 reasons.append(f"第一名 {p1:.2f} < {amb['choice_top_min']}")
             if p1 - p2 < amb["choice_margin_min"]:
                 reasons.append(f"前两名只差 {p1 - p2:.2f}")
-            if a.get("choice") in q.unclear_labels:
-                reasons.append(f"选了「{a.get('choice')}」")
-            out[q.id] = {"answer": a.get("choice"), "raw": a.get("choice"), "p": round(p1, 3),
+            if choice in q.unclear_labels:
+                reasons.append(f"选了「{choice}」")
+            out[q.id] = {"answer": choice, "raw": choice, "p": round(pc, 3),
                          "confidence": a.get("confidence"), "top3": [[k, round(v, 3)] for k, v in probs[:3]],
                          "ambiguous": bool(reasons), "why": "；".join(reasons)}
     return out

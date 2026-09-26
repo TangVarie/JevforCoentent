@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -67,7 +68,8 @@ SYSTEM_TEMPLATE = """你在给一条小红书笔记做事实标注。只回答�
 规则：
 - bool 题只答「是」或「否」；choice 题只从给出的选项里选一个，原样抄选项名。
 - 需要证据时，evidence 必须从题目指定的那一段【原样抄】，不超过 {evidence_max} 字；不需要证据时 evidence 留空字符串。
-- 拿不准就按题目里「算否」的标准答「否」，不要为了凑证据而硬答「是」。"""
+- 拿不准就按题目里「算否」的标准答「否」，不要为了凑证据而硬答「是」。
+- JSON 字符串里的英文双引号写成 \\"，字符串里不要换行（原文换行处直接接着抄）；整个回复只有这一个 JSON 对象。"""
 
 SPAN_LABELS = {
     "title": "标题",
@@ -524,6 +526,95 @@ def _render_question(n: int, q: dict) -> str:
     if ev:
         lines.append(f"   证据：{ev}")
     return "\n".join(lines)
+
+
+_FENCE_RE = re.compile(r"^```[a-zA-Z]*\s*\r?\n(.*?)\r?\n```\s*$", re.S)
+# 三元组: id / answer / evidence 三个键按这个顺序相邻 (SYSTEM_TEMPLATE 给的样例就是这个顺序)。
+# evidence 是对象里最后一个键, 所以它的结尾锚在『" 后面紧跟 }』—— 不锚在逗号上:
+# 原文里 `",` 太常见 (引完一句话接逗号), 锚逗号会把证据截成前缀, 而前缀仍是原文子串, 守卫 3 拦不住,
+# 30 字上限也只对截断后的字符串生效 (自审 on #156)。
+_ANSWER_RE = re.compile(
+    r'"id"\s*:\s*"(?P<id>[A-Za-z0-9_]+)"\s*,\s*'
+    r'"answer"\s*:\s*"(?P<answer>[^"]*)"\s*,\s*'
+    r'"evidence"\s*:\s*"(?P<evidence>.*?)"\s*}', re.S)
+_TRIPLE_KEYS = ("id", "answer", "evidence")
+
+
+def _json_string(s: str) -> str:
+    """把正则捞出来的字符串体按 JSON 字符串解码 (\\n \\" \\\\ \\uXXXX …); 解不开就原样。
+    只替换 \\" 的话, evidence 里一个合法的 \\n 会变成字面的反斜杠 n, 子串校验必失败 → 好答案被判
+    evidence_not_found、还进不了单问兜底 (自审 on #156)。"""
+    try:
+        return json.loads('"' + s + '"', strict=False)
+    except (json.JSONDecodeError, ValueError):
+        return s
+
+
+def _first_object(t: str):
+    """从第一个 { 起解析【第一个】完整 JSON 值, 后面跟着闲话也不管 (rfind 最后一个 } 会被闲话里的
+    大括号带偏)。严格 / 宽松各试一次。解不出返回 None。"""
+    lo = t.find("{")
+    if lo == -1:
+        return None
+    for strict in (True, False):
+        try:
+            obj, _ = json.JSONDecoder(strict=strict).raw_decode(t, lo)
+            return obj
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return None
+
+
+def _coerce_answers(obj) -> Optional[dict]:
+    """JSON 解析出来了但形状不对时尽量扶正: 裸的 {id, answer, evidence} → 包一层; 键名打错
+    ({"answer": [...]}) 或 answers 是单个对象 → 找到那个『带 id 的对象 / 对象列表』。扶不正 → None。"""
+    if isinstance(obj, dict) and isinstance(obj.get("answers"), list):
+        return obj
+    if isinstance(obj, dict) and all(k in obj for k in _TRIPLE_KEYS):
+        return {"answers": [obj]}
+    if isinstance(obj, dict):
+        for v in obj.values():
+            if isinstance(v, list) and v and all(isinstance(x, dict) and "id" in x for x in v):
+                return {"answers": v}
+            if isinstance(v, dict) and all(k in v for k in _TRIPLE_KEYS):
+                return {"answers": [v]}
+    if isinstance(obj, list) and obj and all(isinstance(x, dict) and "id" in x for x in obj):
+        return {"answers": obj}
+    return None
+
+
+def parse_answers(raw: str) -> Optional[dict]:
+    """把模型回复解析成 {"answers": [...]}; 解析不出来返回 None。
+
+    比 annotate_essence_pass.parse_claude_json 多几层容错, 只针对本 pass 这个【固定、扁平】的
+    形状 (answers 是 {id, answer, evidence} 的列表), 不通用:
+      1. 去掉 markdown 围栏, 从第一个 { 起解析第一个完整 JSON 值 (后面的闲话不算数)。
+      2. 先严格再 strict=False: 允许字符串里出现原样换行 / 控制符。evidence 是从正文原样抄的,
+         抄到换行处模型常常直接把换行写进字符串 —— 严格 JSON 会整段解析失败, 于是整组题
+         全记 missing (2026-09-23 闸一 100 篇里 59 格 missing 都是整组一起没的, D-083)。
+      3. 解析出来但形状不对 (裸三元组 / 键名打错 / answers 是对象) → _coerce_answers 扶正。
+      4. 还不行就按正则逐条捞 "id" / "answer" / "evidence" 三元组: evidence 里没转义的英文双引号
+         (原文含 " 时模型照抄) 会让 JSON 断在中间, 但三元组本身还在。evidence 的结尾锚在
+         『" 后面紧跟 }』(它是最后一个键), 内嵌的 `"` `",` 都不会截错; 捞出的字符串体按 JSON
+         字符串解码 (\\n / \\" / \\uXXXX 还原)。
+    捞出来的东西照旧过 validate_answers: 证据必须是原文子串、≤ 30 字, 所以捞错了只会变 NULL,
+    不会变成错答案 (守卫 3 仍在)。挡不住: 捞到的证据恰好也是原文别处的子串。
+    这个函数不碰网络, check_feature_parse.py 有正反例。
+    """
+    if not raw:
+        return None
+    t = raw.strip()
+    m = _FENCE_RE.match(t)
+    if m:
+        t = m.group(1).strip()
+    obj = _first_object(t)
+    if obj is not None:
+        fixed = _coerce_answers(obj)
+        if fixed is not None:
+            return fixed
+    found = [{"id": g["id"], "answer": _json_string(g["answer"]), "evidence": _json_string(g["evidence"])}
+             for g in (mm.groupdict() for mm in _ANSWER_RE.finditer(t))]
+    return {"answers": found} if found else None
 
 
 def hygiene_check(system_prompt: str, user_template_parts: list[str]) -> None:

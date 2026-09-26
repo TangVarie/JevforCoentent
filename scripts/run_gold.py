@@ -67,7 +67,9 @@ def main(argv=None) -> int:
         if problems:
             print("题库有问题：" + "；".join(problems), file=sys.stderr); return 2
         cases_file = json.loads(Path(args.cases).read_text(encoding="utf-8"))
-        gold = {c["id"]: c for c in (yaml.safe_load(Path(args.gold).read_text(encoding="utf-8")) or {}).get("cases", [])} if args.gold else {}
+        gold_doc = (yaml.safe_load(Path(args.gold).read_text(encoding="utf-8")) or {}) if args.gold else {}
+        gold = {c["id"]: c for c in gold_doc.get("cases", [])}
+        gold_version = gold_doc.get("gold_version") or ("?" if args.gold else None)
     except (OSError, json.JSONDecodeError, yaml.YAMLError) as exc:
         print(f"输入错误：{exc}", file=sys.stderr); return 2
     try:
@@ -99,7 +101,12 @@ def main(argv=None) -> int:
 
     qids = bank.ids()
     hits = {q: [0, 0] for q in qids}
-    lines = [f"# 金标准评测 · {bank.name} {bank.version} · {bank.model} · {'mock' if args.mock else 'live'} · 题干 {args.lang}", ""]
+    head = f"# 金标准评测 · {bank.name} {bank.version} · {bank.model} · {'mock' if args.mock else 'live'} · 题干 {args.lang}"
+    if gold_version:
+        head += f" · 金标准 {gold_version}（{Path(args.gold).name}）"
+    lines = [head, ""]
+    if gold_version and "proposed" in str(gold_version):
+        lines += ["> 金标准是提议版，未经勘误：命中率说明题库与提议标注一致，不等于与勘误版一致。", ""]
     if args.mock:
         lines += ["> mock：答案是假的，只看流程。", ""]
     misses = 0
