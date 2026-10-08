@@ -72,16 +72,35 @@ def _explain_http(status: int, text: str) -> str:
     return f"Jev 返回 HTTP {status}：{snippet}"
 
 
+def _env_number(name: str, default: float, lo: float, hi: float) -> float:
+    """读一个数值型 env, 写坏 / 越界退回默认或夹到界内 —— 不让一个手滑的值把服务拖起不来。"""
+    raw = os.environ.get(name, "")
+    try:
+        val = float(raw) if raw else default
+    except ValueError:
+        return default
+    if val != val or val in (float("inf"), float("-inf")):
+        return default
+    return min(max(val, lo), hi)
+
+
 class JevClient:
+    """timeout / retries 没显式传就读 JEV_TIMEOUT_SEC (默认 30, 夹 1–120) / JEV_RETRIES (默认 3, 夹 0–5)。
+
+    为什么要能从 env 调 (2026-10-08 TV 审计 B-08): /judge_draft 给写作台用, 那边整批判定的共同截止是 8 秒;
+    这里默认 30 s 超时 × 3 次重试 × ≤8 s 退避, 一次 429 / 529 就把那 8 秒吃光 —— 写作台记 timeout,
+    judge 却继续判并写账本。给写作台服务的部署可以设 JEV_TIMEOUT_SEC=6 JEV_RETRIES=1; 批处理脚本保持默认。
+    """
+
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None,
-                 timeout: float = 30.0, retries: int = 3, mock: bool = False):
+                 timeout: Optional[float] = None, retries: Optional[int] = None, mock: bool = False):
         self.mock = mock
         self.api_key = api_key or (None if mock else find_api_key())
         if not self.api_key and not mock:
             raise JevError("没找到 Jev 密钥（TYPESAFE_API_KEY / TYPESAFE_KEY_FILE / ~/.config/typesafe/key）")
         self.base_url = (base_url or os.environ.get("TYPESAFE_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
-        self.timeout = timeout
-        self.retries = retries
+        self.timeout = float(timeout) if timeout is not None else _env_number("JEV_TIMEOUT_SEC", 30.0, 1.0, 120.0)
+        self.retries = int(retries) if retries is not None else int(_env_number("JEV_RETRIES", 3, 0, 5))
 
     def call(self, body: dict) -> dict:
         """body = {"state": ..., "model": ..., "questions": {...}} → Jev 原始返回。"""
