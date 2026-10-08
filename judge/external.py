@@ -144,8 +144,9 @@ TEXT_KEYS = ("desc", "content", "note_text")
 
 
 def _detail_text(raw: Any, note_id: str) -> tuple:
-    """详情返回里这篇笔记的（标题, 正文）。app_v2 把笔记包得很深（形如 data.data[0].note_list[0]），没有公开 schema，
-    所以整棵树找带 desc / content 的 dict：id 对得上的优先，其次正文最长的。找不到返回 ("", "")。"""
+    """详情返回里这篇笔记的（标题, 正文）。没有公开 schema，所以整棵树找带 desc / content 的 dict：id 对得上的优先，其次正文最长的。
+    10-08 实跑确认：正文在 data.data[0].note_list[0].desc（同层 id = 本篇）；同层的 share_info.content、mini_program_info.desc
+    是截到 60 字的分享文案、不带 id，靠 id 优先才不会拿错。找不到返回 ("", "")。"""
     cands = []
 
     def walk(x: Any, depth: int) -> None:
