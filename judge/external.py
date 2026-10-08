@@ -30,6 +30,7 @@ TIKHUB_BASE = os.environ.get("TIKHUB_BASE_URL", "https://api.tikhub.io")
 SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
 IMAGE_DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"
 VIDEO_DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_video_note_detail"
+USER_AGENT = "bywood-judge/0.1 (+https://github.com/TangVarie/JevforCoentent)"
 
 
 class BudgetExceeded(Exception):
@@ -169,7 +170,8 @@ class TikHubClient:
         if wait > 0:
             time.sleep(wait)
         url = f"{TIKHUB_BASE}{path}?{urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})}"
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"})
+        # TikHub 前面的 Cloudflare 按 UA 封 Python-urllib（Error 1010，403），必须自带 UA
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.api_key}", "Accept": "application/json", "User-Agent": USER_AGENT})
         self._last = time.time()
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read().decode("utf-8"))
