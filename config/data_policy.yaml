@@ -7,6 +7,8 @@ rx_categories: [处方药]
 # 处方药项目代号（TV mappings/*.yaml 里 category: 处方药 的项目；写作台 / 三省六部用的代号不同时一并写上）
 rx_projects: [OKMAN, OKMAN_phase1]
 # 处方药项目里合同已确认可以出境的（加进来之前，这些项目的未发布稿一律 403）
-rx_cleared: []
+# 2026-10-08 owner 拍板放行 OKMAN（写作台走 TV 项目号 OKMAN_phase1，三省六部 / MCP 走 OKMAN，两个都要在）。
+# 放行之后 OKMAN 的未发布稿与别的项目一样：只跑通用层 + 平台层；项目层仍看 project_layer_cleared。
+rx_cleared: [OKMAN, OKMAN_phase1]
 # 允许未发布稿跑项目层（brief / 项目题库）的项目；不在这里的，项目层整层去掉并在响应的 policy.dropped_banks 里回显
 project_layer_cleared: []
