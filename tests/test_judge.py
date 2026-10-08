@@ -625,6 +625,25 @@ def test_tikhub_pagination_carries_session():
     assert raw3["echo"]["search_id"] is None
 
 
+def test_tikhub_request_sends_own_user_agent(monkeypatch):
+    # Cloudflare 按 UA 封 Python-urllib：漏了 UA，每个请求都是 403（Error 1010），一篇也抓不到
+    from judge import external as E
+    seen = {}
+
+    class Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b"{}"
+
+    def fake_urlopen(req, timeout=None):
+        seen["ua"] = req.get_header("User-agent")
+        return Resp()
+
+    monkeypatch.setattr(E.urllib.request, "urlopen", fake_urlopen)
+    E.TikHubClient(api_key="k", budget=E.Budget(limit_usd=1.0))._get(E.SEARCH_PATH, {"keyword": "戒烟"})
+    assert seen["ua"] and not seen["ua"].startswith("Python-urllib")
+
+
 def test_external_errors_and_seen_discipline():
     from judge import external as E
     import yaml
