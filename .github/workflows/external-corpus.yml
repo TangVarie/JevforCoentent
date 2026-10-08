@@ -1,11 +1,15 @@
 name: external-corpus
-# 每周一 03:00 UTC（北京时间 11:00）抓一次外部语料。量级和预算在 config/external_corpus.yaml，这里只管频率。
-# 顺序：从 TV 拉已入库的外部笔记 id（第二道去重）→ 抓取 → 先上传产物（哪怕后面失败）→ 经 PostgREST 写库（没配密钥就跳过并提示；写库失败不让 job 红，state 照样保存）。
+# 每周一 03:07 UTC（北京时间 11:07）抓一次外部语料。量级和预算在 config/external_corpus.yaml，这里只管频率。
+# 分钟故意不取 0：GitHub 整点的定时队列最挤、漂得最厉害（TV 的 daily-sync 02:17 实际 08:04–09:00 才起），错开一点。
+# 顺序：从 TV 拉已入库的外部笔记 id（第二道去重）→ 抓取 → 先上传产物（哪怕后面失败）→ 经 PostgREST 写库（没配密钥就跳过并提示）。
+# ⚠️ 写库失败让 job 红（2026-10-08，TV 审计 A-08）。以前这一步 continue-on-error：job 绿、actions/cache 把 run 步已经存好的
+#   seen state 保存下来、而账本里没有这批笔记（known_ids 也不会有）→ 下周按 seen 跳过、永远不再抓 —— 那一周的钱和笔记静默丢掉，
+#   唯一痕迹是 artifact。现在 job 红 = cache 不保存 = state 回到上周 = 下周重抓这批（多花一次钱，不丢）；邮件发给改过 cron 那行的人。
 # state 靠 actions/cache：每次存一个新 key、按前缀恢复最近一份；GitHub 会淘汰 7 天没访问的缓存，周更卡在线上，所以另有 known_ids 兜底。
 # 注意：含 ${{ … }} 的值不能写在 {…} 流式映射里（YAML 会把 { 当嵌套映射，GitHub 直接拒绝整个文件），一律用块式 + 引号。
 on:
   schedule:
-    - cron: "0 3 * * 1"
+    - cron: "7 3 * * 1"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -14,6 +18,10 @@ on:
       fresh_state:
         description: "不恢复上次的去重 state（从库里删掉一批数据后重抓用；账本里已有的仍靠 known_ids 去重）"
         default: "false"
+# 同一时间只跑一个：手动触发撞上定时跑的话，两个 run 会各自恢复同一份 state、各花一遍钱、后存的 cache 盖掉先存的。
+concurrency:
+  group: external-corpus
+  cancel-in-progress: false
 jobs:
   crawl:
     runs-on: ubuntu-latest
@@ -54,7 +62,6 @@ jobs:
         with:
           name: "external-corpus-${{ github.run_id }}"
           path: out
-      - name: write to db via PostgREST (skipped with a notice when the key is absent; needs TV notes_v1_17 + v1_18)
+      - name: write to db via PostgREST (skipped with a notice when the key is absent; needs TV notes_v1_17 + v1_18; failure makes the job red so the cache does not keep a seen-but-unwritten state)
         if: always() && github.event.inputs.dry_run != 'true' && hashFiles('out/rows.json') != ''
-        continue-on-error: true
         run: python3 scripts/apply_rows.py out/rows.json
