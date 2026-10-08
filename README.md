@@ -61,8 +61,9 @@ brief 可换。每一位生成端出 k 条，逐条过读者侧 7 题 + 运营�
 
 三道闸都在 `config/external_corpus.yaml`：`budget_usd_per_run`（一次运行的硬上限，到了就停并写进报告）、`max_keep_per_category_per_run` / `_per_month`（每品类留多少篇全文）、`pages_per_sort`（每个关键词搜几页）。
 钱花在两处：搜索按页（0.01 美元 / 页）、取全文按篇（0.01 美元 / 篇）。分诊（Jev 四题）只看搜索页的摘要，不花抓取费，所以「先分诊再取全文」是省钱的关键。
+分诊通过的一律取全文再打 fq：TikHub 搜索页的摘要截在 60 字，拿它打标等于只看半句话。详情接口没有公开 schema，正文从整棵返回里找（id 对得上的优先）；每次运行的前 3 份原始返回进产物 `kept.json` 的 `detail_samples`，开头 5 篇都解析不出正文就整次停、job 红。
 默认配置：5 品类 × 4 词 × 2 排序 × 2 页 = 80 页，每品类每次最多 40 篇全文，最坏 2.8 美元 / 次、每周一次约 12 美元 / 月、每品类每月 160 篇。
-去重靠 `state/external_corpus_state.json`（GitHub Actions 用 cache 保留）和 `--known-ids`（账本里已有的 external note_id）；一条笔记只在有了结局（分诊拒绝 / 太短 / 入账本）后才记为「见过」，因上限、预算或报错没看的下次还会看。
+去重靠 `state/external_corpus_state.json`（GitHub Actions 用 cache 保留）和 `--known-ids`（账本里已有的 external note_id）；一条笔记只在有了结局（分诊拒绝 / 太短 / 入账本）后才记为「见过」，因上限、预算或报错没看的下次还会看。从库里删掉一批外部笔记后要重抓，手动触发时设 `fresh_state=true`（不恢复 cache 里的 state）。
 翻页按 TikHub 的规矩带首页返回的 `search_id` / `search_session_id`；单条笔记或单页搜索出错只记进报告、不中止整次运行。写库走 `scripts/apply_rows.py`（PostgREST upsert，外部笔记表在前、账本行在后），产物先上传再写库。`--mock` 的 state 默认落到临时目录。
 
 ## 三个仓库怎么接
