@@ -28,12 +28,21 @@ from .jev_client import JevClient
 
 TIKHUB_BASE = os.environ.get("TIKHUB_BASE_URL", "https://api.tikhub.io")
 SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
-IMAGE_DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"
-VIDEO_DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_video_note_detail"
+DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"   # 官方文档：图文接口图文、视频笔记都能取到文字；视频接口只认视频
 USER_AGENT = "bywood-judge/0.1 (+https://github.com/TangVarie/JevforCoentent)"
+DETAIL_PROBE = 5           # 一次运行开头连着这么多篇详情都解析不出正文 → 接口格式变了，整次停（不再按篇白付费）
+DETAIL_SAMPLES = 3         # 每次运行留几份详情原始返回进产物，字段变了能直接看
 
 
 class BudgetExceeded(Exception):
+    pass
+
+
+class DetailUnparseable(RuntimeError):
+    """详情接口返回里找不到正文（上游「服务异常」或返回格式变了）。照样计费，所以开头连续失败要整次停。"""
+
+
+class DetailFormatUnknown(RuntimeError):
     pass
 
 
@@ -131,6 +140,35 @@ def normalize_note(n: dict, keyword: str, category: str, sort_type: str) -> dict
             "publish_time": _pick(card, "time", "publish_time", "create_time"), "raw": n}
 
 
+TEXT_KEYS = ("desc", "content", "note_text")
+
+
+def _detail_text(raw: Any, note_id: str) -> tuple:
+    """详情返回里这篇笔记的（标题, 正文）。app_v2 把笔记包得很深（形如 data.data[0].note_list[0]），没有公开 schema，
+    所以整棵树找带 desc / content 的 dict：id 对得上的优先，其次正文最长的。找不到返回 ("", "")。"""
+    cands = []
+
+    def walk(x: Any, depth: int) -> None:
+        if depth > 8:
+            return
+        if isinstance(x, dict):
+            body = next((x[k] for k in TEXT_KEYS if isinstance(x.get(k), str) and x[k].strip()), "")
+            if body:
+                own = str(_pick(x, "note_id", "id", default="") or "") == note_id
+                cands.append((own, len(body), str(_pick(x, "title", "display_title", default="") or ""), body))
+            for v in x.values():
+                walk(v, depth + 1)
+        elif isinstance(x, list):
+            for v in x[:50]:
+                walk(v, depth + 1)
+
+    walk(raw, 0)
+    if not cands:
+        return "", ""
+    _, _, title, body = max(cands, key=lambda c: (c[0], c[1]))
+    return title, body
+
+
 def _find_session(obj: Any, depth: int = 0) -> dict:
     """搜索返回里的翻页会话：TikHub 要求第 2 页起回传首页给的 search_id / search_session_id（官方 OpenAPI 的「翻页说明」）。"""
     if depth > 5:
@@ -159,6 +197,7 @@ class TikHubClient:
         self._last = 0.0
         self.mock = mock
         self._sessions: dict = {}          # (keyword, sort_type) → {search_id, search_session_id}，翻页时回传
+        self.detail_samples: list = []     # 前 DETAIL_SAMPLES 份详情原始返回，进产物
         if not self.api_key and not mock:
             raise RuntimeError("没有 TIKHUB_API_KEY")
 
@@ -192,11 +231,14 @@ class TikHubClient:
         return _find_notes(raw), raw
 
     def detail(self, note_id: str, note_type: str = "") -> tuple:
-        path = VIDEO_DETAIL_PATH if "video" in (note_type or "").lower() or note_type == "视频笔记" else IMAGE_DETAIL_PATH
-        raw = self._get(path, {"note_id": note_id})
-        data = _pick(raw, "data", default=raw) or raw
-        note = _pick(data, "note", "data", "note_detail", default=data) or data
-        return note, raw
+        """返回 ({title, desc}, 原始返回)；解析不出正文抛 DetailUnparseable（这次请求已计费）。"""
+        raw = self._get(DETAIL_PATH, {"note_id": note_id})
+        if len(self.detail_samples) < DETAIL_SAMPLES:
+            self.detail_samples.append({"note_id": note_id, "raw": raw})
+        title, body = _detail_text(raw, note_id)
+        if not body:
+            raise DetailUnparseable(f"详情里找不到正文：{json.dumps(raw, ensure_ascii=False)[:300]}")
+        return {"title": title, "desc": body}, raw
 
 
 # ── mock 供应商（测试与 dry-run 用，不联网、不花钱）────────────────────────
@@ -240,6 +282,8 @@ class RunReport:
     search_attempts: int = 0       # 发出的搜索请求数（含失败的）；searched 只数成功的
     processed: int = 0             # 走进分诊 / 取全文 / 打标的笔记数（含失败的）
     note_errors: int = 0
+    detail_unparseable: int = 0    # 取全文付了费、却解析不出正文的篇数（计在 note_errors 里）
+    detail_samples: list = field(default_factory=list)
     systemic_failure: str = ""     # 全部搜索或全部笔记都失败：供应商 / Jev 挂了或密钥失效，脚本要让 job 红
     kept_notes: list = field(default_factory=list)
     rows: list = field(default_factory=list)
@@ -270,11 +314,10 @@ def _process_note(n: dict, name: str, cfg: dict, provider: TikHubClient, jev: Je
     if it.get("on_topic", {}).get("answer") != "是" or it.get("voice", {}).get("answer") not in keep_voices:
         return "triage_reject"
     n["triage"] = {k: v["answer"] for k, v in it.items()}
-    if len(n["body"]) < min_chars:
-        full, _ = provider.detail(n["note_id"], n["note_type"]); rep.fetched += 1; stats["fetched"] += 1
-        n["title"] = str(_pick(full, "title", default=n["title"]) or n["title"])
-        n["body"] = str(_pick(full, "desc", "content", "body", default=n["body"]) or n["body"])
-        n["fetched_full"] = True
+    # 一律取全文：搜索页的摘要被 TikHub 截在 60 字，拿摘要打 fq 等于只看半句话（10-08 首跑 200 篇全是 60 字片段）
+    full, _ = provider.detail(n["note_id"], n["note_type"]); rep.fetched += 1; stats["fetched"] += 1
+    n["title"] = str(full.get("title") or n["title"])
+    n["body"] = str(full["desc"])
     rep.triaged_kept += 1; stats["triaged"] += 1        # 取全文之后才计，预算在取全文时用完的那条不算「分诊通过」，报告四列对得上
     if len(n["body"]) < min_chars:
         rep.dropped_short += 1; stats["short"] += 1
@@ -359,7 +402,13 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                             except BudgetExceeded:
                                 raise
                             except Exception as exc:  # noqa: BLE001 — 这条不进 seen，下次再看
-                                rep.note_errors += 1; err(n["note_id"], exc, stats); continue
+                                rep.note_errors += 1; err(n["note_id"], exc, stats)
+                                if isinstance(exc, DetailUnparseable):
+                                    rep.detail_unparseable += 1
+                                    if rep.fetched == 0 and rep.detail_unparseable >= DETAIL_PROBE:
+                                        raise DetailFormatUnknown(f"开头 {DETAIL_PROBE} 篇详情都解析不出正文：TikHub 详情接口格式变了或上游异常，"
+                                                                  f"原始返回见产物 detail_samples")
+                                continue
                             seen[n["note_id"]] = {"cat": name, "kw": kw, "at": rep.started, "kept": outcome == "kept", "why": outcome}
                             if outcome == "kept":
                                 kept_this_run += 1; monthly[name] = monthly.get(name, 0) + 1
@@ -375,14 +424,17 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                 stats["note"] = "本月上限已到"
     except BudgetExceeded as exc:
         rep.stopped_reason = str(exc)
+    except DetailFormatUnknown as exc:
+        rep.stopped_reason = rep.systemic_failure = str(exc)
     except Exception as exc:  # noqa: BLE001 — 意外异常也要把已花钱拿到的产物和 state 写出去
         rep.stopped_reason = f"异常中止：{type(exc).__name__}: {exc}"
     rep.calls = provider.budget.calls; rep.spent_usd = provider.budget.spent
+    rep.detail_samples = list(provider.detail_samples)
     # 单条失败继续跑是为了不丢一整周；但「全部失败」是系统性故障（密钥失效 / 供应商或 Jev 挂了），不能悄悄绿着
     if rep.search_attempts and rep.searched == 0:
         rep.systemic_failure = f"{rep.search_attempts} 次搜索请求全部失败：TikHub 不可用或 TIKHUB_API_KEY 失效"
     elif rep.processed and rep.note_errors == rep.processed:
-        rep.systemic_failure = f"{rep.processed} 条笔记的分诊 / 取全文 / 打标全部失败：Jev 或 TikHub 详情接口不可用"
+        rep.systemic_failure = rep.systemic_failure or f"{rep.processed} 条笔记的分诊 / 取全文 / 打标全部失败：Jev 或 TikHub 详情接口不可用"
     return rep
 
 

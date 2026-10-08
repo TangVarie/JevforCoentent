@@ -11,6 +11,9 @@ on:
       dry_run:
         description: "只算计划不联网"
         default: "false"
+      fresh_state:
+        description: "不恢复上次的去重 state（从库里删掉一批数据后重抓用；账本里已有的仍靠 known_ids 去重）"
+        default: "false"
 jobs:
   crawl:
     runs-on: ubuntu-latest
@@ -31,7 +34,8 @@ jobs:
         with:
           path: state
           key: "external-corpus-state-${{ github.run_id }}"
-          restore-keys: external-corpus-state-
+          # fresh_state=true 时给一个永远命中不了的前缀：不恢复，但跑完照样存一份新的
+          restore-keys: "${{ github.event.inputs.fresh_state == 'true' && 'external-corpus-fresh-' || 'external-corpus-state-' }}"
       - name: known ids from TV (second dedupe; state cache can be evicted after 7 idle days)
         if: github.event.inputs.dry_run != 'true'
         run: python3 scripts/known_external_ids.py state/known_ids.txt

@@ -19,7 +19,7 @@ note_type: 普通笔记                  # 不限 / 普通笔记 / 视频笔记
 keep_voices: [普通用户]              # 分诊后留哪些视角；要达人也留就加「达人测评」
 max_keep_per_category_per_run: 40    # 每品类每次运行最多取几篇全文
 max_keep_per_category_per_month: 160
-min_body_chars: 60                   # 摘要短于这个的先取全文再判（全文也短就丢）
+min_body_chars: 60                   # 分诊通过的一律取全文（搜索摘要被截在 60 字）；全文短于这个就丢
 
 categories:
   - name: 戒烟

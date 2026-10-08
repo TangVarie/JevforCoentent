@@ -99,7 +99,7 @@ def main():
     if args.rows:
         Path(args.rows).write_text(json.dumps({"run_id": run_id, "external_notes": note_rows, "answers": rep.rows}, ensure_ascii=False), encoding="utf-8")
     if args.raw:
-        Path(args.raw).write_text(json.dumps({"run_id": run_id, "kept": rep.kept_notes}, ensure_ascii=False, indent=1), encoding="utf-8")
+        Path(args.raw).write_text(json.dumps({"run_id": run_id, "kept": rep.kept_notes, "detail_samples": rep.detail_samples}, ensure_ascii=False, indent=1), encoding="utf-8")
     if rep.stopped_reason:
         # 只告警不改退出码：job 一红，actions/cache 就不保存 state、写库步也被跳过，这周花钱看过的下周会重看。
         print(f"::warning::运行提前停止：{rep.stopped_reason}（产物与 state 已写出）", file=sys.stderr)

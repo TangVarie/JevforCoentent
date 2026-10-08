@@ -644,6 +644,43 @@ def test_tikhub_request_sends_own_user_agent(monkeypatch):
     assert seen["ua"] and not seen["ua"].startswith("Python-urllib")
 
 
+def test_tikhub_detail_text_from_nested_response():
+    from judge import external as E
+    body = "戒烟第20天。" + "白天还好，晚上饭后最难熬，" * 5
+    raw = {"code": 200, "data": {"code": 0, "data": [{"note_list": [{"id": "n1", "title": "全文标题", "desc": body}],
+                                                     "comment_list": [{"id": "c1", "content": "评论" * 200}]}]}}
+    assert E._detail_text(raw, "n1") == ("全文标题", body)          # id 对得上的优先，不被更长的评论抢走
+    assert E._detail_text({"code": 200, "data": {"message": "服务异常"}}, "n1") == ("", "")
+
+
+def test_external_always_fetches_full_text_and_stops_on_unparseable_detail():
+    # 10-08 首跑：摘要被截在 60 字、刚好够 min_body_chars 就不取全文，200 篇全拿半句话打标；取了全文的又一篇都没解析出来
+    from judge import external as E
+    import yaml
+    cfg = yaml.safe_load((ROOT / "config" / "external_corpus.yaml").read_text(encoding="utf-8"))
+    cfg["categories"] = cfg["categories"][:1]; cfg["pages_per_sort"] = 1; cfg["max_keep_per_category_per_run"] = 3
+    cfg["min_body_chars"] = 10                                       # 摘要本身已经够长，也要取全文
+    triage = B.load_bank(ROOT / "banks" / "external_triage_v0.1.yaml", name="external_triage_v0.1")
+    fq = B.load_bank(FQ, name="feature_questions_v0_1")
+    rep = E.run_once(cfg, E.TikHubClient(budget=E.Budget(limit_usd=5.0), mock=True), JevClient(mock=True), triage, fq, {"seen": {}, "monthly": {}})
+    full = E.mock_detail({})["data"]["note"]["desc"]
+    assert rep.judged == 3 and rep.fetched == rep.triaged_kept and all(n["body"] == full for n in rep.kept_notes)
+    assert len(rep.detail_samples) == min(E.DETAIL_SAMPLES, rep.fetched)
+
+    class Garbled(E.TikHubClient):                                   # 详情照样计费，但返回里没有正文
+        def _get(self, path, params):
+            if path == E.DETAIL_PATH:
+                self.budget.charge(1)
+                return {"code": 200, "data": {"message": "服务异常"}}
+            return super()._get(path, params)
+
+    st = {"seen": {}, "monthly": {}}
+    rep2 = E.run_once(cfg, Garbled(budget=E.Budget(limit_usd=5.0), mock=True), JevClient(mock=True), triage, fq, st)
+    assert rep2.detail_unparseable == E.DETAIL_PROBE and rep2.fetched == 0 and rep2.judged == 0   # 开头 5 篇就停，不按篇白付费
+    assert "详情" in rep2.systemic_failure and rep2.stopped_reason and len(rep2.detail_samples) == E.DETAIL_SAMPLES
+    assert not any(v["why"] != "triage_reject" for v in st["seen"].values())                       # 解析失败的不进 seen，下次还会看
+
+
 def test_external_errors_and_seen_discipline():
     from judge import external as E
     import yaml
