@@ -653,7 +653,7 @@ def test_tikhub_detail_text_from_nested_response():
     assert E._detail_text({"code": 200, "data": {"message": "服务异常"}}, "n1") == ("", "")
 
 
-def test_external_always_fetches_full_text_and_stops_on_unparseable_detail():
+def test_external_always_fetches_full_text_caps_requests_and_stops_on_failing_detail():
     # 10-08 首跑：摘要被截在 60 字、刚好够 min_body_chars 就不取全文，200 篇全拿半句话打标；取了全文的又一篇都没解析出来
     from judge import external as E
     import yaml
@@ -667,6 +667,13 @@ def test_external_always_fetches_full_text_and_stops_on_unparseable_detail():
     assert rep.judged == 3 and rep.fetched == rep.triaged_kept and all(n["body"] == full for n in rep.kept_notes)
     assert len(rep.detail_samples) == min(E.DETAIL_SAMPLES, rep.fetched)
 
+    # 全文上限按请求数算：全文都太短也只取 cap 篇，不会一直付费取下去（plan() 的最坏花费按它算）
+    rep_short = E.run_once(dict(cfg, min_body_chars=10_000), E.TikHubClient(budget=E.Budget(limit_usd=5.0), mock=True),
+                           JevClient(mock=True), triage, fq, {"seen": {}, "monthly": {}})
+    assert rep_short.fetched == rep_short.dropped_short == 3 and rep_short.judged == 0
+
+    cfg10 = dict(cfg, max_keep_per_category_per_run=10)            # 上限高于 DETAIL_PROBE，才轮得到连续失败那道闸
+
     class Garbled(E.TikHubClient):                                   # 详情照样计费，但返回里没有正文
         def _get(self, path, params):
             if path == E.DETAIL_PATH:
@@ -674,11 +681,31 @@ def test_external_always_fetches_full_text_and_stops_on_unparseable_detail():
                 return {"code": 200, "data": {"message": "服务异常"}}
             return super()._get(path, params)
 
-    st = {"seen": {}, "monthly": {}}
-    rep2 = E.run_once(cfg, Garbled(budget=E.Budget(limit_usd=5.0), mock=True), JevClient(mock=True), triage, fq, st)
-    assert rep2.detail_unparseable == E.DETAIL_PROBE and rep2.fetched == 0 and rep2.judged == 0   # 开头 5 篇就停，不按篇白付费
-    assert "详情" in rep2.systemic_failure and rep2.stopped_reason and len(rep2.detail_samples) == E.DETAIL_SAMPLES
-    assert not any(v["why"] != "triage_reject" for v in st["seen"].values())                       # 解析失败的不进 seen，下次还会看
+    class Down(E.TikHubClient):                                      # 前 ok_first 次详情正常，之后接口直接报错（401 / 5xx）
+        ok_first = 0
+        detail_calls = 0
+
+        def _get(self, path, params):
+            if path == E.DETAIL_PATH:
+                self.detail_calls += 1
+                if self.detail_calls > self.ok_first:
+                    self.budget.charge(1)
+                    raise RuntimeError("HTTP Error 503: Service Unavailable")
+            return super()._get(path, params)
+
+    for prov in (Garbled(budget=E.Budget(limit_usd=5.0), mock=True), Down(budget=E.Budget(limit_usd=5.0), mock=True)):
+        st = {"seen": {}, "monthly": {}}
+        rep2 = E.run_once(cfg10, prov, JevClient(mock=True), triage, fq, st)
+        assert rep2.detail_failed == E.DETAIL_PROBE and rep2.fetched == 0 and rep2.judged == 0   # 连续 5 篇就停，不按篇白付费
+        assert "取全文失败" in rep2.systemic_failure and rep2.stopped_reason
+        assert not any(v["why"] != "triage_reject" for v in st["seen"].values())                   # 失败的不进 seen，下次还会看
+    assert len(rep2.detail_samples) == 0                             # 请求层报错没有原始返回可留
+    # 中途才断：已取到的照常入库，只告警、不算系统性故障
+    mid = Down(budget=E.Budget(limit_usd=5.0), mock=True)
+    mid.ok_first = 2                                                 # 先取到两篇全文，之后详情接口挂掉
+    rep3 = E.run_once(cfg10, mid, JevClient(mock=True), triage, fq, {"seen": {}, "monthly": {}})
+    assert rep3.fetched == 2 and rep3.judged == 2 and rep3.detail_failed == E.DETAIL_PROBE
+    assert rep3.stopped_reason and rep3.systemic_failure == ""
 
 
 def test_external_errors_and_seen_discipline():

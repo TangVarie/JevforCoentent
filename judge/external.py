@@ -30,7 +30,7 @@ TIKHUB_BASE = os.environ.get("TIKHUB_BASE_URL", "https://api.tikhub.io")
 SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
 DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"   # 官方文档：图文接口图文、视频笔记都能取到文字；视频接口只认视频
 USER_AGENT = "bywood-judge/0.1 (+https://github.com/TangVarie/JevforCoentent)"
-DETAIL_PROBE = 5           # 一次运行开头连着这么多篇详情都解析不出正文 → 接口格式变了，整次停（不再按篇白付费）
+DETAIL_PROBE = 5           # 连着这么多篇取全文失败（接口报错或解析不出正文）→ 整次停，不再按篇白付费
 DETAIL_SAMPLES = 3         # 每次运行留几份详情原始返回进产物，字段变了能直接看
 
 
@@ -38,11 +38,15 @@ class BudgetExceeded(Exception):
     pass
 
 
-class DetailUnparseable(RuntimeError):
-    """详情接口返回里找不到正文（上游「服务异常」或返回格式变了）。照样计费，所以开头连续失败要整次停。"""
+class DetailFailed(RuntimeError):
+    """取全文失败：请求报错（401 / 5xx / 超时）或返回里没有正文。多半照样计费，所以连续失败要整次停。"""
 
 
-class DetailFormatUnknown(RuntimeError):
+class DetailUnparseable(DetailFailed):
+    """详情接口返回里找不到正文（上游「服务异常」或返回格式变了）。"""
+
+
+class DetailEndpointDown(RuntimeError):
     pass
 
 
@@ -283,7 +287,7 @@ class RunReport:
     search_attempts: int = 0       # 发出的搜索请求数（含失败的）；searched 只数成功的
     processed: int = 0             # 走进分诊 / 取全文 / 打标的笔记数（含失败的）
     note_errors: int = 0
-    detail_unparseable: int = 0    # 取全文付了费、却解析不出正文的篇数（计在 note_errors 里）
+    detail_failed: int = 0         # 取全文失败的篇数（请求报错或解析不出正文；计在 note_errors 里）
     detail_samples: list = field(default_factory=list)
     systemic_failure: str = ""     # 全部搜索或全部笔记都失败：供应商 / Jev 挂了或密钥失效，脚本要让 job 红
     kept_notes: list = field(default_factory=list)
@@ -316,7 +320,14 @@ def _process_note(n: dict, name: str, cfg: dict, provider: TikHubClient, jev: Je
         return "triage_reject"
     n["triage"] = {k: v["answer"] for k, v in it.items()}
     # 一律取全文：搜索页的摘要被 TikHub 截在 60 字，拿摘要打 fq 等于只看半句话（10-08 首跑 200 篇全是 60 字片段）
-    full, _ = provider.detail(n["note_id"], n["note_type"]); rep.fetched += 1; stats["fetched"] += 1
+    stats["detail_calls"] += 1                          # 每品类每次的全文上限按请求数算（含失败 / 太短的），plan() 的最坏花费才成立
+    try:
+        full, _ = provider.detail(n["note_id"], n["note_type"])
+    except (BudgetExceeded, DetailFailed):
+        raise
+    except Exception as exc:  # noqa: BLE001 — 请求层的错（401 / 5xx / 超时）也算取全文失败，参与连续失败计数
+        raise DetailFailed(f"取全文失败：{type(exc).__name__}: {exc}") from exc
+    rep.fetched += 1; stats["fetched"] += 1
     n["title"] = str(full.get("title") or n["title"])
     n["body"] = str(full["desc"])
     rep.triaged_kept += 1; stats["triaged"] += 1        # 取全文之后才计，预算在取全文时用完的那条不算「分诊通过」，报告四列对得上
@@ -355,17 +366,17 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
         rep.errors.append((where, f"{type(exc).__name__}: {exc}"))
         stats["errors"] += 1
 
+    detail_streak = 0                                   # 连续取全文失败的篇数；有一篇取到就清零
     try:
         for cat in cfg.get("categories") or []:
             name = cat["name"]
             stats = rep.per_category.setdefault(name, {"searched": 0, "candidates": 0, "triaged": 0, "kept": 0, "fetched": 0,
-                                                       "short": 0, "judged": 0, "errors": 0})
-            kept_this_run = 0
+                                                       "short": 0, "judged": 0, "errors": 0, "detail_calls": 0})
             if monthly.get(name, 0) >= per_month_cap:
                 stats["note"] = "本月上限已到"; continue
 
             def cap_reached() -> bool:
-                return kept_this_run >= per_run_cap or monthly.get(name, 0) >= per_month_cap
+                return stats["detail_calls"] >= per_run_cap or monthly.get(name, 0) >= per_month_cap
 
             done = False
             for kw in cat.get("keywords") or []:
@@ -404,29 +415,33 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                                 raise
                             except Exception as exc:  # noqa: BLE001 — 这条不进 seen，下次再看
                                 rep.note_errors += 1; err(n["note_id"], exc, stats)
-                                if isinstance(exc, DetailUnparseable):
-                                    rep.detail_unparseable += 1
-                                    if rep.fetched == 0 and rep.detail_unparseable >= DETAIL_PROBE:
-                                        raise DetailFormatUnknown(f"开头 {DETAIL_PROBE} 篇详情都解析不出正文：TikHub 详情接口格式变了或上游异常，"
-                                                                  f"原始返回见产物 detail_samples")
+                                if isinstance(exc, DetailFailed):
+                                    rep.detail_failed += 1; detail_streak += 1
+                                    if detail_streak >= DETAIL_PROBE:
+                                        raise DetailEndpointDown(f"连续 {DETAIL_PROBE} 篇取全文失败（TikHub 详情接口报错或返回里找不到正文），整次停；"
+                                                                 f"原始返回见产物 detail_samples")
                                 continue
                             seen[n["note_id"]] = {"cat": name, "kw": kw, "at": rep.started, "kept": outcome == "kept", "why": outcome}
+                            if outcome != "triage_reject":
+                                detail_streak = 0
                             if outcome == "kept":
-                                kept_this_run += 1; monthly[name] = monthly.get(name, 0) + 1
+                                monthly[name] = monthly.get(name, 0) + 1
                         if done:
                             break
                     if done:
                         break
                 if done:
                     break
-            if kept_this_run >= per_run_cap:
+            if stats["detail_calls"] >= per_run_cap:
                 stats["note"] = "本次上限已到"
             elif monthly.get(name, 0) >= per_month_cap:
                 stats["note"] = "本月上限已到"
     except BudgetExceeded as exc:
         rep.stopped_reason = str(exc)
-    except DetailFormatUnknown as exc:
-        rep.stopped_reason = rep.systemic_failure = str(exc)
+    except DetailEndpointDown as exc:
+        rep.stopped_reason = str(exc)
+        if rep.fetched == 0:                            # 一篇全文都没取到才算系统性故障（job 红）；中途断掉只告警，已取到的照常入库
+            rep.systemic_failure = str(exc)
     except Exception as exc:  # noqa: BLE001 — 意外异常也要把已花钱拿到的产物和 state 写出去
         rep.stopped_reason = f"异常中止：{type(exc).__name__}: {exc}"
     rep.calls = provider.budget.calls; rep.spent_usd = provider.budget.spent
