@@ -464,7 +464,7 @@ def test_api_auth_fail_closed(monkeypatch):
     from fastapi.testclient import TestClient
     from judge.api import app
     c = TestClient(app)
-    assert c.get("/health").json()["auth"] == {"mode": "unconfigured", "required": False}
+    assert c.get("/health").json()["auth"] == {"mode": "unconfigured", "required": False, "writer_keys": 0}
     assert c.get("/banks").status_code == 503                                  # 没配 key：拒绝，不放行
     assert c.get("/banks", headers={"X-Judge-Key": "anything"}).status_code == 503
     monkeypatch.setenv("JUDGE_ALLOW_ANONYMOUS", "1")
@@ -793,3 +793,28 @@ def test_banks_lists_latest_version_only_unless_all(monkeypatch):
     assert {"comment_reader_v0.3", "comment_thread_v0.2", "human_feel_para_v0.1"} <= {x["name"] for x in full}
     assert {x["name"] for x in full if x["superseded"]} == {x["name"] for x in full} - names
     assert latest_banks(["a_v0.1", "a_v0.10", "a_v0.2", "b", "c_v1_0"]) == {"a_v0.10": ["a_v0.1", "a_v0.2"], "b": [], "c_v1_0": []}
+
+
+
+def test_writer_key_is_scoped_to_banks_and_non_writing_judge_draft(monkeypatch, policy_cfg):
+    """审计 A-09 的另一半 (codex review on #7, P1): 发到写手机器的 key 不能换来 /judge (任意 subject / write=true / 带暗题的账本行)。
+    写手 key 只够 /banks 和 /judge_draft, 后者 write 一律 403、ledger_rows 一律 None; 管理 key 一切照旧。"""
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k-admin"); monkeypatch.setenv("JUDGE_WRITER_API_KEYS", "w1, w2")
+    from fastapi.testclient import TestClient
+    from judge.api import app
+    c = TestClient(app); W = {"X-Judge-Key": "w2"}; A = {"X-Judge-Key": "k-admin"}
+    assert c.get("/health").json()["auth"] == {"mode": "key", "required": True, "writer_keys": 2}
+    assert c.get("/banks", headers=W).status_code == 200
+    assert c.get("/banks", headers={"X-Judge-Key": "w3"}).status_code == 401
+    body = {"bank": "feature_questions_v0_1", "run_tag": "shadow-t", "subjects": [
+        {"subject_type": "note", "subject_id": "n1", "raw_content": "标题：测试标题？\n正文：昨天在药店买了一盒东西，嚼了几口辣嗓子，有点想戒了。大家怎么看？"}]}
+    assert c.post("/judge", json=body, headers=W).status_code == 403, "写手 key 够不着 /judge"
+    assert c.post("/judge", json=body, headers=A).status_code == 200
+    draft = {"title": "t", "body": "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？",
+             "project": "TUGE", "subject_id": "v1", "return_rows": True}
+    r = c.post("/judge_draft", json={**draft, "write": True}, headers=W)
+    assert r.status_code == 403 and "write" in r.json()["detail"], r.text
+    r = c.post("/judge_draft", json=draft, headers=W)
+    assert r.status_code == 200 and r.json()["ledger_rows"] is None and "plan" in r.json(), r.text
+    r = c.post("/judge_draft", json=draft, headers=A)
+    assert r.status_code == 200 and isinstance(r.json()["ledger_rows"], list), r.text

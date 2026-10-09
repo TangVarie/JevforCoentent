@@ -233,3 +233,47 @@ def test_missing_env_warns_at_startup_and_tools_return_error_dict(monkeypatch, c
     assert called == []
     monkeypatch.setenv("JUDGE_URL", "https://judge.example.test")                                       # 只缺一个也说清是哪个
     assert M.list_banks()["missing"] == ["JUDGE_API_KEY"]
+    # 三样全缺时先报 HTTP 配置、不是先报 project (codex review on #7): 新机器第一次配能一次看全要填什么
+    monkeypatch.delenv("JUDGE_URL", raising=False); monkeypatch.delenv("JUDGE_PROJECT", raising=False)
+    for out in (M.judge_draft("t", BODY), M.repair_plan_for("t", BODY)):
+        assert out["missing"] == ["JUDGE_URL", "JUDGE_API_KEY"] and "policy" not in out["error"], out
+    assert called == []
+
+
+# ── (e) 200 但不是 JSON / 读到一半断掉：都变成 error dict，后者重试 (codex review on #7) ──
+
+def test_non_json_200_and_truncated_read_become_tool_errors(env, monkeypatch):
+    import http.client
+    from judge import mcp_server as M
+    seen = []
+
+    class _Html:
+        status = 200
+
+        def read(self):
+            return b"<html><body>502 Bad Gateway</body></html>"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: seen.append(req) or _Html())
+    out = M.judge_draft("t", BODY)
+    assert isinstance(out, dict) and "不是 JSON" in out["error"] and out["status"] == 200 and "judge_draft" in out["url"], out
+    assert len(seen) == 1, "JUDGE_URL 指错 / 代理回 HTML 不是瞬时的, 不重试"
+    assert "error" in M.list_banks() and "error" in M.repair_plan_for("t", BODY)
+
+    seen.clear()
+    calls = iter([None, _Resp(SERVICE)])
+
+    def flaky(req, timeout=None):
+        seen.append(req)
+        nxt = next(calls)
+        if nxt is None:
+            raise http.client.IncompleteRead(b"{\"pa")
+        return nxt
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    out = M.judge_draft("t", BODY)
+    assert out.get("passed") is SERVICE["passed"] and len(seen) == 2, "读到一半断掉按瞬时重试一次后成功"

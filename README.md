@@ -33,11 +33,11 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 
 金标准报告头会写明对的是哪一版金标准；`cg-v0.2-proposed` 是提议版、未经勘误，命中率不等于对勘误版的命中率。影子跑从库里取用 `--from-db --mappings ../truth-vault/mappings`，切标题按每个项目的 mapping 走。
 
-环境变量（服务端）：`TYPESAFE_API_KEY`（必需，**只放在服务端**，写手机器不配；也可用 `TYPESAFE_KEY_FILE` 指向密钥文件，`TYPESAFE_BASE_URL` 换端点）· `JUDGE_API_KEY`（HTTP 鉴权，必需；不配则服务拒绝所有请求，本地开发显式设 `JUDGE_ALLOW_ANONYMOUS=1`）· `JUDGE_WORKERS`（一批 subject 并行几路，默认 4）·
+环境变量（服务端）：`TYPESAFE_API_KEY`（必需，**只放在服务端**，写手机器不配；也可用 `TYPESAFE_KEY_FILE` 指向密钥文件，`TYPESAFE_BASE_URL` 换端点）· `JUDGE_API_KEY`（管理 key，必需；不配则服务拒绝所有请求，本地开发显式设 `JUDGE_ALLOW_ANONYMOUS=1`）· `JUDGE_WRITER_API_KEYS`（发给写手机器的 key，逗号分隔可多把；只够 `GET /banks` 和 `POST /judge_draft`，后者 write 一律 403、不回账本行；`/judge` 只认管理 key）· `JUDGE_WORKERS`（一批 subject 并行几路，默认 4）·
 `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`（与 truth-vault 同名；直接写账本，没有就只出 SQL / rows.json）· `JUDGE_MOCK=1`（不联网的假 Jev；它判的行 extractor 是 `mock:<模型>`，任何写库请求一律拒绝）· `TIKHUB_API_KEY`（外部语料，每次请求 0.01 美元；`TIKHUB_BASE_URL` 换端点）·
 `JUDGE_BANKS_DIR` / `JUDGE_POLICY_CONFIG` / `JUDGE_HIDDEN_CONFIG`（换题库目录与两份配置的位置）·
 `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`（或 `MOONSHOT_API_KEY`）（`loop.AnthropicCompatGenerator` 的生成端；末尾带不带 `/v1` 都行）。
-环境变量（写手机器，`judge.mcp_server` 的 `.mcp.json` env；2026-10-09 审计 A-09）：`JUDGE_URL`（判定服务地址）+ `JUDGE_API_KEY`（与服务端同值，鉴权头 `X-Judge-Key`）两个必需，没配则启动记一条警告、工具返回 `{"error": …}` ·
+环境变量（写手机器，`judge.mcp_server` 的 `.mcp.json` env；2026-10-09 审计 A-09）：`JUDGE_URL`（判定服务地址）+ `JUDGE_API_KEY`（填服务端 `JUDGE_WRITER_API_KEYS` 里的一把写手 key，**不是**服务端的管理 key；鉴权头 `X-Judge-Key`）两个必需，没配则启动记一条警告、工具返回 `{"error": …}` ·
 `JUDGE_PROJECT` / `JUDGE_CATEGORY`（默认项目代号与品类；`project` 两处都没有在本地就拒绝，其余数据出境规则由服务端执行并回显在 `policy`）· `JUDGE_HTTP_TIMEOUT_SEC`（默认 180；429 / 5xx 退避重试最多 2 次）·
 `JUDGE_ALLOW_LOCAL_JEV=1`（评论三个工具暂无 HTTP 端点，默认拒绝；只有合法持有 vendor 密钥的内部 / 运维机器显式设它才进程内跑，那台机器另需 `TYPESAFE_API_KEY` + 本地 `banks/`）。写手机器上**没有** `TYPESAFE_API_KEY`，MCP 不读 `banks/`、不 import `judge.hidden`。
 账本里的 `bank_sha256` 用 TV 同款规范化摘要（剔掉 `status:` / `frozen_sha256:` 两行再算），与 TV 自己写的行同口径，冻结题库不会把行劈成两批；`banks/vendor/SHA256SUMS` 钉的是整文件。

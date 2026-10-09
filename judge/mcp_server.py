@@ -6,7 +6,9 @@
 
 2026-10-09 审计 A-09 之前这个模块在写手机器上进程内跑判定：.mcp.json 把 Jev 的 vendor 密钥（TYPESAFE_API_KEY）发到写手的环境里，
 题库和暗题轮换也从本地 checkout 读，与 README / docs/31 §2.1「密钥只在这个服务的环境变量里」矛盾。现在稿子的判定走
-POST {JUDGE_URL}/judge_draft、题库清单走 GET {JUDGE_URL}/banks，鉴权头 X-Judge-Key = JUDGE_API_KEY（与服务端同值）。
+POST {JUDGE_URL}/judge_draft、题库清单走 GET {JUDGE_URL}/banks，鉴权头 X-Judge-Key = JUDGE_API_KEY。写手机器上这把要填服务端
+JUDGE_WRITER_API_KEYS 里的一把（写手 key），**不是**服务端的 JUDGE_API_KEY（管理 key）：写手 key 只够这两个端点、/judge_draft 不能写、
+拿不到账本行；拿着管理 key 的写手进程能绕过本模块直接调 /judge（任意 subject、write=true、带暗题的账本行；codex review on #7）。
 Jev 密钥不出服务端；题库、暗题（judge/hidden.py）、数据出境（judge/policy.py）都在服务端算，这里不读 banks/、不 import judge.hidden、
 不建 JevClient。服务端返回的已经是抹掉暗题的视图（view / plan / recorded / policy / banks…），这里再把 ledger_rows 防御性去掉：
 写手的模型看到的，就是服务端允许写手看到的那一份。
@@ -19,10 +21,11 @@ Claude Code 的 .mcp.json：{"mcpServers": {"judge": {"command": "python", "args
                                                      "env": {"JUDGE_URL": "https://judge.example.railway.app", "JUDGE_API_KEY": "…",
                                                              "JUDGE_PROJECT": "TUGE", "JUDGE_CATEGORY": "教育"}}}}
 
-环境变量：JUDGE_URL（必需，服务地址）· JUDGE_API_KEY（必需，= 服务端的 JUDGE_API_KEY）· JUDGE_PROJECT / JUDGE_CATEGORY（默认项目代号 / 品类）·
+环境变量：JUDGE_URL（必需，服务地址）· JUDGE_API_KEY（必需，= 服务端 JUDGE_WRITER_API_KEYS 里的一把写手 key）· JUDGE_PROJECT / JUDGE_CATEGORY（默认项目代号 / 品类）·
 JUDGE_HTTP_TIMEOUT_SEC（一次请求的超时，默认 180）· JUDGE_ALLOW_LOCAL_JEV=1（评论三个工具的本机路径，见下）。
 两个必需的没配：启动时记一条警告，三个薄客户端工具返回 {"error": …, "missing": […]} 而不是抛异常。
-429 / 5xx / 连不上按退避重试（最多 2 次，同 loop.AnthropicCompatGenerator）；401 / 403 / 422 等不重试，服务端的 detail 原样带回。
+429 / 5xx / 连不上 / 响应读到一半断掉按退避重试（最多 2 次，同 loop.AnthropicCompatGenerator）；401 / 403 / 422 等不重试，服务端的 detail 原样带回；
+200 但回的不是 JSON（JUDGE_URL 指错、中间有代理）不重试，直接变成 {"error": …}（不然 MCP 只看到一句 isError）。
 
 数据出境（judge/policy.py，docs/00 #7）：项目代号从参数 project 或环境变量 JUDGE_PROJECT 取，两处都没有就在本地拒绝（不发一个会 422 的请求）；
 处方药项目拒绝、项目层只有放行的项目才判——这些由服务端 /judge_draft 执行并回显在响应的 policy 里，客户端只是把 project / category 传过去。
@@ -33,6 +36,7 @@ JUDGE_HTTP_TIMEOUT_SEC（一次请求的超时，默认 180）· JUDGE_ALLOW_LOC
 """
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -115,16 +119,25 @@ def _request(method: str, path: str, body: Optional[dict] = None):
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=_timeout()) as r:
-                return json.loads(r.read().decode("utf-8"))
+                status, raw = getattr(r, "status", 200), r.read()
         except urllib.error.HTTPError as exc:
             detail = _error_detail(exc)
             last = ThinClientError(f"judge 服务回 {exc.code}：{detail}", status=exc.code, detail=detail, url=url)
             if exc.code not in RETRY_STATUSES or attempt >= RETRIES:
                 raise last from None
-        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+        except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+            # IncompleteRead = 连接在 read() 中途断了（不是 OSError 的子类），和连不上一样是瞬时的 (codex review on #7)
             last = ThinClientError(f"连不上 judge 服务（{url}）：{exc}", url=url)
             if attempt >= RETRIES:
                 raise last from None
+        else:
+            try:
+                return json.loads(raw.decode("utf-8"))
+            except ValueError:
+                # 200 但不是 JSON：JUDGE_URL 指错 / 中间有代理回了 HTML。不重试（再发两次还是那页），回 error dict 而不是炸成 isError
+                head = raw[:200].decode("utf-8", "replace")
+                raise ThinClientError(f"judge 服务回的不是 JSON（{url}，HTTP {status}）：{head!r} —— JUDGE_URL 指错了？中间有代理？",
+                                      status=status, url=url) from None
         time.sleep(min(0.5 * (2 ** attempt), 8.0))
     raise last  # pragma: no cover — 循环里要么 return 要么 raise
 
@@ -181,6 +194,7 @@ def judge_draft(title: str, body: str, banks: Optional[list] = None, judge_paras
     返回服务端的响应原样：篇级画像 profile、硬伤 hard_fails（题、答案、概率、依据句）、没判出来的硬约束 unjudged、歧义题、段级分布 para_stats、
     修改单 plan、只记录的目标题 recorded、数据出境 policy、用的题库 banks。不改稿；不落账本。出错时返回 {"error": …, "status"?: …, "detail"?: …}。"""
     try:
+        _config()   # 先报缺 JUDGE_URL / JUDGE_API_KEY，再报缺 project：新机器第一次配时一次看全 (codex review on #7)
         d = _post_json("/judge_draft", _draft_body(title, body, banks, judge_paras, project, category, brief, hard_rules, target, validated, subject_id))
     except ThinClientError as exc:
         return exc.as_dict()
@@ -195,6 +209,7 @@ def repair_plan_for(title: str, body: str, banks: Optional[list] = None, project
     recorded 是没过闸二、只记录不下发的目标题（给了 target 才有）。与 judge_draft 同样的层和硬约束（含 brief 编出的项目题库）。
     返回 {"plan": […], "recorded": […], "passed": …, "invalid_reason": …, "policy": …}；出错时返回 {"error": …}。"""
     try:
+        _config()
         d = _post_json("/judge_draft", _draft_body(title, body, banks, "on_fail", project, category, brief, hard_rules, target, validated, subject_id))
     except ThinClientError as exc:
         return exc.as_dict()
