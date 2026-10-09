@@ -13,18 +13,26 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import yaml
 
 CONFIG = Path(os.environ.get("JUDGE_HIDDEN_CONFIG", Path(__file__).resolve().parent.parent / "config" / "hidden_rotation.yaml"))
 _cache: dict = {}
+# 季度按哪个时区的"今天"算 (TV 审计 2026-10-08 C-08): 以前是 date.today() = 服务器本地时间, Railway 是 UTC、
+# 写手机器上的 MCP 是北京时间, 每季交界有 8 小时两边暗题不一样。钉死一个时区, 两边一致; 要换用 JUDGE_TZ。
+QUARTER_TZ = ZoneInfo(os.environ.get("JUDGE_TZ", "Asia/Shanghai"))
+
+
+def today() -> date:
+    return datetime.now(QUARTER_TZ).date()
 
 
 def quarter(d: Optional[date] = None) -> str:
-    d = d or date.today()
+    d = d or today()
     return f"{d.year}Q{(d.month - 1) // 3 + 1}"
 
 
