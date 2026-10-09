@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""给写手（Claude Code / WorkBuddy 里的模型）用的 MCP 工具——部署好的判定服务的**薄客户端**。
+"""部署好的判定服务的**薄客户端**（stdio MCP）。2026-10-09 起**写手不用它**：写手的判稿走写作台 deskcore 的
+judge_draft / repair_plan_for / list_banks（deskcore 用服务端管理 key 转发, 写手只配 deskcore 一个 MCP）; 这里留给内部 / 运维机器
+（评论三个工具只有这条路）。
 
   薄客户端（走 HTTP）：judge_draft · repair_plan_for · list_banks
   本机 Jev（默认拒绝，JUDGE_ALLOW_LOCAL_JEV=1 才放行）：judge_comments · comment_repair_plan_for · judge_thread

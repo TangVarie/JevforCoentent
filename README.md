@@ -26,7 +26,7 @@ python3 -m pytest -q                            # 全 mock
 python3 scripts/run_gold.py banks/comment_reader_v0.4.yaml fixtures/comment_cases.json --gold banks/gold/comment_reader_gold_v0.2_proposed.yaml   # 占位符从用例文件的 fill 填
 python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --opus fixtures/fq_opus_gate1_50.tsv --gate1 fixtures/fq_jev_d081_A_gate1_50.tsv --out fq.md --sql fq.sql --run-tag shadow-$(date +%F)
 uvicorn judge.api:app --port 8080              # HTTP：POST /judge（一个题库、一批 subject，并行）· POST /judge_draft（一篇稿、多层题库、带修改单）· GET /banks · GET /health（不鉴权）
-JUDGE_URL=https://… JUDGE_API_KEY=… python3 -m judge.mcp_server   # 写手的 MCP 工具（上面那个 HTTP 服务的薄客户端，写手机器不配 TYPESAFE_API_KEY）：judge_draft · repair_plan_for · list_banks；
+JUDGE_URL=https://… JUDGE_API_KEY=… python3 -m judge.mcp_server   # 内部 / 运维机器的 MCP 工具（上面那个 HTTP 服务的薄客户端）：judge_draft · repair_plan_for · list_banks。写手不用它：这三个工具 2026-10-09 起由写作台 deskcore 转发（写手只配 deskcore 那一个 MCP）；
                                                 #   judge_comments · comment_repair_plan_for · judge_thread 暂无 HTTP 端点，只在显式设 JUDGE_ALLOW_LOCAL_JEV=1 的内部机器上进程内跑
 python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要花多少钱；--probe 花一次请求钉字段；正式跑由 .github/workflows/external-corpus.yml 每周一触发
 ```
@@ -37,7 +37,7 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`（与 truth-vault 同名；直接写账本，没有就只出 SQL / rows.json）· `JUDGE_MOCK=1`（不联网的假 Jev；它判的行 extractor 是 `mock:<模型>`，任何写库请求一律拒绝）· `TIKHUB_API_KEY`（外部语料，每次请求 0.01 美元；`TIKHUB_BASE_URL` 换端点）·
 `JUDGE_BANKS_DIR` / `JUDGE_POLICY_CONFIG` / `JUDGE_HIDDEN_CONFIG`（换题库目录与两份配置的位置）·
 `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`（或 `MOONSHOT_API_KEY`）（`loop.AnthropicCompatGenerator` 的生成端；末尾带不带 `/v1` 都行）。
-环境变量（写手机器，`judge.mcp_server` 的 `.mcp.json` env；2026-10-09 审计 A-09）：`JUDGE_URL`（判定服务地址）+ `JUDGE_API_KEY`（填服务端 `JUDGE_WRITER_API_KEYS` 里的一把写手 key，**不是**服务端的管理 key；鉴权头 `X-Judge-Key`）两个必需，没配则启动记一条警告、工具返回 `{"error": …}` ·
+环境变量（`judge.mcp_server` 所在机器的 `.mcp.json` env；2026-10-09 审计 A-09。写手机器**不再**起它——写手通过 deskcore 的 `judge_draft` / `repair_plan_for` / `list_banks` 判稿，deskcore 用服务端的管理 key 转发）：`JUDGE_URL`（判定服务地址）+ `JUDGE_API_KEY`（填服务端 `JUDGE_WRITER_API_KEYS` 里的一把写手 key，**不是**服务端的管理 key；鉴权头 `X-Judge-Key`）两个必需，没配则启动记一条警告、工具返回 `{"error": …}` ·
 `JUDGE_PROJECT` / `JUDGE_CATEGORY`（默认项目代号与品类；`project` 两处都没有在本地就拒绝，其余数据出境规则由服务端执行并回显在 `policy`）· `JUDGE_HTTP_TIMEOUT_SEC`（默认 180；429 / 5xx 退避重试最多 2 次）·
 `JUDGE_ALLOW_LOCAL_JEV=1`（评论三个工具暂无 HTTP 端点，默认拒绝；只有合法持有 vendor 密钥的内部 / 运维机器显式设它才进程内跑，那台机器另需 `TYPESAFE_API_KEY` + 本地 `banks/`）。写手机器上**没有** `TYPESAFE_API_KEY`，MCP 不读 `banks/`、不 import `judge.hidden`。
 账本里的 `bank_sha256` 用 TV 同款规范化摘要（剔掉 `status:` / `frozen_sha256:` 两行再算），与 TV 自己写的行同口径，冻结题库不会把行劈成两批；`banks/vendor/SHA256SUMS` 钉的是整文件。

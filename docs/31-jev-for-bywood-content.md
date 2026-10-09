@@ -194,7 +194,7 @@ docs/30 §3 已写借卡（§3.1）、发牌（§3.2）、查稿（§3.3）、�
 - **写后** `judge_draft → repair_plan → repair`：篇级跑 fq + 平台 + 项目题库；平台和项目题答「是」的做证据选句；篇级不过再判段（人感题库 + 意图题）；修改单每条 = 题号 + 概率 + 依据句 + 该题定义，不写改法；修补由便宜模型只改指到的句子，再判，直到过或预算用完。fq 题的正向写法只对过了闸二的题下发（docs/28 §7）。
 - **整条** `produce`：把上面串起来，返回终稿、篇级画像、段级分布（语域分布、无产品意图段占比、产品第一次出现在第几段、有没有摩擦、总结式收尾段数）和每一步的轨迹。
 
-两个入口：写手在 Claude Code / WorkBuddy 里挂 `judge.mcp_server`（judge_draft / repair_plan_for / list_banks；2026-10-09 起是部署好的 HTTP 服务的薄客户端，写手机器不持 Jev 密钥；judge_comments / comment_repair_plan_for / judge_thread 要 `JUDGE_ALLOW_LOCAL_JEV=1` 的内部机器），现在就能用；deskcore 的 `commit_drafts` 挂 HTTP `/judge`，答案进账本。两篇真实笔记实跑：每篇 10–12 次调用、4.5 秒；「效果是真的绝…立马就压住了」被平台题库判疗效暗示 0.68，「省下的烟钱都够给老婆买个包」被项目题库判省钱 0.77，都带依据句；段级分布给出无产品意图段 83%、产品第一次出现在第 4 段、有摩擦、无总结式收尾。生成端是可插拔适配器（Anthropic 兼容端点，接三省六部那个中转站即可），本轮没有接真实生成端。目标画像等 ⑧ 的参考分布和闸二。
+两个入口：写手在 Claude Code / WorkBuddy 里用**写作台 deskcore** 的 `judge_draft` / `repair_plan_for` / `list_banks`（2026-10-09 并进 deskcore：deskcore 用服务端的管理 key 转发到 `/judge_draft`，`write` / `return_rows` 钉死 false，写手只有 deskcore 那一个 MCP、不持任何 judge 密钥；`judge.mcp_server` 这个 stdio 薄客户端只剩内部 / 运维机器用，judge_comments / comment_repair_plan_for / judge_thread 要 `JUDGE_ALLOW_LOCAL_JEV=1`），现在就能用；deskcore 的 `commit_drafts` 挂 HTTP `/judge`，答案进账本。两篇真实笔记实跑：每篇 10–12 次调用、4.5 秒；「效果是真的绝…立马就压住了」被平台题库判疗效暗示 0.68，「省下的烟钱都够给老婆买个包」被项目题库判省钱 0.77，都带依据句；段级分布给出无产品意图段 83%、产品第一次出现在第 4 段、有摩擦、无总结式收尾。生成端是可插拔适配器（Anthropic 兼容端点，接三省六部那个中转站即可），本轮没有接真实生成端。目标画像等 ⑧ 的参考分布和闸二。
 
 ### 5.5 句级判只在需要修补时做
 
