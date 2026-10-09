@@ -36,7 +36,9 @@ def main(argv: list) -> int:
             n1 = postgrest_upsert(d.get("external_notes") or [], url, key, table="external_notes")
             n2 = postgrest_upsert(d.get("answers") or [], url, key)
         except Exception as exc:  # noqa: BLE001
-            print(f"{f}: 写库失败：{exc}。先确认 TV 已跑 notes_v1_17 / notes_v1_18；产物仍在 artifact 里可手工执行", file=sys.stderr)
+            # 异常文本里万一带着 key (urllib 的 URLError 会回显请求头? 不会, 但 TV 审计 B-11 要求日志出口不赌) → 抹掉
+            msg = str(exc).replace(key, "***REDACTED***")
+            print(f"{f}: 写库失败：{msg}。先确认 TV 已跑 notes_v1_17 / notes_v1_18；产物仍在 artifact 里可手工执行", file=sys.stderr)
             return 1
         print(f"{f}: external_notes {n1} 行 · note_feature_answers {n2} 行（run {d.get('run_id')}）")
     return 0
