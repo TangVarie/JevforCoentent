@@ -40,7 +40,9 @@
     项目层没放行 → 整层去掉，回显在 policy.dropped_banks / dropped_hard_rules。公开内容（note / external_note / comment）不受限。
   JUDGE_MOCK=1 时判出来的行 extractor 是 mock:<模型>，任何 write=true 一律 422：假答案绝不进真账本。
 
-鉴权：X-Judge-Key 必须等于 JUDGE_API_KEY；没配 JUDGE_API_KEY 时默认一律 503 拒绝（fail-closed），本地开发显式设 JUDGE_ALLOW_ANONYMOUS=1。
+鉴权：X-Judge-Key 必须等于 JUDGE_API_KEY（管理 key）或 JUDGE_WRITER_API_KEYS 里的一把（写手 key，逗号分隔，可多把以便轮换）；
+  写手 key 只够 GET /banks 和 POST /judge_draft（write 一律 403、不回账本行）—— 发到写手机器上的凭据不能换来 /judge 的任意 subject、
+  write=true 和带暗题的账本行（审计 A-09，codex review on #7）。没配 JUDGE_API_KEY 时默认一律 503 拒绝（fail-closed），本地开发显式设 JUDGE_ALLOW_ANONYMOUS=1。
 /health 不鉴权（Railway 探活），只回布尔与题库名，不回密钥。Jev 密钥不出服务端；调用方自己 fail-open。
 """
 from __future__ import annotations
@@ -48,6 +50,7 @@ from __future__ import annotations
 import concurrent.futures as cf
 import hmac
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -94,12 +97,40 @@ def auth_mode() -> str:
     return "unconfigured"
 
 
-def require_key(x_judge_key: Optional[str] = Header(default=None)):
+def writer_keys() -> list:
+    """发给写手机器的 key（JUDGE_WRITER_API_KEYS，逗号分隔）：只够 /banks 与 /judge_draft（不写）。"""
+    return [k.strip() for k in os.environ.get("JUDGE_WRITER_API_KEYS", "").split(",") if k.strip()]
+
+
+def _key_role(x_judge_key: Optional[str]) -> Optional[str]:
+    given = (x_judge_key or "").encode("utf-8")
+    if hmac.compare_digest(given, os.environ.get("JUDGE_API_KEY", "").encode("utf-8")):
+        return "admin"
+    for k in writer_keys():
+        if hmac.compare_digest(given, k.encode("utf-8")):
+            return "writer"
+    return None
+
+
+def require_any_key(x_judge_key: Optional[str] = Header(default=None)) -> str:
+    """管理 key 或写手 key 都过，回 "admin" / "writer"（匿名模式回 admin）。"""
     mode = auth_mode()
     if mode == "unconfigured":
         raise HTTPException(503, "JUDGE_API_KEY 未配置：服务默认拒绝所有请求；本地开发请显式设 JUDGE_ALLOW_ANONYMOUS=1")
-    if mode == "key" and not hmac.compare_digest((x_judge_key or "").encode("utf-8"), os.environ["JUDGE_API_KEY"].encode("utf-8")):
+    if mode == "anonymous":
+        return "admin"
+    role = _key_role(x_judge_key)
+    if role is None:
         raise HTTPException(401, "X-Judge-Key 不对")
+    return role
+
+
+def require_key(x_judge_key: Optional[str] = Header(default=None)) -> str:
+    """只有管理 key 过：/judge 收任意 subject、能 write=true、回带全部题（含暗题）的账本行，写手 key 不该够得着（审计 A-09）。"""
+    role = require_any_key(x_judge_key)
+    if role != "admin":
+        raise HTTPException(403, "这把是写手 key（JUDGE_WRITER_API_KEYS），只够 /banks 和 /judge_draft（不写）；/judge 要服务端的 JUDGE_API_KEY")
+    return role
 
 
 def workers() -> int:
@@ -228,21 +259,46 @@ app = FastAPI(title="judge", version=__version__)
 def health():
     mode = auth_mode()
     return {"ok": True, "version": __version__, "banks": sorted(discover(BANKS_DIR)),
-            "auth": {"mode": mode, "required": mode == "key"}, "workers": workers(),
+            "auth": {"mode": mode, "required": mode == "key", "writer_keys": len(writer_keys())}, "workers": workers(),
             "jev_key": bool(os.environ.get("TYPESAFE_API_KEY")), "mock": os.environ.get("JUDGE_MOCK") == "1",
             "write_enabled": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))}
 
 
-@app.get("/banks", dependencies=[Depends(require_key)])
-def banks():
-    """题库清单。暗题（judge/hidden.py）只报个数不报题号：调用方可能把这份清单转给写手。"""
+_BANK_VERSION = re.compile(r"^(?P<family>.+?)_v(?P<major>\d+)[._](?P<minor>\d+)$")
+
+
+def latest_banks(names) -> dict[str, list[str]]:
+    """{每个家族的最新版: [被它取代的老版本]} (审计 C-09, TV D-103)。家族 = 名字去掉 _vX.Y / _vX_Y 的部分; 没版本号的自成一族。
+    老版本文件不删: 账本里有它们的 bank_sha256, 删了历史行对不上; 只是默认不再列给调用方。"""
+    fam: dict[str, list[tuple[tuple[int, int], str]]] = {}
+    for n in names:
+        m = _BANK_VERSION.match(n)
+        key = m.group("family") if m else n
+        ver = (int(m.group("major")), int(m.group("minor"))) if m else (0, 0)
+        fam.setdefault(key, []).append((ver, n))
+    out: dict[str, list[str]] = {}
+    for members in fam.values():
+        members.sort()
+        out[members[-1][1]] = [n for _, n in members[:-1]]
+    return out
+
+
+@app.get("/banks", dependencies=[Depends(require_any_key)])
+def banks(all: bool = False):
+    """题库清单。默认只列每个家族的最新版本 (老版本在 supersedes 里点名; ?all=1 全列, 审计 C-09)。
+    暗题（judge/hidden.py）只报个数不报题号：调用方可能把这份清单转给写手。"""
     from .hidden import hidden_ids
+    found = discover(BANKS_DIR)
+    latest = latest_banks(found)
     out = []
-    for name, path in discover(BANKS_DIR).items():
+    for name, path in found.items():
+        if not all and name not in latest:
+            continue
         b = load_bank(path, name=name)
         h = hidden_ids(name, b.ids())
         out.append({"name": name, "version": b.version, "model": b.model, "format": b.fmt, "layer": P.layer_of(name),
-                    "questions": [q for q in b.ids() if q not in h], "hidden": len(h), "sha256": b.sha256, "problems": check_bank(b)})
+                    "questions": [q for q in b.ids() if q not in h], "hidden": len(h), "sha256": b.sha256, "problems": check_bank(b),
+                    "supersedes": latest.get(name, []), "superseded": name not in latest})
     return out
 
 
@@ -298,8 +354,12 @@ class DraftRequest(BaseModel):
     return_rows: bool = True
 
 
-@app.post("/judge_draft", dependencies=[Depends(require_key)])
-def judge_draft(req: DraftRequest):
+@app.post("/judge_draft")
+def judge_draft(req: DraftRequest, role: str = Depends(require_any_key)):
+    # 写手 key（审计 A-09，codex review on #7）：不能写账本，也拿不到账本行（行里有暗题；view / plan 已抹）。先于一切校验，不花一次 Jev。
+    if role == "writer" and req.write:
+        raise HTTPException(403, "写手 key 不能 write=true：账本只由服务端 / 写作台写（JUDGE_API_KEY）")
+    return_rows = req.return_rows and role != "writer"
     if req.judge_paras not in ("always", "on_fail", "never"):
         raise HTTPException(422, "judge_paras 只能是 always / on_fail / never")
     if not req.subject_id.strip():
@@ -338,5 +398,5 @@ def judge_draft(req: DraftRequest):
             "calls": dj.calls, "usage": dj.usage, "banks": {n: {"version": b.version, "sha256": b.sha256} for n, b in ds.loaded.items()},
             "ignored_banks": ds.ignored, "hard_rules": {(f"{b}:hidden" if q in hidden else f"{b}:{q}"): ("hidden" if q in hidden else w) for (b, q), w in ds.hard.items()},
             "policy": ds.decision.as_dict(),
-            "rows": len(rows), "ledger_rows": shown if req.return_rows else None, "written": written,
+            "rows": len(rows), "ledger_rows": shown if return_rows else None, "written": written,
             "write_error": write_error}

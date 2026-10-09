@@ -74,7 +74,7 @@ Jev 能做的：闭集选择（Choice ≤ 255 项）、有序分档（Score）�
 
 ### 2.1 服务放在独立仓库，账本留在 TV
 
-- **位置**：独立仓库 `judge`，Railway 单独一个服务。对外一个接口：`POST /judge`，入参 `{bank, subjects: [{subject_type, subject_id, raw_content | state}], run_tag, write}`，出参每个 subject 每题的答案、概率、是否歧义、证据句；`write=true` 直接写账本，否则调用方拿 SQL。密钥只在这个服务的环境变量里（docs/30 §4）。写手侧另有一个 MCP 入口（`judge.mcp_server`：judge_draft / repair_plan_for / judge_comments）。
+- **位置**：独立仓库 `judge`，Railway 单独一个服务。对外一个接口：`POST /judge`，入参 `{bank, subjects: [{subject_type, subject_id, raw_content | state}], run_tag, write}`，出参每个 subject 每题的答案、概率、是否歧义、证据句；`write=true` 直接写账本，否则调用方拿 SQL。密钥只在这个服务的环境变量里（docs/30 §4）。写手侧的 MCP 入口（`judge.mcp_server`：judge_draft / repair_plan_for / list_banks）是这个服务的**薄客户端**，写手机器只配 `JUDGE_URL` + `JUDGE_API_KEY`（填的是服务端 `JUDGE_WRITER_API_KEYS` 里的写手 key，只够 `/banks` 和不写的 `/judge_draft`，够不着 `/judge`），不持 Jev 密钥、不读题库、不碰暗题轮换（2026-10-09 审计 A-09 之前它在写手机器上进程内跑判定、`.mcp.json` 里带 `TYPESAFE_API_KEY`，与这句矛盾，已改）。评论三个工具（judge_comments / comment_repair_plan_for / judge_thread）暂无 HTTP 端点，默认拒绝，只在显式设 `JUDGE_ALLOW_LOCAL_JEV=1` 的内部机器上进程内跑。
 - **为什么不放 TV**：TV 已有 worker / librarian / onboarder / dashboard 四个服务，`ci.yml` 离 505,000 字节的棘轮上限只剩约 1.3 KB（上限写在 TV 的 `scripts/check_system_map.py:322`；D-075 正文只记 heredoc 块数棘轮），题库又是三仓共用的。深度集成的实质是三样：共用一张账本（`note_feature_answers`，按 D-004 这里存的是事实）、共用一套题库纪律（fq 题库从 TV 原样 vendor 并记校验和，同 D-041）、每仓一个薄客户端。写作台调它就像调馆员（`librarian_client.py`），deskcore 的「一次 LLM 调用都没有」（`docs/deskcore.md:416`）不破：推理仍归调用方模型，deskcore 拿到的是事实。三省六部按 `kimi_client` + `llm_retry` 那套 advisory 写法调它，成本走 `accumulate_auxiliary_cost`。
 - **失败退回现行路径**：特征层退回 worker 的 Opus 路径，选卡退回大模型选卡，写作台入库判定和三省六部二审直接跳过并记状态，都不阻塞主流程（同 docs/30 §4）。
 
@@ -194,7 +194,7 @@ docs/30 §3 已写借卡（§3.1）、发牌（§3.2）、查稿（§3.3）、�
 - **写后** `judge_draft → repair_plan → repair`：篇级跑 fq + 平台 + 项目题库；平台和项目题答「是」的做证据选句；篇级不过再判段（人感题库 + 意图题）；修改单每条 = 题号 + 概率 + 依据句 + 该题定义，不写改法；修补由便宜模型只改指到的句子，再判，直到过或预算用完。fq 题的正向写法只对过了闸二的题下发（docs/28 §7）。
 - **整条** `produce`：把上面串起来，返回终稿、篇级画像、段级分布（语域分布、无产品意图段占比、产品第一次出现在第几段、有没有摩擦、总结式收尾段数）和每一步的轨迹。
 
-两个入口：写手在 Claude Code / WorkBuddy 里挂 `judge.mcp_server`（judge_draft / repair_plan_for / judge_comments / comment_repair_plan_for / judge_thread），现在就能用；deskcore 的 `commit_drafts` 挂 HTTP `/judge`，答案进账本。两篇真实笔记实跑：每篇 10–12 次调用、4.5 秒；「效果是真的绝…立马就压住了」被平台题库判疗效暗示 0.68，「省下的烟钱都够给老婆买个包」被项目题库判省钱 0.77，都带依据句；段级分布给出无产品意图段 83%、产品第一次出现在第 4 段、有摩擦、无总结式收尾。生成端是可插拔适配器（Anthropic 兼容端点，接三省六部那个中转站即可），本轮没有接真实生成端。目标画像等 ⑧ 的参考分布和闸二。
+两个入口：写手在 Claude Code / WorkBuddy 里挂 `judge.mcp_server`（judge_draft / repair_plan_for / list_banks；2026-10-09 起是部署好的 HTTP 服务的薄客户端，写手机器不持 Jev 密钥；judge_comments / comment_repair_plan_for / judge_thread 要 `JUDGE_ALLOW_LOCAL_JEV=1` 的内部机器），现在就能用；deskcore 的 `commit_drafts` 挂 HTTP `/judge`，答案进账本。两篇真实笔记实跑：每篇 10–12 次调用、4.5 秒；「效果是真的绝…立马就压住了」被平台题库判疗效暗示 0.68，「省下的烟钱都够给老婆买个包」被项目题库判省钱 0.77，都带依据句；段级分布给出无产品意图段 83%、产品第一次出现在第 4 段、有摩擦、无总结式收尾。生成端是可插拔适配器（Anthropic 兼容端点，接三省六部那个中转站即可），本轮没有接真实生成端。目标画像等 ⑧ 的参考分布和闸二。
 
 ### 5.5 句级判只在需要修补时做
 

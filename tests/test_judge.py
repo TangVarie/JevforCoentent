@@ -234,19 +234,21 @@ def test_loop_compile_judge_repair_produce():
     assert set(out) >= {"draft", "passed", "profile", "trail", "calls"} and out["trail"][0]["step"] == "best_of_k"
 
 
-def test_mcp_tools_mock(monkeypatch):
-    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE")
+def test_mcp_tools_mock(monkeypatch, mcp_via_testclient):
+    """稿子三个工具是 HTTP 服务的薄客户端（A-09，urlopen 打到 TestClient）；评论工具是本机路径，要显式放行。"""
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE"); monkeypatch.setenv("JUDGE_ALLOW_LOCAL_JEV", "1")
     from judge import mcp_server as M
     names = {b["name"] for b in M.list_banks()}
-    assert {"feature_questions_v0_1", "comment_reader_v0.3", "platform_health_v0.1", "human_feel_para_v0.2"} <= names
+    assert {"feature_questions_v0_1", "comment_reader_v0.4", "platform_health_v0.1", "human_feel_para_v0.2"} <= names
     body = "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？"
     d = M.judge_draft("测试标题？", body)
-    assert set(d) >= {"passed", "profile", "hard_fails", "para_stats", "policy"} and d["policy"]["project"] == "TUGE"
+    assert set(d) >= {"passed", "profile", "hard_fails", "para_stats", "policy", "plan"} and d["policy"]["project"] == "TUGE" and "ledger_rows" not in d
     plan = M.repair_plan_for("测试标题？", body)
-    assert isinstance(plan, list)
+    assert isinstance(plan["plan"], list) and plan["recorded"] == []
     assert M.judge_draft("测试标题？", "太短")["invalid_reason"] == "text_too_short"
+    assert all(r.get_header("X-judge-key") == "k" for r in mcp_via_testclient) and len(mcp_via_testclient) == 4
     cs = M.judge_comments("标题", "正文", [{"id": "c1", "text": "在哪里"}, {"id": "c2", "text": "感谢老师帮我拿到结果"}])
-    assert len(cs) == 2 and all("flags" in c and "speech_act" in c["items"] for c in cs)
+    assert len(cs) == 2 and all("flags" in c and "speech_act" in c["items"] for c in cs) and len(mcp_via_testclient) == 4   # 评论不走 HTTP
 
 
 # ── 外部语料：预算、去重、上限（mock 供应商 + mock Jev）──
@@ -446,7 +448,7 @@ def test_produce_comments_best_of_k_repair_and_thread_swap():
 
 
 def test_mcp_comment_tools_mock(monkeypatch):
-    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE")
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE"); monkeypatch.setenv("JUDGE_ALLOW_LOCAL_JEV", "1")   # 本机路径（A-09）
     from judge import mcp_server as M
     r = M.comment_repair_plan_for("标题", "戒烟第三天，嘴里没味，靠嗑瓜子撑着。", "在哪里买的", {"id": "q1", "speech_act": ["提问"], "must_echo": False,
                                   "value_ok": ["可行动信息", "判断依据", "无"], "min_detail": "无"})
@@ -462,7 +464,7 @@ def test_api_auth_fail_closed(monkeypatch):
     from fastapi.testclient import TestClient
     from judge.api import app
     c = TestClient(app)
-    assert c.get("/health").json()["auth"] == {"mode": "unconfigured", "required": False}
+    assert c.get("/health").json()["auth"] == {"mode": "unconfigured", "required": False, "writer_keys": 0}
     assert c.get("/banks").status_code == 503                                  # 没配 key：拒绝，不放行
     assert c.get("/banks", headers={"X-Judge-Key": "anything"}).status_code == 503
     monkeypatch.setenv("JUDGE_ALLOW_ANONYMOUS", "1")
@@ -771,3 +773,48 @@ def test_external_errors_and_seen_discipline():
     st5 = {"seen": {}, "monthly": {}}
     rep5 = E.run_once(cfg, E.TikHubClient(budget=E.Budget(limit_usd=5.0), mock=True), DeadJev(), triage, fq, st5)
     assert rep5.processed > 0 and rep5.note_errors == rep5.processed and "全部失败" in rep5.systemic_failure and st5["seen"] == {}
+
+
+def test_banks_lists_latest_version_only_unless_all(monkeypatch):
+    """审计 C-09 (TV D-103): /banks 默认只列每个家族的最新版; 老版本文件留着 (账本里有它们的 sha), ?all=1 才列。"""
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k")
+    from fastapi.testclient import TestClient
+    from judge.api import app, latest_banks
+    c = TestClient(app); H = {"X-Judge-Key": "k"}
+    rows = c.get("/banks", headers=H).json()
+    names = {x["name"] for x in rows}
+    assert "comment_reader_v0.4" in names and "comment_reader_v0.3" not in names
+    assert "comment_thread_v0.4" in names and not ({"comment_thread_v0.2", "comment_thread_v0.3"} & names)
+    assert "human_feel_para_v0.2" in names and "human_feel_para_v0.1" not in names
+    assert "ssll_critic_v0.1" in names and "feature_questions_v0_1" in names      # 只有一版 / _v0_1 写法的照常列
+    assert all(x["superseded"] is False for x in rows)
+    assert next(x for x in rows if x["name"] == "comment_thread_v0.4")["supersedes"] == ["comment_thread_v0.2", "comment_thread_v0.3"]
+    full = c.get("/banks", params={"all": 1}, headers=H).json()
+    assert {"comment_reader_v0.3", "comment_thread_v0.2", "human_feel_para_v0.1"} <= {x["name"] for x in full}
+    assert {x["name"] for x in full if x["superseded"]} == {x["name"] for x in full} - names
+    assert latest_banks(["a_v0.1", "a_v0.10", "a_v0.2", "b", "c_v1_0"]) == {"a_v0.10": ["a_v0.1", "a_v0.2"], "b": [], "c_v1_0": []}
+
+
+
+def test_writer_key_is_scoped_to_banks_and_non_writing_judge_draft(monkeypatch, policy_cfg):
+    """审计 A-09 的另一半 (codex review on #7, P1): 发到写手机器的 key 不能换来 /judge (任意 subject / write=true / 带暗题的账本行)。
+    写手 key 只够 /banks 和 /judge_draft, 后者 write 一律 403、ledger_rows 一律 None; 管理 key 一切照旧。"""
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k-admin"); monkeypatch.setenv("JUDGE_WRITER_API_KEYS", "w1, w2")
+    from fastapi.testclient import TestClient
+    from judge.api import app
+    c = TestClient(app); W = {"X-Judge-Key": "w2"}; A = {"X-Judge-Key": "k-admin"}
+    assert c.get("/health").json()["auth"] == {"mode": "key", "required": True, "writer_keys": 2}
+    assert c.get("/banks", headers=W).status_code == 200
+    assert c.get("/banks", headers={"X-Judge-Key": "w3"}).status_code == 401
+    body = {"bank": "feature_questions_v0_1", "run_tag": "shadow-t", "subjects": [
+        {"subject_type": "note", "subject_id": "n1", "raw_content": "标题：测试标题？\n正文：昨天在药店买了一盒东西，嚼了几口辣嗓子，有点想戒了。大家怎么看？"}]}
+    assert c.post("/judge", json=body, headers=W).status_code == 403, "写手 key 够不着 /judge"
+    assert c.post("/judge", json=body, headers=A).status_code == 200
+    draft = {"title": "t", "body": "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？",
+             "project": "TUGE", "subject_id": "v1", "return_rows": True}
+    r = c.post("/judge_draft", json={**draft, "write": True}, headers=W)
+    assert r.status_code == 403 and "write" in r.json()["detail"], r.text
+    r = c.post("/judge_draft", json=draft, headers=W)
+    assert r.status_code == 200 and r.json()["ledger_rows"] is None and "plan" in r.json(), r.text
+    r = c.post("/judge_draft", json=draft, headers=A)
+    assert r.status_code == 200 and isinstance(r.json()["ledger_rows"], list), r.text
