@@ -58,7 +58,7 @@ from . import __version__
 from . import policy as P
 from . import spans as sp
 from .banks import Bank, check_bank, discover, load_bank, unfilled
-from .core import judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
+from .core import LedgerWriteError, judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
 from .draft import DraftSetupError, setup_draft
 from .hidden import all_hidden
 from .jev_client import JevClient, JevError
@@ -121,6 +121,24 @@ def _write_rows(rows: list) -> int:
     if not (url and key):
         raise HTTPException(503, "没配 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY，不能写库")
     return postgrest_upsert(rows, url, key)
+
+
+def _write_or_report(rows: list) -> tuple[int, Optional[str]]:
+    """写账本; 写到一半失败不把整个请求变成 500 (TV 审计 2026-10-08 B-06)。
+
+    Jev 的钱已经付了、答案已经算出来了, 账本写失败是**下游**的事: 回 200, ``written`` 是**已确认**写进去的
+    行数 (下限: 炸掉那一批可能已提交, 见 LedgerWriteError.uncertain), ``write_error`` 说清写了多少、第几批炸的,
+    调用方拿 ``ledger_rows`` 自己补写或重跑 (upsert 幂等, 多写一遍不重复)。
+    503 (没配密钥) 照旧抛 —— 那是配置问题, 不是半写。
+    """
+    try:
+        return _write_rows(rows), None
+    except HTTPException:
+        raise
+    except LedgerWriteError as exc:
+        return exc.written, str(exc)
+    except Exception as exc:  # noqa: BLE001 — ValueError (mock 行) 等: 一行没写
+        return 0, f"账本一行没写: {type(exc).__name__}: {exc}"
 
 
 # ── /judge ───────────────────────────────────────────────────────────────
@@ -250,10 +268,12 @@ def judge(req: JudgeRequest):
         rows.extend(ledger_rows(r, bank, run_tag=req.run_tag, extractor=req.extractor))
     if errors == len(outs):
         raise HTTPException(502, results[0]["error"])
-    written = _write_rows(rows) if req.write else None
+    written, write_error = _write_or_report(rows) if req.write else (None, None)
     return {"bank": bank.name, "bank_version": bank.version, "model": bank.model, "results": results,
-            "rows": len(rows), "errors": errors, "ledger_rows": rows if req.return_rows else None, "written": written,
-            "policy": decision.as_dict()}
+            "rows": len(rows), "errors": errors,
+            # 写失败时无论 return_rows 都把行回去: 调用方要靠它补写 (B-06)
+            "ledger_rows": rows if (req.return_rows or write_error) else None, "written": written,
+            "write_error": write_error, "policy": decision.as_dict()}
 
 
 # ── /judge_draft ─────────────────────────────────────────────────────────
@@ -311,11 +331,12 @@ def judge_draft(req: DraftRequest):
         rows.extend(ledger_rows(r, ds.loaded[bname], run_tag=req.run_tag))
     for bname, r in dj.para_results:                  # 段级（含暗题）：subject_id = <稿 id>:p<N>
         rows.extend(ledger_rows(r, ds.loaded[bname], run_tag=req.run_tag))
-    written = _write_rows(rows) if req.write else None
+    written, write_error = _write_or_report(rows) if req.write else (None, None)
     view = redact(dj, hidden)
-    shown = [r for r in rows if r["question_id"] not in hidden]    # 暗题的行进账本，但不回给调用方
+    shown = [r for r in rows if r["question_id"] not in hidden]    # 暗题的行进账本，但不回给调用方 (写失败也不回: 暗题不出境)
     return {"subject_id": req.subject_id, **view, "plan": plan, "recorded": recorded,
             "calls": dj.calls, "usage": dj.usage, "banks": {n: {"version": b.version, "sha256": b.sha256} for n, b in ds.loaded.items()},
             "ignored_banks": ds.ignored, "hard_rules": {(f"{b}:hidden" if q in hidden else f"{b}:{q}"): ("hidden" if q in hidden else w) for (b, q), w in ds.hard.items()},
             "policy": ds.decision.as_dict(),
-            "rows": len(rows), "ledger_rows": shown if req.return_rows else None, "written": written}
+            "rows": len(rows), "ledger_rows": shown if req.return_rows else None, "written": written,
+            "write_error": write_error}

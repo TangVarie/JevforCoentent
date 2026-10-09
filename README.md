@@ -47,6 +47,9 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
   但不出现在修改单、`/judge_draft` 的 profile / detail / plan / ledger_rows、`/banks` 与 MCP `list_banks` 的题号列表里。
   `judge_paras=on_fail`（默认）时篇级没硬伤也要把暗题逐段判一遍（暗题防的就是对着公开题库写、篇级全过的稿子）；`never` 一次段级调用都不发，暗题也不判。
   段级结果（含暗题）以 `subject_id = <稿 id>:p<段号>` 写进账本；`/judge` 的 ledger_rows 照带全部题，调用方不得转给写手。
+- `write=true` 时账本**可能写到一半**（PostgREST 一批一个事务，批之间没有）。2026-10-09 起 `/judge` / `/judge_draft` 不再因此 500：
+  回 200，`written` 是真写进去的行数，`write_error` 说清写了多少、第几批炸的；`/judge` 写失败时无论 `return_rows` 都回 `ledger_rows`
+  供补写（upsert 幂等，重跑不重复）。调用方要看 `write_error`，别只看状态码。TV 的 `verify_supabase_state.sql` #87 从账本侧反查半写。
 - **闸二门禁**（docs/28 §7）：没过闸二的 fq 目标题不进修改单，只进响应的 `recorded`；fq 硬伤只给依据句，不给题干和定义。
 
 ## 评论怎么写

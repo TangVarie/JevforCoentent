@@ -89,18 +89,83 @@ def load_mappings(dir_: str) -> dict:
     return out
 
 
-def fetch_from_db(limit: int, project: str | None, versions: dict):
-    """versions = {question_id: 当前题库的 question_version}：只拿同版本的现行答案当参照。"""
+PAGE = 1000   # PostgREST db-max-rows 默认 1000: 单次 GET 带 limit=N 也只回 1000 行 (同 backfill_comments, TV 审计 B-09)
+
+
+def _pg_pages(url, key, base_query: str, limit: int | None = None, page: int = PAGE) -> list:
+    out: list = []
+    offset = 0
+    while limit is None or len(out) < limit:
+        want = page if limit is None else min(page, limit - len(out))
+        rows = _pg(url, key, f"{base_query}&limit={want}&offset={offset}")
+        if not rows:
+            break
+        out.extend(rows)
+        offset += len(rows)
+        if len(rows) < want:
+            break
+    return out
+
+
+def _by_ids(url, key, table_query: str, col: str, ids: list, chunk: int = 150) -> list:
+    """按 id 分组 in_ 查 (300 篇 × 20 题的账本一次 URL 太长; 同 backfill_comments 的 150 一组)。"""
+    out: list = []
+    for i in range(0, len(ids), chunk):
+        part = ",".join(urllib.parse.quote(x) for x in ids[i:i + chunk])
+        out.extend(_pg_pages(url, key, f"{table_query}&{col}=in.({part})"))
+    return out
+
+
+GATE1_PROJECTS = ("NUC_phase1", "NRT_phase2", "NRT_phase3", "OKMAN_phase1", "SPX_phase1")
+
+
+def gate1_sample(labels: list, per_class: int = 30, seed: int = 20260923) -> list:
+    """docs/28 §6.1 的闸一样本: 每个项目各抽 per_class 条爆款 (y=1, 不足全取) + per_class 条趴 (y=0),
+    固定随机种子, 名单可存档可复现。labels = v_l2_labels 的行 [{note_id, project_id, y}]。
+    纯函数 (TV 审计 2026-10-08 C-10: 以前 --from-db 是 order=note_id&limit=N, 产不出这份样本)。
+    排序后再抽: 库里返回顺序变了, 同一个 seed 仍是同一份名单。"""
+    import random
+    by_proj: dict = {}
+    for r in labels:
+        by_proj.setdefault(str(r["project_id"]), {0: [], 1: []})[1 if int(r["y"]) else 0].append(str(r["note_id"]))
+    out = []
+    for pid in sorted(by_proj):
+        for y in (1, 0):
+            ids = sorted(set(by_proj[pid][y]))
+            rnd = random.Random(f"{seed}:{pid}:{y}")
+            picked = ids if len(ids) <= per_class else rnd.sample(ids, per_class)
+            out.extend({"note_id": nid, "project_id": pid, "y": y} for nid in sorted(picked))
+    return out
+
+
+def fetch_from_db(limit: int, project: str | None, versions: dict, *, gate1: bool = False,
+                  projects: tuple = GATE1_PROJECTS, per_class: int = 30, seed: int = 20260923, sample_out: str | None = None):
+    """versions = {question_id: 当前题库的 question_version}：只拿同版本的现行答案当参照。
+    gate1=True: 不按 note_id 顺序取前 N 篇, 而是按 docs/28 §6.1 从 v_l2_labels 抽 5 项目 × (30 爆 + 30 趴),
+    名单写到 sample_out (存档; 人工标注 / 第二标注人都从这份名单取)。"""
     url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not (url and key):
         sys.exit("--from-db 需要 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
-    q = f"notes?select=note_id,project_id,title,raw_content&order=note_id&limit={limit}"
-    if project:
-        q += f"&project_id=eq.{urllib.parse.quote(project)}"
-    notes = _pg(url, key, q)
-    ids = ",".join(urllib.parse.quote(n["note_id"]) for n in notes)
-    ans = _pg(url, key, f"note_feature_answers?select=subject_id,question_id,question_version,answer,evidence,invalid_reason,extractor,extracted_at"
-                        f"&extractor=like.llm:*&run_tag=eq.primary&subject_id=in.({ids})")
+    if gate1:
+        plist = ",".join(urllib.parse.quote(p) for p in projects)
+        labels = _pg_pages(url, key, f"v_l2_labels?select=note_id,project_id,y&order=note_id&project_id=in.({plist})")
+        sample = gate1_sample(labels, per_class=per_class, seed=seed)
+        if sample_out:
+            Path(sample_out).write_text(json.dumps({"seed": seed, "per_class": per_class, "projects": list(projects),
+                                                    "n": len(sample), "sample": sample}, ensure_ascii=False, indent=1), encoding="utf-8")
+        notes = _by_ids(url, key, "notes?select=note_id,project_id,title,raw_content&order=note_id", "note_id",
+                        [s["note_id"] for s in sample])
+    else:
+        q = "notes?select=note_id,project_id,title,raw_content&order=note_id"
+        if project:
+            q += f"&project_id=eq.{urllib.parse.quote(project)}"
+        notes = _pg_pages(url, key, q, limit)
+    # 翻页要全序: 账本主键是 (subject_type, subject_id, question_id, question_version, extractor, run_tag), run_tag 已固定,
+    # 其余五列都进 order —— 只按 (subject_id, question_id, extracted_at) 排, 同一时刻的不同 question_version / extractor
+    # 行在页边界会重复或漏 (codex review on #6)。
+    ans = _by_ids(url, key, "note_feature_answers?select=subject_id,question_id,question_version,answer,evidence,invalid_reason,extractor,extracted_at"
+                            "&extractor=like.llm:*&run_tag=eq.primary&order=subject_type,subject_id,question_id,question_version,extractor", "subject_id",
+                  [n["note_id"] for n in notes])
     return notes, latest_per_cell(ans, versions)
 
 
@@ -129,6 +194,11 @@ def main():
     ap.add_argument("--from-db", action="store_true"); ap.add_argument("--limit", type=int, default=100); ap.add_argument("--project")
     ap.add_argument("--title-extraction", default="markers", help="本地文件模式用；--from-db 按 --mappings 每个项目各自的切法")
     ap.add_argument("--mappings", help="TV 仓的 mappings 目录（--from-db 必填）")
+    ap.add_argument("--gate1-sample", action="store_true",
+                    help="docs/28 §6.1 的样本：从 v_l2_labels 抽 --gate1-projects 各 (--per-class 爆 + --per-class 趴)，固定 --seed；代替 --limit/--project")
+    ap.add_argument("--gate1-projects", default=",".join(GATE1_PROJECTS)); ap.add_argument("--per-class", type=int, default=30)
+    ap.add_argument("--seed", type=int, default=20260923); ap.add_argument("--sample-out", default="fq-gate1-sample.json",
+                                                                             help="样本名单存档（--gate1-sample 时写）")
     ap.add_argument("--out", default="fq-shadow.md"); ap.add_argument("--raw"); ap.add_argument("--sql")
     ap.add_argument("--run-tag", default="shadow"); ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--mock", action="store_true"); ap.add_argument("--from-raw")
@@ -140,7 +210,9 @@ def main():
         if not args.mappings:
             sys.exit("--from-db 要给 --mappings（TV 仓的 mappings 目录）：切标题按项目的 title_extraction 走，同 TV")
         modes = load_mappings(args.mappings)
-        notes, opus = fetch_from_db(args.limit, args.project, {q.id: q.version for q in bank.questions})
+        notes, opus = fetch_from_db(args.limit, args.project, {q.id: q.version for q in bank.questions},
+                                    gate1=args.gate1_sample, projects=tuple(p for p in args.gate1_projects.split(",") if p),
+                                    per_class=args.per_class, seed=args.seed, sample_out=args.sample_out if args.gate1_sample else None)
         unknown = sorted({n.get("project_id") for n in notes} - set(modes))
         if unknown:
             sys.exit(f"这些项目在 {args.mappings} 里没有 mapping：{unknown}")

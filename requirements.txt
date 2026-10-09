@@ -2,3 +2,4 @@ pyyaml>=6.0
 fastapi>=0.110
 uvicorn>=0.27
 mcp>=1.2,<2        # 2.x 把 FastMCP 改名成 MCPServer，mcp_server.py 按 1.x 写
+tzdata>=2024.1     # judge/hidden.py 用 ZoneInfo("Asia/Shanghai") 定暗题季度；Windows / 精简镜像没有系统时区库

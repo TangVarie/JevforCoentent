@@ -11,20 +11,45 @@ hard_fails / ambiguous / para_stats / plan。账本行（ledger_rows）照常带
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import os
-from datetime import date
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
 CONFIG = Path(os.environ.get("JUDGE_HIDDEN_CONFIG", Path(__file__).resolve().parent.parent / "config" / "hidden_rotation.yaml"))
 _cache: dict = {}
+_log = logging.getLogger("judge.hidden")
+# 季度按哪个时区的"今天"算 (TV 审计 2026-10-08 C-08): 以前是 date.today() = 服务器本地时间, Railway 是 UTC、
+# 写手机器上的 MCP 是北京时间, 每季交界有 8 小时两边暗题不一样。钉死一个时区, 两边一致; 要换用 JUDGE_TZ。
+QUARTER_TZ_NAME = os.environ.get("JUDGE_TZ", "Asia/Shanghai")
+# 写手机器可能是 Windows / 精简镜像, 没有系统 IANA 时区库: requirements.txt 声明了 tzdata 兜底, 这里再兜一层 ——
+# 找不到就退到固定偏移 (上海 +8, 其它退 UTC) 并记一行; 不能让一个时区名把 API / MCP 服务起不来 (codex review on #6)。
+_FIXED_OFFSETS = {"Asia/Shanghai": 8, "UTC": 0}
+
+
+def _load_tz(name: str, zone_cls=ZoneInfo) -> tzinfo:
+    try:
+        return zone_cls(name)
+    except (ZoneInfoNotFoundError, OSError, ValueError) as exc:
+        hours = _FIXED_OFFSETS.get(name, 0)
+        _log.warning("时区库里找不到 %s (%s): 退到固定偏移 UTC%+d (季度判定不受影响; 想要真时区 pip install tzdata)", name, exc, hours)
+        return timezone(timedelta(hours=hours), name)
+
+
+QUARTER_TZ = _load_tz(QUARTER_TZ_NAME)
+
+
+def today() -> date:
+    return datetime.now(QUARTER_TZ).date()
 
 
 def quarter(d: Optional[date] = None) -> str:
-    d = d or date.today()
+    d = d or today()
     return f"{d.year}Q{(d.month - 1) // 3 + 1}"
 
 

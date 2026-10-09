@@ -242,12 +242,31 @@ def rows_to_sql(rows: list, table: str = "truth_vault.note_feature_answers", bat
     return "\n".join(out)
 
 
+class LedgerWriteError(RuntimeError):
+    """账本写到一半失败 (TV 审计 2026-10-08 B-06)。
+
+    PostgREST 一批一个事务、批与批之间没有事务: 20 批写到第 7 批炸, 前 6 批已经在库里。
+    以前这里直接把底层异常抛上去, 调用方只知道"写库失败", 不知道**写了多少** —— /judge 200 篇
+    4,000 行可能半写, Jev 的钱已经付了, 结果也算出来了, 却整个变成 500。
+    这个异常带着 ``written`` (已确认写入的下限) / ``uncertain`` (炸掉那一批的行数: 连接可能在 PostgREST 提交之后才断,
+    这批写没写进去**不可知**, 不能说成"没写") / ``total`` / ``failed_batch``; 消息里说清"重跑同一批是幂等的 upsert"
+    (codex review on #6: 不要把不可知的那一批报成确定没写)。
+    """
+
+    def __init__(self, written: int, total: int, failed_batch: int, cause: Exception, uncertain: int = 0):
+        self.written, self.total, self.failed_batch, self.cause, self.uncertain = written, total, failed_batch, cause, uncertain
+        unsent = max(total - written - uncertain, 0)
+        super().__init__(f"账本已确认写入 {written}/{total} 行, 第 {failed_batch} 批 ({uncertain} 行) 失败: {type(cause).__name__}: {cause}。"
+                         f"那一批状态不明 (连接可能在提交之后才断); 剩下 {unsent} 行没发。重跑同一批是幂等 upsert, 不会重复。")
+
+
 def postgrest_upsert(rows: list, url: str, service_key: str, table: str = "note_feature_answers",
                      schema: str = "truth_vault", batch: int = 200) -> int:
     """直接写库（需要 service key）。PostgREST 用 Prefer: resolution=merge-duplicates 做 upsert。
     写账本表（note_feature_answers）时带上 extracted_at = 现在，与 rows_to_sql 的 `extracted_at = now()` 同口径
     （否则重判的行时间戳停在第一次）。别的表（apply_rows 也用它写 external_notes，那张表只有 fetched_at）原样写，
-    多一个它没有的列 PostgREST 会整批拒绝。mock 行（extractor 以 mock: 开头）拒绝写。"""
+    多一个它没有的列 PostgREST 会整批拒绝。mock 行（extractor 以 mock: 开头）拒绝写。
+    某一批失败抛 LedgerWriteError, 带已写行数 (批之间没有事务, 前面的批已经在库里)。"""
     import urllib.request
     bad = sorted({r.get("extractor") for r in rows if str(r.get("extractor") or "").startswith(MOCK_EXTRACTOR_PREFIX)})
     if bad:
@@ -255,15 +274,18 @@ def postgrest_upsert(rows: list, url: str, service_key: str, table: str = "note_
     now = datetime.now(timezone.utc).isoformat()
     touch = table == "note_feature_answers"
     n = 0
-    for i in range(0, len(rows), batch):
+    for k, i in enumerate(range(0, len(rows), batch), start=1):
         chunk = [dict(r, extracted_at=now) for r in rows[i:i + batch]] if touch else rows[i:i + batch]
         data = json.dumps(chunk, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(f"{url.rstrip('/')}/rest/v1/{table}", data=data, method="POST", headers={
             "apikey": service_key, "Authorization": f"Bearer {service_key}", "Content-Type": "application/json",
             "Content-Profile": schema, "Prefer": "resolution=merge-duplicates,return=minimal"})
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            if resp.status not in (200, 201, 204):
-                raise RuntimeError(f"PostgREST HTTP {resp.status}")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                if resp.status not in (200, 201, 204):
+                    raise RuntimeError(f"PostgREST HTTP {resp.status}")
+        except Exception as exc:  # noqa: BLE001
+            raise LedgerWriteError(n, len(rows), k, exc, uncertain=len(chunk)) from exc
         n += len(rows[i:i + batch])
     return n
 

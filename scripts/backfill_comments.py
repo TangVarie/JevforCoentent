@@ -44,14 +44,34 @@ def _pg(url, key, path):
         return json.loads(r.read().decode("utf-8"))
 
 
+PAGE = 1000   # PostgREST 的 db-max-rows 默认 1000: 单次 GET 带 limit=9652 也只回 1000 行, 不报错
+
+
+def _pg_pages(url, key, base_query: str, limit: int, page: int = PAGE) -> list:
+    """按 offset 翻页直到空页或够 limit。以前一次 GET 带 limit=N 就当拿全了 —— 服务端会静默钳到
+    db-max-rows (默认 1000), 9,652 条评论 "回填完" 实际只回填 10% (2026-10-08 TV 审计 B-09)。"""
+    out: list = []
+    offset = 0
+    while len(out) < limit:
+        want = min(page, limit - len(out))
+        rows = _pg(url, key, f"{base_query}&limit={want}&offset={offset}")
+        if not rows:
+            break
+        out.extend(rows)
+        offset += len(rows)
+        if len(rows) < want:
+            break
+    return out
+
+
 def fetch(limit: int, project: str | None):
     url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not (url and key):
         sys.exit("--from-db 需要 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
-    q = f"comments?select=comment_id,note_id,content,comment_role,is_pinned&order=note_id,comment_order&limit={limit}"
+    q = "comments?select=comment_id,note_id,content,comment_role,is_pinned&order=note_id,comment_order,comment_id"
     if project:
         q += f"&note_id=like.{urllib.parse.quote(project)}*"
-    comments = _pg(url, key, q)
+    comments = _pg_pages(url, key, q, limit)
     ids = sorted({c["note_id"] for c in comments})
     notes = {}
     for i in range(0, len(ids), 150):
