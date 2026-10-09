@@ -48,6 +48,7 @@ from __future__ import annotations
 import concurrent.futures as cf
 import hmac
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -233,16 +234,41 @@ def health():
             "write_enabled": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))}
 
 
+_BANK_VERSION = re.compile(r"^(?P<family>.+?)_v(?P<major>\d+)[._](?P<minor>\d+)$")
+
+
+def latest_banks(names) -> dict[str, list[str]]:
+    """{每个家族的最新版: [被它取代的老版本]} (审计 C-09, TV D-103)。家族 = 名字去掉 _vX.Y / _vX_Y 的部分; 没版本号的自成一族。
+    老版本文件不删: 账本里有它们的 bank_sha256, 删了历史行对不上; 只是默认不再列给调用方。"""
+    fam: dict[str, list[tuple[tuple[int, int], str]]] = {}
+    for n in names:
+        m = _BANK_VERSION.match(n)
+        key = m.group("family") if m else n
+        ver = (int(m.group("major")), int(m.group("minor"))) if m else (0, 0)
+        fam.setdefault(key, []).append((ver, n))
+    out: dict[str, list[str]] = {}
+    for members in fam.values():
+        members.sort()
+        out[members[-1][1]] = [n for _, n in members[:-1]]
+    return out
+
+
 @app.get("/banks", dependencies=[Depends(require_key)])
-def banks():
-    """题库清单。暗题（judge/hidden.py）只报个数不报题号：调用方可能把这份清单转给写手。"""
+def banks(all: bool = False):
+    """题库清单。默认只列每个家族的最新版本 (老版本在 supersedes 里点名; ?all=1 全列, 审计 C-09)。
+    暗题（judge/hidden.py）只报个数不报题号：调用方可能把这份清单转给写手。"""
     from .hidden import hidden_ids
+    found = discover(BANKS_DIR)
+    latest = latest_banks(found)
     out = []
-    for name, path in discover(BANKS_DIR).items():
+    for name, path in found.items():
+        if not all and name not in latest:
+            continue
         b = load_bank(path, name=name)
         h = hidden_ids(name, b.ids())
         out.append({"name": name, "version": b.version, "model": b.model, "format": b.fmt, "layer": P.layer_of(name),
-                    "questions": [q for q in b.ids() if q not in h], "hidden": len(h), "sha256": b.sha256, "problems": check_bank(b)})
+                    "questions": [q for q in b.ids() if q not in h], "hidden": len(h), "sha256": b.sha256, "problems": check_bank(b),
+                    "supersedes": latest.get(name, []), "superseded": name not in latest})
     return out
 
 
