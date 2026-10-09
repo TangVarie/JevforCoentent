@@ -66,3 +66,6 @@ def test_fetch_from_db_gate1_pages_labels_and_chunks_ids(monkeypatch, tmp_path):
     assert len(label_pages) >= 1 and all("limit=" in p and "offset=" in p for p in label_pages), "v_l2_labels 要翻页 (609 行 > 一页也不能钳)"
     note_calls = [p for p in calls if p.startswith("notes?")]
     assert all(len(p.split("note_id=in.(")[1].rstrip(")").split(",")) <= 150 for p in note_calls), "按 150 个一组查, URL 别爆"
+    ans_calls = [p for p in calls if p.startswith("note_feature_answers?")]
+    assert ans_calls and all("order=subject_type,subject_id,question_id,question_version,extractor" in p for p in ans_calls), \
+        "账本翻页要按主键全序排 (run_tag 已固定), 否则同一时刻的不同 question_version / extractor 行在页边界会重复或漏"

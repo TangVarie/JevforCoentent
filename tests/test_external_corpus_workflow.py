@@ -45,6 +45,16 @@ def test_schedule_is_off_the_hour_and_weekly():
     assert hour == "3", "小时不动：docs/29 登记的是 03:07 UTC，改了要同步登记册"
 
 
+def test_known_ids_step_uses_the_ledger_aware_script():
+    """known_ids 那一步必须跑 known_external_ids.py (它只收账本写齐的); 换成直接读 external_notes 就会把
+    "external_notes 写成、账本写炸"的那批永久跳过 (codex review on #6, P1)。"""
+    steps = _doc()["jobs"]["crawl"]["steps"]
+    hits = [s for s in steps if "known_external_ids.py" in str(s.get("run", ""))]
+    assert len(hits) == 1 and "state/known_ids.txt" in hits[0]["run"]
+    src = (ROOT / "scripts" / "known_external_ids.py").read_text(encoding="utf-8")
+    assert "note_feature_answers" in src and "complete_ids" in src, "known_ids 的判据必须看账本, 不能只看 external_notes"
+
+
 def test_single_flight_concurrency_group():
     d = _doc()
     conc = d.get("concurrency")

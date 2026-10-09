@@ -45,7 +45,9 @@ jobs:
           key: "external-corpus-state-${{ github.run_id }}-${{ github.run_attempt }}"
           # fresh_state=true 时给一个永远命中不了的前缀：不恢复，但跑完照样存一份新的
           restore-keys: "${{ github.event.inputs.fresh_state == 'true' && 'external-corpus-fresh-' || 'external-corpus-state-' }}"
-      - name: known ids from TV (second dedupe; state cache can be evicted after 7 idle days)
+      # known_ids 只收【账本写齐了】的笔记 (codex review on #6, P1): apply_rows 先写 external_notes 再写账本, 账本那步失败时
+      # external_notes 里已经有这批; 若 known_ids 照 external_notes 全收, 下周这批按 known 跳过、账本那一半永久丢。
+      - name: known ids from TV (second dedupe; only notes whose ledger rows are complete; state cache can be evicted after 7 idle days)
         if: github.event.inputs.dry_run != 'true'
         run: python3 scripts/known_external_ids.py state/known_ids.txt
       - name: plan only (dry run)

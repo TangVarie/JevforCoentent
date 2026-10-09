@@ -160,8 +160,11 @@ def fetch_from_db(limit: int, project: str | None, versions: dict, *, gate1: boo
         if project:
             q += f"&project_id=eq.{urllib.parse.quote(project)}"
         notes = _pg_pages(url, key, q, limit)
+    # 翻页要全序: 账本主键是 (subject_type, subject_id, question_id, question_version, extractor, run_tag), run_tag 已固定,
+    # 其余五列都进 order —— 只按 (subject_id, question_id, extracted_at) 排, 同一时刻的不同 question_version / extractor
+    # 行在页边界会重复或漏 (codex review on #6)。
     ans = _by_ids(url, key, "note_feature_answers?select=subject_id,question_id,question_version,answer,evidence,invalid_reason,extractor,extracted_at"
-                            "&extractor=like.llm:*&run_tag=eq.primary&order=subject_id,question_id,extracted_at", "subject_id",
+                            "&extractor=like.llm:*&run_tag=eq.primary&order=subject_type,subject_id,question_id,question_version,extractor", "subject_id",
                   [n["note_id"] for n in notes])
     return notes, latest_per_cell(ans, versions)
 

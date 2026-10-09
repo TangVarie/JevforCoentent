@@ -126,8 +126,9 @@ def _write_rows(rows: list) -> int:
 def _write_or_report(rows: list) -> tuple[int, Optional[str]]:
     """写账本; 写到一半失败不把整个请求变成 500 (TV 审计 2026-10-08 B-06)。
 
-    Jev 的钱已经付了、答案已经算出来了, 账本写失败是**下游**的事: 回 200, ``written`` 是真写进去的
-    行数, ``write_error`` 说清写了多少、第几批炸的, 调用方拿 ``ledger_rows`` 自己补写或重跑 (upsert 幂等)。
+    Jev 的钱已经付了、答案已经算出来了, 账本写失败是**下游**的事: 回 200, ``written`` 是**已确认**写进去的
+    行数 (下限: 炸掉那一批可能已提交, 见 LedgerWriteError.uncertain), ``write_error`` 说清写了多少、第几批炸的,
+    调用方拿 ``ledger_rows`` 自己补写或重跑 (upsert 幂等, 多写一遍不重复)。
     503 (没配密钥) 照旧抛 —— 那是配置问题, 不是半写。
     """
     try:

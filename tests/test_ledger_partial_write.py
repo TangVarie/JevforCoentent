@@ -39,9 +39,11 @@ def test_partial_write_reports_written_total_and_batch(monkeypatch):
     with pytest.raises(C.LedgerWriteError) as ei:
         C.postgrest_upsert(_rows(500), "http://h", "k", batch=200)
     e = ei.value
-    assert (e.written, e.total, e.failed_batch) == (200, 500, 2), "第 1 批 200 行已在库里, 第 2 批炸, 第 3 批没发"
-    assert calls == [200, 200], "炸了就停, 不该继续发第 3 批"
+    assert (e.written, e.total, e.failed_batch, e.uncertain) == (200, 500, 2, 200), \
+        "第 1 批 200 行确认在库里, 第 2 批 (200 行) 状态不明, 第 3 批没发"
+    assert calls == [200, 200], "炸了就停, 不该继续发第 3 batch"
     assert "200/500" in str(e) and "幂等" in str(e)
+    assert "状态不明" in str(e) and "100 行没发" in str(e), "炸掉那批可能已提交, 不能报成'没写' (codex review on #6)"
     assert isinstance(e, RuntimeError), "老调用方 except RuntimeError / Exception 照样接得住"
 
 

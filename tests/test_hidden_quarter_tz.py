@@ -18,8 +18,24 @@ def test_quarter_default_is_shanghai_not_server_local(monkeypatch):
     monkeypatch.delenv("JUDGE_TZ", raising=False)
     import judge.hidden as H
     importlib.reload(H)
-    assert H.QUARTER_TZ.key == "Asia/Shanghai"
+    assert H.QUARTER_TZ_NAME == "Asia/Shanghai"
+    assert H.QUARTER_TZ.utcoffset(datetime(2026, 10, 1)) == timedelta(hours=8)
     assert H.quarter() == H.quarter(H.today()), "不传日期 = 按钉死时区的今天"
+
+
+def test_missing_tz_database_falls_back_to_fixed_offset_instead_of_crashing():
+    """写手机器可能是 Windows / 精简镜像, 没有 IANA 时区库: import 不能炸, 退到 +8 固定偏移 (codex review on #6)。"""
+    import judge.hidden as H
+    from zoneinfo import ZoneInfoNotFoundError
+
+    def raiser(name):
+        raise ZoneInfoNotFoundError(name)
+    tz = H._load_tz("Asia/Shanghai", zone_cls=raiser)
+    assert tz.utcoffset(datetime(2026, 10, 1)) == timedelta(hours=8)
+    assert H._load_tz("Europe/Berlin", zone_cls=raiser).utcoffset(datetime(2026, 10, 1)) == timedelta(0), "没登记的时区退 UTC, 不猜"
+    # 兜底之上还有 requirements 里的 tzdata 声明
+    req = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert "tzdata" in req
     # 显式传日期的行为不变
     assert H.quarter(date(2026, 1, 1)) == "2026Q1" and H.quarter(date(2026, 12, 31)) == "2026Q4"
 
@@ -37,9 +53,9 @@ def test_judge_tz_env_overrides(monkeypatch):
     import judge.hidden as H
     importlib.reload(H)
     try:
-        assert H.QUARTER_TZ.key == "UTC"
+        assert H.QUARTER_TZ_NAME == "UTC" and H.QUARTER_TZ.utcoffset(datetime(2026, 10, 1)) == timedelta(0)
         assert abs((H.today() - datetime.now(timezone.utc).date()).days) <= 1
     finally:
         monkeypatch.delenv("JUDGE_TZ", raising=False)
         importlib.reload(H)
-        assert H.QUARTER_TZ.key == "Asia/Shanghai"
+        assert H.QUARTER_TZ_NAME == "Asia/Shanghai"

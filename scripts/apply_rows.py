@@ -7,6 +7,8 @@ TV 里没有「执行任意 SQL」的 RPC（也不该有），所以走和 core.
 CHECK 约束拒绝（PostgREST 400），本脚本会把它打出来并以非零退出。
 ⚠️ workflow 里这一步【会】拖红 job（2026-10-08 起，TV 审计 A-08）：run 步在写库之前就把 seen state 存好了，写库失败还让 job 绿的话
 actions/cache 会把那份 state 保存下来，账本里却没有这批笔记 —— 下周按 seen 跳过、永远不再抓。job 红 = cache 不保存 = 下周重抓。
+⚠️ 两张表之间也没有事务：external_notes 写成、账本写炸的话，这批笔记在 external_notes 里有行、账本里没有。known_external_ids.py
+只把【账本写齐的】算 known（codex review on #6），所以这批下周会重抓重判，不会因为"在 external_notes 里"被跳过。
    python3 scripts/apply_rows.py out/rows.json
 """
 from __future__ import annotations
