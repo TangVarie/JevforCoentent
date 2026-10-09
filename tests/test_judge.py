@@ -234,19 +234,21 @@ def test_loop_compile_judge_repair_produce():
     assert set(out) >= {"draft", "passed", "profile", "trail", "calls"} and out["trail"][0]["step"] == "best_of_k"
 
 
-def test_mcp_tools_mock(monkeypatch):
-    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE")
+def test_mcp_tools_mock(monkeypatch, mcp_via_testclient):
+    """稿子三个工具是 HTTP 服务的薄客户端（A-09，urlopen 打到 TestClient）；评论工具是本机路径，要显式放行。"""
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE"); monkeypatch.setenv("JUDGE_ALLOW_LOCAL_JEV", "1")
     from judge import mcp_server as M
     names = {b["name"] for b in M.list_banks()}
     assert {"feature_questions_v0_1", "comment_reader_v0.3", "platform_health_v0.1", "human_feel_para_v0.2"} <= names
     body = "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？"
     d = M.judge_draft("测试标题？", body)
-    assert set(d) >= {"passed", "profile", "hard_fails", "para_stats", "policy"} and d["policy"]["project"] == "TUGE"
+    assert set(d) >= {"passed", "profile", "hard_fails", "para_stats", "policy", "plan"} and d["policy"]["project"] == "TUGE" and "ledger_rows" not in d
     plan = M.repair_plan_for("测试标题？", body)
-    assert isinstance(plan, list)
+    assert isinstance(plan["plan"], list) and plan["recorded"] == []
     assert M.judge_draft("测试标题？", "太短")["invalid_reason"] == "text_too_short"
+    assert all(r.get_header("X-judge-key") == "k" for r in mcp_via_testclient) and len(mcp_via_testclient) == 4
     cs = M.judge_comments("标题", "正文", [{"id": "c1", "text": "在哪里"}, {"id": "c2", "text": "感谢老师帮我拿到结果"}])
-    assert len(cs) == 2 and all("flags" in c and "speech_act" in c["items"] for c in cs)
+    assert len(cs) == 2 and all("flags" in c and "speech_act" in c["items"] for c in cs) and len(mcp_via_testclient) == 4   # 评论不走 HTTP
 
 
 # ── 外部语料：预算、去重、上限（mock 供应商 + mock Jev）──
@@ -446,7 +448,7 @@ def test_produce_comments_best_of_k_repair_and_thread_swap():
 
 
 def test_mcp_comment_tools_mock(monkeypatch):
-    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE")
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE"); monkeypatch.setenv("JUDGE_ALLOW_LOCAL_JEV", "1")   # 本机路径（A-09）
     from judge import mcp_server as M
     r = M.comment_repair_plan_for("标题", "戒烟第三天，嘴里没味，靠嗑瓜子撑着。", "在哪里买的", {"id": "q1", "speech_act": ["提问"], "must_echo": False,
                                   "value_ok": ["可行动信息", "判断依据", "无"], "min_detail": "无"})

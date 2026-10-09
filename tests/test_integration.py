@@ -182,19 +182,19 @@ def test_hidden_questions_never_reach_writer_facing_outputs(monkeypatch, policy_
     hid = [p for p in plan if p["qid"] == "hidden"]
     assert hid and all("不公开" in p["instruction"] for p in hid)
     assert not any(k in json.dumps(plan, ensure_ascii=False) for k in ("para_register", "文案", hf.by_id()["para_register"].instructions))
-    # HTTP 与 MCP 都不回暗题
+    # HTTP 不回暗题；MCP 是它的薄客户端（A-09），写手看到的就是服务端抹过的这一份
     monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_API_KEY", "k"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE")
     from fastapi.testclient import TestClient
     from judge import api as A, mcp_server as M
-    monkeypatch.setattr(A, "all_hidden", lambda banks: hidden); monkeypatch.setattr(M, "all_hidden", lambda banks: hidden)
-    monkeypatch.setattr(M, "hidden_ids", lambda name, qids, when=None: hidden & set(qids))
-    c = TestClient(A.app)
-    d = c.post("/judge_draft", json={"title": "t", "body": BODY, "project": "TUGE", "judge_paras": "always", "return_rows": False},
-               headers={"X-Judge-Key": "k"}).json()
+    monkeypatch.setattr(A, "all_hidden", lambda banks: hidden)
+    c = TestClient(A.app); H = {"X-Judge-Key": "k"}
+    d = c.post("/judge_draft", json={"title": "t", "body": BODY, "project": "TUGE", "judge_paras": "always", "return_rows": False}, headers=H).json()
     assert "para_register" not in json.dumps(d, ensure_ascii=False) and "para_friction" not in json.dumps(d, ensure_ascii=False)
-    hf_listed = next(x for x in M.list_banks() if x["name"] == "human_feel_para_v0.2")
+    hf_listed = next(x for x in c.get("/banks", headers=H).json() if x["name"] == "human_feel_para_v0.2")
     assert hf_listed["hidden"] == 2 and not ({"para_register", "para_friction"} & set(hf_listed["questions"]))
+    monkeypatch.setattr(M, "_request", lambda method, path, body=None: (c.post(path, json=body, headers=H) if method == "POST" else c.get(path, headers=H)).json())
     assert "para_register" not in json.dumps(M.judge_draft("t", BODY, judge_paras="always"), ensure_ascii=False)
+    assert next(x for x in M.list_banks() if x["name"] == "human_feel_para_v0.2")["hidden"] == 2
 
 
 # ── 数据出境 ──
@@ -237,21 +237,25 @@ def test_data_policy_http(monkeypatch, policy_cfg):
     assert c.post("/judge", json={"bank": "feature_questions_v0_1", "subjects": [samp], "published": True}, headers=H).status_code == 422
 
 
-def test_data_policy_mcp(monkeypatch, policy_cfg):
-    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.delenv("JUDGE_PROJECT", raising=False)
+def test_data_policy_mcp(monkeypatch, policy_cfg, mcp_via_testclient):
+    """MCP 薄客户端（A-09）：project 两处都没有在本地就拒、不发请求；其余出境规则由服务端 /judge_draft 执行，403 的 detail 原样带回。
+    评论工具是本机路径（显式放行），policy 仍在进程内算、照旧抛。"""
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.delenv("JUDGE_PROJECT", raising=False); monkeypatch.setenv("JUDGE_ALLOW_LOCAL_JEV", "1")
     from judge import mcp_server as M
-    from judge.policy import PolicyBlocked, PolicyInputError
-    with pytest.raises(PolicyInputError):
-        M.judge_draft("t", BODY)
-    with pytest.raises(PolicyBlocked):
-        M.judge_draft("t", BODY, project="OKMAN")
+    from judge.policy import PolicyBlocked
+    out = M.judge_draft("t", BODY)
+    assert out["error"].startswith("policy:") and mcp_via_testclient == []                    # 没 project：本地拒，一个请求都不发
+    out = M.judge_draft("t", BODY, project="OKMAN")
+    assert out["status"] == 403 and out["detail"].startswith("policy:") and len(mcp_via_testclient) == 1   # 处方药：服务端 403 原样带回
     with pytest.raises(PolicyBlocked):
         M.judge_thread("t", BODY, [{"text": "在哪里"}], project="OKMAN")
     brief = {"hard_rules": [{"id": "must_ask", "ask": "有没有向读者提问？", "want": True}]}
     d = M.judge_draft("t", BODY, project="TUGE", brief=brief)                                  # 写手侧也能送 brief、硬约束接到判定
-    assert "project" in d["detail"] and d["policy"]["project_layer"]
-    plan_ids = {p["qid"] for p in M.repair_plan_for("t", BODY, project="TUGE", brief=dict(brief, hard_rules=[dict(brief["hard_rules"][0], want=(d["profile"]["must_ask"] != "是"))]))}
+    assert "project" in d["detail"] and d["policy"]["project_layer"] and "ledger_rows" not in d
+    plan_ids = {p["qid"] for p in M.repair_plan_for("t", BODY, project="TUGE", brief=dict(brief, hard_rules=[dict(brief["hard_rules"][0], want=(d["profile"]["must_ask"] != "是"))]))["plan"]}
     assert "must_ask" in plan_ids                                                               # repair_plan_for 也带项目层（以前连 project 都没传）
+    d2 = M.judge_draft("t", BODY, project="NRT", brief=brief)                                  # 没放行项目层：服务端整层去掉并回显
+    assert d2["policy"]["dropped_banks"] == ["project"] and "project" not in d2["detail"]
 
 
 # ── 回路：太短、没判出来的硬约束、Echo 修补、生成端适配 ──
@@ -519,7 +523,7 @@ def test_thread_with_unanswered_questions_does_not_pass():
 
 
 def test_mcp_judge_thread_folds_comment_review_into_passed(monkeypatch, policy_cfg):
-    monkeypatch.setenv("JUDGE_MOCK", "1")
+    monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_ALLOW_LOCAL_JEV", "1")   # 评论工具是本机路径（A-09）
     from judge import mcp_server as M
     monkeypatch.setattr(M, "_client", lambda: FixedJev(THREAD_OK))   # 评论区四题都过；单条评论的读者题全漏答
     d = M.judge_thread(POST["title"], POST["body"], [{"text": "在哪买"}, {"text": "我也在戒"}], project="NRT")

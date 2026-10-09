@@ -8,14 +8,14 @@
 
 | 目录 | 内容 |
 |---|---|
-| `judge/` | `jev_client`（调用、重试、mock）· `banks`（两种题库格式 → 一种内部表示；歧义判定）· `spans`（TV 同款切片、切句）· `core`（判一篇 / 判一个 state、证据选句、账本行、SQL / PostgREST 写入）· `loop`（稿子的生产回路：brief 编译成项目题库、best-of-k、判 → 修改单 → 修补）· `comments`（评论的生产回路：评论位、best-of-k、修改单、评论区成组判、换位）· `external`（外部语料：TikHub 抓取、预算、去重、分诊、打标）· `draft`（一篇稿子判哪几层、哪些硬约束：HTTP 与 MCP 共用）· `policy`（数据出境：未发布稿只跑通用层 + 平台层、处方药未发布稿不出境）· `hidden`（暗题：人感题库每季度 1/3 不进任何给写手看的输出）· `api`（HTTP `/judge` · `/judge_draft`）· `mcp_server`（给写手用的 MCP 工具） |
+| `judge/` | `jev_client`（调用、重试、mock）· `banks`（两种题库格式 → 一种内部表示；歧义判定）· `spans`（TV 同款切片、切句）· `core`（判一篇 / 判一个 state、证据选句、账本行、SQL / PostgREST 写入）· `loop`（稿子的生产回路：brief 编译成项目题库、best-of-k、判 → 修改单 → 修补）· `comments`（评论的生产回路：评论位、best-of-k、修改单、评论区成组判、换位）· `external`（外部语料：TikHub 抓取、预算、去重、分诊、打标）· `draft`（一篇稿子判哪几层、哪些硬约束：`/judge_draft` 用，MCP 经 HTTP 间接用）· `policy`（数据出境：未发布稿只跑通用层 + 平台层、处方药未发布稿不出境）· `hidden`（暗题：人感题库每季度 1/3 不进任何给写手看的输出）· `api`（HTTP `/judge` · `/judge_draft`）· `mcp_server`（给写手用的 MCP 工具：HTTP 服务的薄客户端，不持 Jev 密钥、不读题库） |
 | `banks/` | `vendor/feature_questions_v0_1.yaml` TV 的 fq 题库原样 vendor（SHA256SUMS 记校验和，测试钉住）· `comment_reader_v0.4` 读者侧评论 7 题（v0.3 + 按篇 / 按项目的占位符，途鸽用例逐字等同 v0.3）· `comment_thread_v0.4` 评论区 4 题（v0.3 + praise_share 的出口「评论太少」；v0.3 留给金标准）· `comment_ops_v0.2` 运营侧 comment_intent（草案；蓝词植入改成只看文字能判的定义，state 不带蓝词清单）· `platform_health_v0.1` 大健康平台层（草案）· `human_feel_para_v0.2` 人感段级（草案；para_function 加出口「说不清」）· `external_triage_v0.1` 外部语料分诊 4 题（草案）· `gold/` 金标准 |
 | `scripts/` | `run_gold.py` 金标准评测 · `fq_shadow.py` 特征层影子跑（与现行抽取器 / D-081 表比对，出 SQL）· `backfill_comments.py` 评论回填 · `external_corpus.py` 外部语料定时抓取（`--dry-run` 算钱、`--probe` 钉字段、`--rows` 出两张表的行）· `apply_rows.py` 把 rows.json 经 PostgREST 写进 TV（TV 没有、也不该有执行任意 SQL 的 RPC）· `known_external_ids.py` 从 TV 拉已入库的外部笔记 id 做第二道去重 |
 | `config/` | `external_corpus.yaml`：品类、关键词、排序、页数、每次 / 每月上限、预算——量级和频率都在这里改 · `data_policy.yaml`：处方药项目、合同已清出境的项目、放行项目层的项目 · `hidden_rotation.yaml`：暗题的比例与手工指定 |
 | `migrations/` | `notes_v1_17_judge_subjects.sql`（账本加 comment / ssll_sample / external_note，prob 口径统一）· `notes_v1_18_external_notes.sql`（外部笔记表 + 参考分布视图 `v_external_reference`） |
 | `fixtures/` | gate1 的 50 篇笔记 + Opus 答案（覆盖其中 47 篇，所以报告里有 921 与 999 两个分母）+ D-081 Jev 表；33 条运营评论（运营前缀【贴主回复】等已剥掉、角色已改正）；评论用例 |
 | `docs/` | 实跑报告（特征层 50 篇、评论 33 条、评论金标准）与拍板记录 |
-| `tests/` | 56 个测试，全 mock（评论回路用按关键词给答案的假 Jev），不联网 |
+| `tests/` | 103 个测试，全 mock（评论回路用按关键词给答案的假 Jev；MCP 薄客户端的 urllib 打到进程内 TestClient），不联网 |
 
 ## 跑起来
 
@@ -26,23 +26,27 @@ python3 -m pytest -q                            # 全 mock
 python3 scripts/run_gold.py banks/comment_reader_v0.4.yaml fixtures/comment_cases.json --gold banks/gold/comment_reader_gold_v0.2_proposed.yaml   # 占位符从用例文件的 fill 填
 python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --opus fixtures/fq_opus_gate1_50.tsv --gate1 fixtures/fq_jev_d081_A_gate1_50.tsv --out fq.md --sql fq.sql --run-tag shadow-$(date +%F)
 uvicorn judge.api:app --port 8080              # HTTP：POST /judge（一个题库、一批 subject，并行）· POST /judge_draft（一篇稿、多层题库、带修改单）· GET /banks · GET /health（不鉴权）
-python3 -m judge.mcp_server                     # 写手的 MCP 工具：judge_draft · repair_plan_for · judge_comments · comment_repair_plan_for · judge_thread · list_banks
+JUDGE_URL=https://… JUDGE_API_KEY=… python3 -m judge.mcp_server   # 写手的 MCP 工具（上面那个 HTTP 服务的薄客户端，写手机器不配 TYPESAFE_API_KEY）：judge_draft · repair_plan_for · list_banks；
+                                                #   judge_comments · comment_repair_plan_for · judge_thread 暂无 HTTP 端点，只在显式设 JUDGE_ALLOW_LOCAL_JEV=1 的内部机器上进程内跑
 python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要花多少钱；--probe 花一次请求钉字段；正式跑由 .github/workflows/external-corpus.yml 每周一触发
 ```
 
 金标准报告头会写明对的是哪一版金标准；`cg-v0.2-proposed` 是提议版、未经勘误，命中率不等于对勘误版的命中率。影子跑从库里取用 `--from-db --mappings ../truth-vault/mappings`，切标题按每个项目的 mapping 走。
 
-环境变量：`TYPESAFE_API_KEY`（必需；也可用 `TYPESAFE_KEY_FILE` 指向密钥文件，`TYPESAFE_BASE_URL` 换端点）· `JUDGE_API_KEY`（HTTP 鉴权，必需；不配则服务拒绝所有请求，本地开发显式设 `JUDGE_ALLOW_ANONYMOUS=1`）· `JUDGE_WORKERS`（一批 subject 并行几路，默认 4）·
+环境变量（服务端）：`TYPESAFE_API_KEY`（必需，**只放在服务端**，写手机器不配；也可用 `TYPESAFE_KEY_FILE` 指向密钥文件，`TYPESAFE_BASE_URL` 换端点）· `JUDGE_API_KEY`（HTTP 鉴权，必需；不配则服务拒绝所有请求，本地开发显式设 `JUDGE_ALLOW_ANONYMOUS=1`）· `JUDGE_WORKERS`（一批 subject 并行几路，默认 4）·
 `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`（与 truth-vault 同名；直接写账本，没有就只出 SQL / rows.json）· `JUDGE_MOCK=1`（不联网的假 Jev；它判的行 extractor 是 `mock:<模型>`，任何写库请求一律拒绝）· `TIKHUB_API_KEY`（外部语料，每次请求 0.01 美元；`TIKHUB_BASE_URL` 换端点）·
-`JUDGE_PROJECT` / `JUDGE_CATEGORY`（写手侧 MCP 的默认项目代号与品类，数据出境要用）· `JUDGE_BANKS_DIR` / `JUDGE_POLICY_CONFIG` / `JUDGE_HIDDEN_CONFIG`（换题库目录与两份配置的位置）·
+`JUDGE_BANKS_DIR` / `JUDGE_POLICY_CONFIG` / `JUDGE_HIDDEN_CONFIG`（换题库目录与两份配置的位置）·
 `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`（或 `MOONSHOT_API_KEY`）（`loop.AnthropicCompatGenerator` 的生成端；末尾带不带 `/v1` 都行）。
+环境变量（写手机器，`judge.mcp_server` 的 `.mcp.json` env；2026-10-09 审计 A-09）：`JUDGE_URL`（判定服务地址）+ `JUDGE_API_KEY`（与服务端同值，鉴权头 `X-Judge-Key`）两个必需，没配则启动记一条警告、工具返回 `{"error": …}` ·
+`JUDGE_PROJECT` / `JUDGE_CATEGORY`（默认项目代号与品类；`project` 两处都没有在本地就拒绝，其余数据出境规则由服务端执行并回显在 `policy`）· `JUDGE_HTTP_TIMEOUT_SEC`（默认 180；429 / 5xx 退避重试最多 2 次）·
+`JUDGE_ALLOW_LOCAL_JEV=1`（评论三个工具暂无 HTTP 端点，默认拒绝；只有合法持有 vendor 密钥的内部 / 运维机器显式设它才进程内跑，那台机器另需 `TYPESAFE_API_KEY` + 本地 `banks/`）。写手机器上**没有** `TYPESAFE_API_KEY`，MCP 不读 `banks/`、不 import `judge.hidden`。
 账本里的 `bank_sha256` 用 TV 同款规范化摘要（剔掉 `status:` / `frozen_sha256:` 两行再算），与 TV 自己写的行同口径，冻结题库不会把行劈成两批；`banks/vendor/SHA256SUMS` 钉的是整文件。
 
 ## 数据出境、暗题、闸二门禁
 
 - **数据出境**（docs/00 #7，`judge/policy.py` + `config/data_policy.yaml`）：公开内容（note / external_note / comment）直接跑；未发布稿（aw_version / ssll_sample）必须带 `project`，
   默认只跑通用层（fq、人感、评论、三省六部二审、外部分诊）+ 平台层，项目层只有 `project_layer_cleared` 里的项目才跑，否则整层去掉并在响应的 `policy.dropped_banks` 回显；
-  处方药项目（`rx_categories` / `rx_projects`）的未发布稿在合同确认、加进 `rx_cleared` 之前一律 403，一次 Jev 都不调。HTTP 和 MCP 共用这一处。
+  处方药项目（`rx_categories` / `rx_projects`）的未发布稿在合同确认、加进 `rx_cleared` 之前一律 403，一次 Jev 都不调。规则只在服务端执行一遍：MCP 是 `/judge_draft` 的薄客户端，只把 `project` / `category` 传过去，403 的 detail 原样带回写手。
 - **暗题**（docs/00 #4，`judge/hidden.py` + `config/hidden_rotation.yaml`）：人感题库每季度按 sha256(题号|季度) 自动换 1/3；暗题照判、照落账本、照算硬伤，
   但不出现在修改单、`/judge_draft` 的 profile / detail / plan / ledger_rows、`/banks` 与 MCP `list_banks` 的题号列表里。
   `judge_paras=on_fail`（默认）时篇级没硬伤也要把暗题逐段判一遍（暗题防的就是对着公开题库写、篇级全过的稿子）；`never` 一次段级调用都不发，暗题也不判。
@@ -72,7 +76,7 @@ brief 可换。每一位生成端出 k 条，逐条过读者侧 7 题 + 运营�
 ## 三个仓库怎么接
 
 - **truth-vault**：两份迁移已落进 TV 的 `schemas/`（排在 notes_v1_13 之后）；特征层用 `scripts/fq_shadow.py --from-db` 影子跑，过线后 worker 的 `/annotate-features` 改调 `/judge`（extractor = `jev:1.13.0`，run_tag = primary），Opus 路径留作备份；`annotate_feature_pass` 的续跑判据从 `llm:%` 改成按 extractor 传入。
-- **autowriter / deskcore**：`commit_drafts` 写锁释放后 HTTP 调 `/judge_draft`（带 project；层与硬约束按数据出境规则定），答案落 `note_feature_answers(aw_version)`，返回里带修改单；判失败只记状态，不影响入库。deskcore 保持零 LLM。写手侧另可直接挂 `judge.mcp_server`。
+- **autowriter / deskcore**：`commit_drafts` 写锁释放后 HTTP 调 `/judge_draft`（带 project；层与硬约束按数据出境规则定），答案落 `note_feature_answers(aw_version)`，返回里带修改单；判失败只记状态，不影响入库。deskcore 保持零 LLM。写手侧另可挂 `judge.mcp_server`（同一个 `/judge_draft` 的薄客户端，只配 `JUDGE_URL` / `JUDGE_API_KEY`）。
 - **sanshengliubu**：网感循环的二审影子跑 `/judge`（题库 `ssll_critic_v0.1`，advisory，只写进 `_jev_arbitration` 与 stage_log，不改分流）；`sample_one_cell` 保留正文后用 `feature_questions_v0_1 + human_feel_para` 判 5 篇 / cell；`comment_seeds` 走 `comments.produce_comments`（工部·构建出候选，本仓判和换位）。
 
 ## 纪律（改题前先读）
