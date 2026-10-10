@@ -1,27 +1,32 @@
 # -*- coding: utf-8 -*-
-"""给写手（Claude Code / WorkBuddy 里的模型）用的 MCP 工具——部署好的判定服务的**薄客户端**。
+"""部署好的判定服务的**薄客户端**（stdio MCP）。2026-10-09 起**写手不用它**：写手的判稿走写作台 deskcore 的
+judge_draft / repair_plan_for / list_banks（deskcore 用服务端管理 key 转发, 写手只配 deskcore 一个 MCP）; 这里留给内部 / 运维机器
+（评论三个工具只有这条路）。
 
   薄客户端（走 HTTP）：judge_draft · repair_plan_for · list_banks
   本机 Jev（默认拒绝，JUDGE_ALLOW_LOCAL_JEV=1 才放行）：judge_comments · comment_repair_plan_for · judge_thread
 
-2026-10-09 审计 A-09 之前这个模块在写手机器上进程内跑判定：.mcp.json 把 Jev 的 vendor 密钥（TYPESAFE_API_KEY）发到写手的环境里，
-题库和暗题轮换也从本地 checkout 读，与 README / docs/31 §2.1「密钥只在这个服务的环境变量里」矛盾。现在稿子的判定走
-POST {JUDGE_URL}/judge_draft、题库清单走 GET {JUDGE_URL}/banks，鉴权头 X-Judge-Key = JUDGE_API_KEY。写手机器上这把要填服务端
-JUDGE_WRITER_API_KEYS 里的一把（写手 key），**不是**服务端的 JUDGE_API_KEY（管理 key）：写手 key 只够这两个端点、/judge_draft 不能写、
-拿不到账本行；拿着管理 key 的写手进程能绕过本模块直接调 /judge（任意 subject、write=true、带暗题的账本行；codex review on #7）。
-Jev 密钥不出服务端；题库、暗题（judge/hidden.py）、数据出境（judge/policy.py）都在服务端算，这里不读 banks/、不 import judge.hidden、
-不建 JevClient。服务端返回的已经是抹掉暗题的视图（view / plan / recorded / policy / banks…），这里再把 ledger_rows 防御性去掉：
-写手的模型看到的，就是服务端允许写手看到的那一份。
+历史：2026-10-09 审计 A-09 之前这个模块在写手机器上进程内跑判定：.mcp.json 把 Jev 的 vendor 密钥（TYPESAFE_API_KEY）发到写手的环境里，
+题库和暗题轮换也从本地 checkout 读，与 README / docs/31 §2.1「密钥只在这个服务的环境变量里」矛盾。A-09 把它改成薄客户端：稿子的判定走
+POST {JUDGE_URL}/judge_draft、题库清单走 GET {JUDGE_URL}/banks，鉴权头 X-Judge-Key = JUDGE_API_KEY。同日 autowriter#95 又把写手那一侧
+整个搬进写作台 deskcore（写手机器上不装本仓、不起本模块、不持任何 judge key），本模块从此只给内部 / 运维机器。
+起它的机器上 JUDGE_API_KEY 填服务端 JUDGE_WRITER_API_KEYS 里的一把（名字沿用，实际是「受限 key」），**不是**服务端的管理 key：
+受限 key 只够这两个端点、/judge_draft 不能写、拿不到账本行；拿着管理 key 的进程能绕过本模块直接调 /judge（任意 subject、write=true、
+带暗题的账本行；codex review on #7）。Jev 密钥不出服务端；题库、暗题（judge/hidden.py）、数据出境（judge/policy.py）都在服务端算，
+这里不读 banks/、不 import judge.hidden、不建 JevClient。服务端返回的已经是抹掉暗题的视图（view / plan / recorded / policy / banks…），
+这里再把 ledger_rows 防御性去掉：调用方的模型看到的，就是服务端允许它看到的那一份。
 
-写作台的 deskcore 是流程纪律，这里是判定；写手的模型在自己的会话里调这几个工具，拿到题号 + 概率 + 证据句，
-自己按修改单改稿，再判一遍——这就是「写后」参与点在写手这一侧的形态（deskcore 的 commit_drafts 挂 HTTP 判定是服务器侧的形态）。
+写作台的 deskcore 是流程纪律，这里是判定；写手的「写后」参与点现在是 deskcore 的 judge_draft / repair_plan_for / list_banks
+（同一个 /judge_draft，deskcore 用服务端管理 key 转发、write / return_rows 钉死 false）。本模块的三个薄客户端工具与之同名同语义，
+给没有 deskcore 的内部会话（运维、题库调试）用；评论三个工具只有这条路。
 
-启动（stdio）：python -m judge.mcp_server
-Claude Code 的 .mcp.json：{"mcpServers": {"judge": {"command": "python", "args": ["-m", "judge.mcp_server"],
-                                                     "env": {"JUDGE_URL": "https://judge.example.railway.app", "JUDGE_API_KEY": "…",
-                                                             "JUDGE_PROJECT": "TUGE", "JUDGE_CATEGORY": "教育"}}}}
+启动（stdio，内部 / 运维机器）：python -m judge.mcp_server
+那台机器的 .mcp.json：{"mcpServers": {"judge": {"command": "python", "args": ["-m", "judge.mcp_server"],
+                                                 "env": {"JUDGE_URL": "https://judge.example.railway.app", "JUDGE_API_KEY": "…",
+                                                         "JUDGE_PROJECT": "TUGE", "JUDGE_CATEGORY": "教育"}}}}
+写手机器不配这段：写手只配写作台 deskcore 那一个 HTTP MCP。
 
-环境变量：JUDGE_URL（必需，服务地址）· JUDGE_API_KEY（必需，= 服务端 JUDGE_WRITER_API_KEYS 里的一把写手 key）· JUDGE_PROJECT / JUDGE_CATEGORY（默认项目代号 / 品类）·
+环境变量：JUDGE_URL（必需，服务地址）· JUDGE_API_KEY（必需，= 服务端 JUDGE_WRITER_API_KEYS 里的一把受限 key）· JUDGE_PROJECT / JUDGE_CATEGORY（默认项目代号 / 品类）·
 JUDGE_HTTP_TIMEOUT_SEC（一次请求的超时，默认 180）· JUDGE_ALLOW_LOCAL_JEV=1（评论三个工具的本机路径，见下）。
 两个必需的没配：启动时记一条警告，三个薄客户端工具返回 {"error": …, "missing": […]} 而不是抛异常。
 429 / 5xx / 连不上 / 响应读到一半断掉按退避重试（最多 2 次，同 loop.AnthropicCompatGenerator）；401 / 403 / 422 等不重试，服务端的 detail 原样带回；

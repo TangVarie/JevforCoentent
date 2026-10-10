@@ -25,9 +25,9 @@ CONFIG = Path(os.environ.get("JUDGE_HIDDEN_CONFIG", Path(__file__).resolve().par
 _cache: dict = {}
 _log = logging.getLogger("judge.hidden")
 # 季度按哪个时区的"今天"算 (TV 审计 2026-10-08 C-08): 以前是 date.today() = 服务器本地时间, Railway 是 UTC、
-# 写手机器上的 MCP 是北京时间, 每季交界有 8 小时两边暗题不一样。钉死一个时区, 两边一致; 要换用 JUDGE_TZ。
+# 起 judge.mcp_server 的机器 (当时是写手机器) 是北京时间, 每季交界有 8 小时两边暗题不一样。钉死一个时区, 两边一致; 要换用 JUDGE_TZ。
 QUARTER_TZ_NAME = os.environ.get("JUDGE_TZ", "Asia/Shanghai")
-# 写手机器可能是 Windows / 精简镜像, 没有系统 IANA 时区库: requirements.txt 声明了 tzdata 兜底, 这里再兜一层 ——
+# 起 MCP 的机器可能是 Windows / 精简镜像, 没有系统 IANA 时区库: requirements.txt 声明了 tzdata 兜底, 这里再兜一层 ——
 # 找不到就退到固定偏移 (上海 +8, 其它退 UTC) 并记一行; 不能让一个时区名把 API / MCP 服务起不来 (codex review on #6)。
 _FIXED_OFFSETS = {"Asia/Shanghai": 8, "UTC": 0}
 
