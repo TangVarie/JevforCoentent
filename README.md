@@ -8,7 +8,7 @@
 
 | 目录 | 内容 |
 |---|---|
-| `judge/` | `jev_client`（调用、重试、mock）· `banks`（两种题库格式 → 一种内部表示；歧义判定）· `spans`（TV 同款切片、切句）· `core`（判一篇 / 判一个 state、证据选句、账本行、SQL / PostgREST 写入）· `loop`（稿子的生产回路：brief 编译成项目题库、best-of-k、判 → 修改单 → 修补）· `comments`（评论的生产回路：评论位、best-of-k、修改单、评论区成组判、换位）· `external`（外部语料：TikHub 抓取、预算、去重、分诊、打标）· `draft`（一篇稿子判哪几层、哪些硬约束：`/judge_draft` 用，MCP 经 HTTP 间接用）· `policy`（数据出境：未发布稿只跑通用层 + 平台层、处方药未发布稿不出境）· `hidden`（暗题：人感题库每季度 1/3 不进任何给写手看的输出）· `api`（HTTP `/judge` · `/judge_draft`）· `mcp_server`（给写手用的 MCP 工具：HTTP 服务的薄客户端，不持 Jev 密钥、不读题库） |
+| `judge/` | `jev_client`（调用、重试、mock）· `banks`（两种题库格式 → 一种内部表示；歧义判定）· `spans`（TV 同款切片、切句）· `core`（判一篇 / 判一个 state、证据选句、账本行、SQL / PostgREST 写入）· `loop`（稿子的生产回路：brief 编译成项目题库、best-of-k、判 → 修改单 → 修补）· `comments`（评论的生产回路：评论位、best-of-k、修改单、评论区成组判、换位）· `external`（外部语料：TikHub 抓取、预算、去重、分诊、打标）· `draft`（一篇稿子判哪几层、哪些硬约束：`/judge_draft` 用，MCP 经 HTTP 间接用）· `policy`（数据出境：未发布稿只跑通用层 + 平台层、处方药未发布稿不出境）· `hidden`（暗题：人感题库每季度 1/3 不进任何给写手看的输出）· `api`（HTTP `/judge` · `/judge_draft`）· `mcp_server`（内部 / 运维机器用的 stdio MCP：HTTP 服务的薄客户端，不持 Jev 密钥、不读题库；写手的判稿入口在写作台 deskcore，见 docs/31 §5.4） |
 | `banks/` | `vendor/feature_questions_v0_1.yaml` TV 的 fq 题库原样 vendor（SHA256SUMS 记校验和，测试钉住）· `comment_reader_v0.4` 读者侧评论 7 题（v0.3 + 按篇 / 按项目的占位符，途鸽用例逐字等同 v0.3）· `comment_thread_v0.4` 评论区 4 题（v0.3 + praise_share 的出口「评论太少」；v0.3 留给金标准）· `comment_ops_v0.2` 运营侧 comment_intent（草案；蓝词植入改成只看文字能判的定义，state 不带蓝词清单）· `platform_health_v0.1` 大健康平台层（草案）· `human_feel_para_v0.2` 人感段级（草案；para_function 加出口「说不清」）· `external_triage_v0.1` 外部语料分诊 4 题（草案）· `gold/` 金标准 |
 | `scripts/` | `run_gold.py` 金标准评测 · `fq_shadow.py` 特征层影子跑（与现行抽取器 / D-081 表比对，出 SQL）· `backfill_comments.py` 评论回填 · `external_corpus.py` 外部语料定时抓取（`--dry-run` 算钱、`--probe` 钉字段、`--rows` 出两张表的行）· `apply_rows.py` 把 rows.json 经 PostgREST 写进 TV（TV 没有、也不该有执行任意 SQL 的 RPC）· `known_external_ids.py` 从 TV 拉已入库的外部笔记 id 做第二道去重 |
 | `config/` | `external_corpus.yaml`：品类、关键词、排序、页数、每次 / 每月上限、预算——量级和频率都在这里改 · `data_policy.yaml`：处方药项目、合同已清出境的项目、放行项目层的项目 · `hidden_rotation.yaml`：暗题的比例与手工指定 |
@@ -76,7 +76,7 @@ brief 可换。每一位生成端出 k 条，逐条过读者侧 7 题 + 运营�
 ## 三个仓库怎么接
 
 - **truth-vault**：两份迁移已落进 TV 的 `schemas/`（排在 notes_v1_13 之后）；特征层用 `scripts/fq_shadow.py --from-db` 影子跑，过线后 worker 的 `/annotate-features` 改调 `/judge`（extractor = `jev:1.13.0`，run_tag = primary），Opus 路径留作备份；`annotate_feature_pass` 的续跑判据从 `llm:%` 改成按 extractor 传入。
-- **autowriter / deskcore**：`commit_drafts` 写锁释放后 HTTP 调 `/judge_draft`（带 project；层与硬约束按数据出境规则定），答案落 `note_feature_answers(aw_version)`，返回里带修改单；判失败只记状态，不影响入库。deskcore 保持零 LLM。写手侧另可挂 `judge.mcp_server`（同一个 `/judge_draft` 的薄客户端，只配 `JUDGE_URL` / `JUDGE_API_KEY`）。
+- **autowriter / deskcore**：`commit_drafts` 写锁释放后 HTTP 调 `/judge_draft`（带 project；层与硬约束按数据出境规则定），答案落 `note_feature_answers(aw_version)`，返回里带修改单；判失败只记状态，不影响入库。deskcore 保持零 LLM。写手的 `judge_draft` / `repair_plan_for` / `list_banks` 也由 deskcore 转发到同一个 `/judge_draft`（2026-10-09 autowriter#95：写手不装本仓、不持 judge 密钥）；`judge.mcp_server` 这个 stdio 薄客户端只给内部 / 运维机器。
 - **sanshengliubu**：网感循环的二审影子跑 `/judge`（题库 `ssll_critic_v0.1`，advisory，只写进 `_jev_arbitration` 与 stage_log，不改分流）；`sample_one_cell` 保留正文后用 `feature_questions_v0_1 + human_feel_para` 判 5 篇 / cell；`comment_seeds` 走 `comments.produce_comments`（工部·构建出候选，本仓判和换位）。
 
 ## 纪律（改题前先读）

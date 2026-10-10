@@ -41,7 +41,7 @@
   JUDGE_MOCK=1 时判出来的行 extractor 是 mock:<模型>，任何 write=true 一律 422：假答案绝不进真账本。
 
 鉴权：X-Judge-Key 必须等于 JUDGE_API_KEY（管理 key）或 JUDGE_WRITER_API_KEYS 里的一把（写手 key，逗号分隔，可多把以便轮换）；
-  写手 key 只够 GET /banks 和 POST /judge_draft（write 一律 403、不回账本行）—— 发到写手机器上的凭据不能换来 /judge 的任意 subject、
+  写手 key 只够 GET /banks 和 POST /judge_draft（write 一律 403、不回账本行）—— 发到服务端之外的机器上的凭据不能换来 /judge 的任意 subject、
   write=true 和带暗题的账本行（审计 A-09，codex review on #7）。没配 JUDGE_API_KEY 时默认一律 503 拒绝（fail-closed），本地开发显式设 JUDGE_ALLOW_ANONYMOUS=1。
 /health 不鉴权（Railway 探活），只回布尔与题库名，不回密钥。Jev 密钥不出服务端；调用方自己 fail-open。
 """
@@ -98,7 +98,8 @@ def auth_mode() -> str:
 
 
 def writer_keys() -> list:
-    """发给写手机器的 key（JUDGE_WRITER_API_KEYS，逗号分隔）：只够 /banks 与 /judge_draft（不写）。"""
+    """受限 key（JUDGE_WRITER_API_KEYS，逗号分隔；名字沿用——2026-10-09 起写手经写作台 deskcore 判稿、不再持 key，
+    这把发给起 judge.mcp_server 的内部 / 运维机器）：只够 /banks 与 /judge_draft（不写）。"""
     return [k.strip() for k in os.environ.get("JUDGE_WRITER_API_KEYS", "").split(",") if k.strip()]
 
 

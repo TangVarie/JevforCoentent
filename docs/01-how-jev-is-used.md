@@ -94,7 +94,7 @@ POST https://api.typesafe.ai/v1/systemone
 
 下面是流程演示的轨迹（假 Jev 按关键词给答案，数字不是模型的；真实数字要等密钥）：exp 位两条候选都是背书体（各 7 处硬伤，分数 720），修改单下发后生成端给回「我也是文科，当时也反复问了简历是不是他们写，后来四版改下来才踏实」，再判：补充经验、不点名、接住帖子、具体、认真分享、判断依据；三条一组的评论区：夸的少数、不同句式、有摩擦（贴主回复）、不像安排的；15 次调用。
 
-三个入口：写手 MCP（`comment_repair_plan_for` 判一条给修改单、`judge_thread` 判一组、`judge_comments` 批量打旗；这三个暂无 HTTP 端点、要在本机调 Jev，默认拒绝，只在显式设 `JUDGE_ALLOW_LOCAL_JEV=1` 的内部机器上跑——写手机器不持 Jev 密钥，审计 A-09）；HTTP `/judge` 用 `comment_reader_v0.4` 加 `fill`；三省六部的 `comment_seeds` 过同一套。
+三个入口：内部机器的 `judge.mcp_server`（`comment_repair_plan_for` 判一条给修改单、`judge_thread` 判一组、`judge_comments` 批量打旗；这三个暂无 HTTP 端点、要在本机调 Jev，默认拒绝，只在显式设 `JUDGE_ALLOW_LOCAL_JEV=1` 的内部机器上跑——写手机器不持 Jev 密钥，审计 A-09；写手的判稿工具在写作台 deskcore，autowriter#95）；HTTP `/judge` 用 `comment_reader_v0.4` 加 `fill`；三省六部的 `comment_seeds` 过同一套。
 
 ## 5. 本仓不做、生成端做
 
