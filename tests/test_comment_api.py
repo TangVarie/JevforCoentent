@@ -91,6 +91,17 @@ def test_thread_ambiguity_routes_to_review(wired):
     assert "has_friction" in data["ambiguous"] and data["needs_review"] is True and data["passed"] is False
 
 
+def test_thread_uses_slot_author_role_in_both_judgments(wired):
+    client, jev = wired
+    r = client.post("/judge_thread", headers={"X-Judge-Key": "writer"}, json={**POST, "comments": [
+        {"text": "怎么买呢", "slot": {**SLOT, "role": "贴主"}}]})
+    assert r.status_code == 200
+    reader_call = next(c for c in jev.calls if "speech_act" in c["questions"])
+    thread_call = next(c for c in jev.calls if "has_friction" in c["questions"])
+    assert reader_call["state"]["评论角色"] == "贴主"
+    assert "[贴主]" in thread_call["state"]["评论列表"]
+
+
 def test_ops_unclear_label_is_review_even_when_confidence_is_high(wired):
     client, jev = wired
     jev.overrides["comment_intent"] = "其他"

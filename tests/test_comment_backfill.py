@@ -1,6 +1,9 @@
 import csv
 import json
 import sys
+import os
+import subprocess
+import yaml
 
 import pytest
 
@@ -17,11 +20,15 @@ def test_health_annotation_packet_is_blank_and_independent(tmp_path):
     comments = [{"comment_id": f"c{i}", "note_id": f"n{i}", "comment_text": f"合成提问{i}怎么买",
                  "comment_role": "素人", "category": "OTC药" if i < 35 else ("保健品" if i < 70 else "处方药"),
                  "title": "合成帖子", "raw_content": "正文：用于测试的帖子，不是真实原文。"} for i in range(100)]
+    formulas = ["=HYPERLINK(\"https://example.invalid\")", "+SUM(1,2)", "-1+2", "@SUM(1,2)", "\t=1", "\r=1"]
+    for i, text in enumerate(formulas):
+        comments[i]["comment_text"] = text
+    comments[0].update(title="@标题", raw_content="正文：=BODY()")
     sample.write_text(json.dumps({"notes": comments, "sample_version": "synthetic", "sampling_query": "synthetic"}))
     manifest = prepare(sample, tmp_path)
     sheets = []
     for who in ("A", "B"):
-        with (tmp_path / f"标注{who}.csv").open(encoding="utf-8-sig") as fh:
+        with (tmp_path / f"标注{who}.csv").open(encoding="utf-8-sig", newline="") as fh:
             sheets.append(list(csv.DictReader(fh)))
     bank = load_bank(B.READER)
     assert manifest["categories"] == {"OTC药": 35, "保健品": 35, "处方药": 30}
@@ -30,6 +37,11 @@ def test_health_annotation_packet_is_blank_and_independent(tmp_path):
     assert [r["comment_id"] for r in sheets[0]] != [r["comment_id"] for r in sheets[1]]
     assert all(not row[q] for sheet in sheets for row in sheet for q in bank.by_id())
     assert not any("互动" in key or "tier" in key for key in sheets[0][0])
+    by_id = {r["comment_id"]: r for r in sheets[0]}
+    assert all(by_id[f"c{i}"]["评论原文"] == "'" + text for i, text in enumerate(formulas))
+    assert by_id["c0"]["帖子标题"] == "'@标题" and by_id["c0"]["帖子正文"].startswith("'=")
+    definitions = json.loads((tmp_path / "逐条题面.json").read_text())
+    assert definitions[0]["state"]["评论原文"] == formulas[0], "CSV转义不得改原始判定文本"
 
 
 def test_backfill_context_does_not_assume_every_comment_is_operations():
@@ -105,3 +117,38 @@ def test_acceptance_requires_two_people_and_current_bank_digest(tmp_path):
     path.write_text(json.dumps(record))
     with pytest.raises(ValueError, match="摘要"):
         B.validate_acceptance(str(path), [(bank, B.state_reader)])
+
+
+def test_malformed_nested_model_response_preserves_other_bank_checkpoint(monkeypatch, tmp_path):
+    source, rows, raw = tmp_path / "input.json", tmp_path / "rows.json", tmp_path / "raw.json"
+    source.write_text(json.dumps([{"comment_id": "c1", "note_id": "n1", "comment_text": "怎么买"}]))
+    class BadReader(Answers):
+        def call(self, body):
+            result = super().call(body)
+            if "speech_act" in body["questions"]:
+                result["answers"]["speech_act"]["probabilities"] = [1]
+            return result
+    monkeypatch.setattr(B, "JevClient", lambda **kw: BadReader())
+    monkeypatch.setattr(sys, "argv", ["backfill_comments", "--input", str(source), "--rows-json", str(rows), "--raw", str(raw)])
+    with pytest.raises(SystemExit) as exc:
+        B.main()
+    assert exc.value.code == 1 and len(json.loads(rows.read_text())) == 2
+    assert "Error" in json.loads((tmp_path / "raw.json.errors.json").read_text())[0]["error"]
+
+
+def test_resume_workflow_uses_whole_snapshot_and_original_tag(tmp_path):
+    step = next(s for s in yaml.safe_load((B.ROOT / ".github/workflows/backfill-comments.yml").read_text())
+                ["jobs"]["backfill"]["steps"] if s.get("name") == "judge historical comments (shadow only)")
+    (tmp_path / "resume").mkdir()
+    (tmp_path / "artifacts").mkdir()
+    (tmp_path / "resume/inputs.json").write_text(json.dumps([{}] * 500))
+    (tmp_path / "resume/run_tag.txt").write_text("shadow-comments-123\n")
+    # Execute the actual workflow shell with a model-free CLI shim; -c still runs real Python.
+    shim = 'python() { if [ "$1" = -c ]; then "$PYTHON_REAL" "$@"; else printf "%s\\n" "$@" > cli-args.txt; fi; }\n'
+    subprocess.run(["bash", "-c", "set -e\n" + shim + step["run"]], cwd=tmp_path, check=True,
+                   env={**os.environ, "PYTHON_REAL": sys.executable, "LIMIT": "100", "PROJECT": "",
+                        "RESUME_RUN": "456", "GITHUB_RUN_ID": "789", "WRITE_SHADOW": "false"})
+    args = (tmp_path / "cli-args.txt").read_text().splitlines()
+    assert args[args.index("--limit") + 1] == "500"
+    assert args[args.index("--input") + 1] == "resume/inputs.json"
+    assert args[args.index("--run-tag") + 1] == "shadow-comments-123"

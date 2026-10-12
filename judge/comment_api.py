@@ -120,7 +120,8 @@ def attach(app, *, get_bank, get_client, policy, auth, parallel):
             judged = parallel(lambda pair: C.judge_comment(
                 client, post, pair[0].text, pair[1], reader, ops=ops, fill=fill,
                 reply_to_text=pair[0].reply_to_text, role=pair[0].role, account=pair[0].account), list(zip(req.comments, slots)))
-            comments = [c.model_dump(exclude={"slot"}) for c in req.comments]
+            comments = [{**c.model_dump(exclude={"slot"}), "role": slot.role if slot else c.role}
+                        for c, slot in zip(req.comments, slots)]
             tj = C.judge_thread(client, post, comments, thread, fill=fill, judged=judged, max_named=req.max_named)
         except JevError as exc:
             raise HTTPException(502, f"Jev 调用失败：{exc}")

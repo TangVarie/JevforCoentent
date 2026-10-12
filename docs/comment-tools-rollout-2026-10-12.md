@@ -1,6 +1,6 @@
 # J-01 / J-02 / J-03 · 评论工具与回填
 
-两个候选评论接口已实现：`POST /comment_repair_plan_for`（帖子 + 单条评论 + slot 目标画像）和 `POST /judge_thread`（帖子 + 1..20 条评论，可带每条 slot）。两者接受管理 key 或受限 writer key；均只读、不入稿件库、不回账本行。额外的 write / published 参数直接 422，候选评论固定按未发布内容检查出境；未清出的处方药项目 403、一次 Jev 调用也不发。
+两个候选评论接口已实现：`POST /comment_repair_plan_for`（帖子 + 单条评论 + slot 目标画像）和 `POST /judge_thread`（帖子 + 1..20 条评论，可带每条 slot）。单条/整组使用同一slot角色（贴主回复不会在整组误标读者位）。两者接受管理 key 或受限 writer key；均只读、不入稿件库、不回账本行。额外的 write / published 参数直接 422，候选评论固定按未发布内容检查出境；未清出的处方药项目 403、一次 Jev 调用也不发。
 
 `passed=true` 必须同时满足有效答案、单条/整组硬伤均通过、无人工复核项。缺答与亲历背书/旁观推荐不能靠通过其他题掩盖。先判单条再判整组；整组缺 slot 时可给画像但不能假装已定位应换的评论位。正文最多展示前 600 字，自动要点只从同一段提取；显式 points 必须由真实正文/brief 提供。
 
@@ -14,7 +14,7 @@
 python scripts/prepare_comment_gold.py --output artifacts/comment-gold
 ```
 
-产生标注A.csv、标注B.csv（相同100条、不同顺序、七题答案均留空）、标注说明.md、逐条题面.json 和 manifest.json。两位独立标注人先按原定义填表，owner/第三人仲裁分歧；之后才跑 Jev 对照并逐题报告一致率、混淆、歧义及高风险漏报。不能拿 Jev 答案补人类答案。当前只完成样本与标注包，尚没有人工金标准或验收结论。
+CSV的公式起始符会加前置单引号（原始JSON文本不改），避免平台原文在表格软件中执行公式。产生标注A.csv、标注B.csv（相同100条、不同顺序、七题答案均留空）、标注说明.md、逐条题面.json 和 manifest.json。两位独立标注人先按原定义填表，owner/第三人仲裁分歧；之后才跑 Jev 对照并逐题报告一致率、混淆、歧义及高风险漏报。不能拿 Jev 答案补人类答案。当前只完成样本与标注包，尚没有人工金标准或验收结论。
 
 ## 历史评论回填
 
@@ -28,7 +28,7 @@ python scripts/backfill_comments.py --input inputs.json --limit 100 --run-tag sh
   --resume rows.json --rows-json rows.json --raw raw.json --summary summary.csv
 ```
 
-短页也继续请求，只有空页或达到 limit 才停，避免 PostgREST 自定义上限截断。每25条原子保存 rows checkpoint；单条/单题库失败保留其他结果、退出非零，不给整批成功假象、不写库。workflow 最后始终上传产物。`resume_run` 下载旧 run 的固定文本快照、checkpoint 与 run_tag.txt，沿用它实际的 shadow tag（含再次续跑的链）；输入范围/limit 必须与旧批次一致。mock 可离线验流程但不允许 `--write`，不能把 mock SQL 当真实答案。
+评论与note上下文都分页；上下文缺失立即拒绝整批，不用空正文判评论。短页也继续请求，只有空页或达到 limit 才停，避免 PostgREST 自定义上限截断。每25条原子保存 rows checkpoint；单条/单题库失败（包括嵌套模型JSON形状异常）保留其他结果、退出非零，不给整批成功假象、不写库。workflow 最后始终上传产物。`resume_run` 下载旧 run 的固定文本快照、checkpoint 与 run_tag.txt，沿用它实际的 shadow tag（含再次续跑的链）；续跑条数从旧快照总数推导，忽略dispatch默认limit=100，不截断大批次；CLI手动续跑需保持完整快照。mock 可离线验流程但不允许 `--write`，不能把 mock SQL 当真实答案。
 
 正式 primary 回填需人工验收记录 `--acceptance acceptance.json`，内容至少包含 accepted=true、sample_count>=100、两位不同的 independent_annotators、arbitration_artifact、evaluation_artifact、accepted_by 和 bank_sha256（两个题库名到当前摘要的映射）。CLI 校验记录的完整性和题库摘要；记录由 owner 完成真实验收后保存，它不能代替标注/仲裁/模型误差评估。当前 workflow 只提供 shadow 路径。若修改定义，需升版、重新标金标准与验收。
 

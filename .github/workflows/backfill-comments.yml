@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: "评论上限（1..30000），先 100 条影子核查"
+        description: "新批评论上限（1..30000）；续跑自动沿用快照总数，忽略此值"
         default: "100"
       project:
         description: "note_id 前缀过滤；留空全库"
@@ -49,6 +49,9 @@ jobs:
           fi
       - name: judge historical comments (shadow only)
         run: |
+          if [ -n "$RESUME_RUN" ]; then
+            LIMIT=$(python -c 'import json; print(len(json.load(open("resume/inputs.json"))))')
+          fi
           cmd=(python scripts/backfill_comments.py --limit "$LIMIT" --workers 4
             --sql artifacts/comments.sql --rows-json artifacts/rows.json
             --input-snapshot artifacts/inputs.json

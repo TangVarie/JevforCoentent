@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,7 +44,7 @@ def test_backfill_fetch_pages_past_max_rows(monkeypatch):
             q = dict(kv.split("=", 1) for kv in path.split("?", 1)[1].split("&"))
             limit, offset = int(q["limit"]), int(q.get("offset", 0))
             return rows[offset: offset + min(limit, 1000)]          # 服务端钳到 1000
-        return [{"note_id": nid, "title": "t", "raw_content": "body"} for nid in path.split("in.(")[1].rstrip(")").split(",")]
+        return [{"note_id": nid, "title": "t", "raw_content": "body"} for nid in path.split("in.(")[1].split(")", 1)[0].split(",")]
     monkeypatch.setattr(B, "_pg", fake_pg)
     monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
@@ -89,3 +90,28 @@ def test_backfill_custom_server_cap_cannot_truncate(monkeypatch):
         return source[offset:offset + min(3, int(params["limit"]))]
     monkeypatch.setattr(B, "_pg", pg)
     assert B._pg_pages("url", "key", "comments?select=id", 100) == source
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_note_metadata_pages_under_custom_cap_or_rejects_missing(monkeypatch, missing):
+    import scripts.backfill_comments as B
+    comments = [{"comment_id": f"c{i}", "note_id": f"n{i}", "content": "怎么买"} for i in range(12)]
+    notes = [{"note_id": f"n{i}", "title": "标题", "raw_content": f"原正文{i}", "projects": {"category": "教育"}}
+             for i in range(11 if missing else 12)]
+    calls = []
+    def pg(url, key, path):
+        calls.append(path)
+        params = dict(kv.split("=", 1) for kv in path.split("?", 1)[1].split("&"))
+        offset, size = int(params["offset"]), min(3, int(params["limit"]))
+        source = comments if path.startswith("comments?") else sorted(notes, key=lambda n: n["note_id"])
+        return source[offset:offset + size]
+    monkeypatch.setattr(B, "_pg", pg)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.invalid")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test")
+    if missing:
+        with pytest.raises(ValueError, match="上下文未取全"):
+            B.fetch(12, None)
+    else:
+        result = B.fetch(12, None)
+        assert len(result) == 12 and all(c["raw_content"] and c["category"] == "教育" for c in result)
+        assert len([p for p in calls if p.startswith("notes?")]) == 4

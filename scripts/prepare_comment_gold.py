@@ -20,6 +20,14 @@ ROOT = Path(__file__).resolve().parent.parent
 SAMPLE = ROOT / "fixtures/local/comment_health_annotation_20261012.json"
 
 
+def spreadsheet_cell(value):
+    # Platform text is untrusted. CSV quoting alone does not neutralize spreadsheet formulas.
+    if isinstance(value, str) and (value.startswith(("\t", "\r", "\n"))
+                                   or value.lstrip().startswith(("=", "+", "-", "@"))):
+        return "'" + value
+    return value
+
+
 def prepare(sample: Path, output: Path):
     data = json.loads(sample.read_text(encoding="utf-8"))
     comments = data["notes"]
@@ -45,7 +53,7 @@ def prepare(sample: Path, output: Path):
         with (output / f"标注{person}.csv").open("w", encoding="utf-8-sig", newline="") as fh:
             writer = csv.DictWriter(fh, fields)
             writer.writeheader()
-            writer.writerows(rows)  # answers stay empty; no model or performance fields
+            writer.writerows({key: spreadsheet_cell(value) for key, value in row.items()} for row in rows)
     (output / "逐条题面.json").write_text(json.dumps(definitions, ensure_ascii=False, indent=2), encoding="utf-8")
     lines = ["# J-03 大健康评论 · 两人独立标注", "", "同一批 100 条，A/B 顺序不同。分别发给两位标注人；独立完成前不要互看答案。",
              "只看表中的帖子、评论和对应题面，对照下方定义填写七列。是非题填「是 / 否」，选择题填原选项。",
@@ -66,7 +74,7 @@ def prepare(sample: Path, output: Path):
                 "bank": bank.name, "bank_sha256": bank.sha256, "count": len(ids),
                 "categories": dict(Counter(c["category"] for c in comments)),
                 "roles": dict(Counter(c["comment_role"] for c in comments)),
-                "sampling_query": data["sampling_query"], "answers_prefilled": False}
+                "sampling_query": data["sampling_query"], "answers_prefilled": False, "csv_formula_escaped": True}
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
 

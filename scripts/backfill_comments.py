@@ -77,8 +77,12 @@ def fetch(limit: int, project: str | None):
     notes = {}
     for i in range(0, len(ids), 150):
         chunk = ",".join(urllib.parse.quote(x) for x in ids[i:i + 150])
-        for n in _pg(url, key, f"notes?select=note_id,title,raw_content,project_id,projects(category)&note_id=in.({chunk})"):
+        for n in _pg_pages(url, key, f"notes?select=note_id,title,raw_content,project_id,projects(category)&note_id=in.({chunk})&order=note_id",
+                           len(ids[i:i + 150])):
             notes[n["note_id"]] = n
+    missing = set(ids) - set(notes)
+    if missing:
+        raise ValueError(f"{len(missing)} 篇笔记上下文未取全，拒绝用空正文判评论")
     for c in comments:
         n = notes.get(c["note_id"], {})
         c["comment_text"] = c.pop("content", None) or ""
@@ -215,8 +219,8 @@ def main():
                 continue
             try:
                 r = judge_state(client, bank, c["comment_id"], mk(c), subject_type="comment", fill=fill_for(post_for(c)))
-            except (JevError, ValueError) as exc:
-                out.append((bank, str(exc)))
+            except Exception as exc:  # Preserve successful banks even for malformed nested model JSON.
+                out.append((bank, f"{type(exc).__name__}: {exc}"))
                 continue
             out.append((bank, r))
         return c, out
