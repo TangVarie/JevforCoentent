@@ -50,7 +50,7 @@ def test_backfill_fetch_pages_past_max_rows(monkeypatch):
     got = B.fetch(limit=9652, project=None)
     assert len(got) == 2500, f"要翻页拿全 2500 条, 实际 {len(got)} (单次 GET 会被钳到 1000)"
     pages = [p for p in calls if p.startswith("comments?")]
-    assert len(pages) == 3 and "offset=1000" in pages[1] and "offset=2000" in pages[2], pages
+    assert len(pages) == 4 and "offset=1000" in pages[1] and "offset=2000" in pages[2] and "offset=2500" in pages[3], pages
     assert all("order=note_id,comment_order,comment_id" in p for p in pages), "翻页要有稳定的全序, 否则页间会重复 / 漏行"
     calls.clear()
     got = B.fetch(limit=1500, project="P")
@@ -60,7 +60,7 @@ def test_backfill_fetch_pages_past_max_rows(monkeypatch):
     assert all("note_id=like.P*" in p for p in pages), "--project 过滤要带到每一页, 不能只带第一页"
 
 
-def test_backfill_fetch_stops_on_short_page(monkeypatch):
+def test_backfill_fetch_confirms_end_with_empty_page(monkeypatch):
     import scripts.backfill_comments as B
     rows = [{"comment_id": f"c{i}", "note_id": "n0", "content": "x", "comment_role": "素人", "is_pinned": False}
             for i in range(7)]
@@ -77,5 +77,15 @@ def test_backfill_fetch_stops_on_short_page(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
     got = B.fetch(limit=500, project=None)
-    assert len(got) == 7 and len([p for p in calls if p.startswith("comments?")]) == 1, \
-        "短页 (7 < 500) 就是最后一页, 不该再发第二个 GET 去确认空页"
+    assert len(got) == 7 and len([p for p in calls if p.startswith("comments?")]) == 2
+
+
+def test_backfill_custom_server_cap_cannot_truncate(monkeypatch):
+    import scripts.backfill_comments as B
+    source = list(range(11))
+    def pg(url, key, path):
+        params = dict(kv.split("=", 1) for kv in path.split("?", 1)[1].split("&"))
+        offset = int(params["offset"])
+        return source[offset:offset + min(3, int(params["limit"]))]
+    monkeypatch.setattr(B, "_pg", pg)
+    assert B._pg_pages("url", "key", "comments?select=id", 100) == source

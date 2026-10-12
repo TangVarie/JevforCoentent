@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""HTTP 服务：POST /judge · POST /judge_draft · GET /banks · GET /health。
+"""HTTP 服务：/judge · /judge_draft · /comment_repair_plan_for · /judge_thread · /banks · /health。
 
   POST /judge   （一个题库、一批 subject；特征层 / 评论 / 外部语料都走这里）
     {
@@ -41,7 +41,7 @@
   JUDGE_MOCK=1 时判出来的行 extractor 是 mock:<模型>，任何 write=true 一律 422：假答案绝不进真账本。
 
 鉴权：X-Judge-Key 必须等于 JUDGE_API_KEY（管理 key）或 JUDGE_WRITER_API_KEYS 里的一把（写手 key，逗号分隔，可多把以便轮换）；
-  写手 key 只够 GET /banks 和 POST /judge_draft（write 一律 403、不回账本行）—— 发到服务端之外的机器上的凭据不能换来 /judge 的任意 subject、
+  写手 key 可用 GET /banks、POST /judge_draft 和两个只读评论端点（不回账本行；评论参数不接受 write / published）—— 发到服务端之外的机器上的凭据不能换来 /judge 的任意 subject、
   write=true 和带暗题的账本行（审计 A-09，codex review on #7）。没配 JUDGE_API_KEY 时默认一律 503 拒绝（fail-closed），本地开发显式设 JUDGE_ALLOW_ANONYMOUS=1。
 /health 不鉴权（Railway 探活），只回布尔与题库名，不回密钥。Jev 密钥不出服务端；调用方自己 fail-open。
 """
@@ -262,7 +262,8 @@ def health():
     return {"ok": True, "version": __version__, "banks": sorted(discover(BANKS_DIR)),
             "auth": {"mode": mode, "required": mode == "key", "writer_keys": len(writer_keys())}, "workers": workers(),
             "jev_key": bool(os.environ.get("TYPESAFE_API_KEY")), "mock": os.environ.get("JUDGE_MOCK") == "1",
-            "write_enabled": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))}
+            "write_enabled": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
+            "comment_tools_enabled": os.environ.get("JUDGE_COMMENT_TOOLS_ENABLED") == "1"}
 
 
 _BANK_VERSION = re.compile(r"^(?P<family>.+?)_v(?P<major>\d+)[._](?P<minor>\d+)$")
@@ -401,3 +402,10 @@ def judge_draft(req: DraftRequest, role: str = Depends(require_any_key)):
             "policy": ds.decision.as_dict(),
             "rows": len(rows), "ledger_rows": shown if return_rows else None, "written": written,
             "write_error": write_error}
+
+
+# Candidate comments are read-only and always pass the unpublished-content policy.
+from .comment_api import attach as _attach_comments
+
+_attach_comments(app, get_bank=get_bank, get_client=_client, policy=_policy,
+                 auth=require_any_key, parallel=_parallel)
