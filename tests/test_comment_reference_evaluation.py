@@ -12,6 +12,7 @@ from scripts import evaluate_comment_reference as E
 from judge.banks import discover
 
 CANDIDATE = E.ROOT / "banks/candidates/comment_reader_v0.5_candidate.yaml"
+HISTORICAL_CANDIDATE = E.ROOT / "banks/candidates/comment_reader_v0.5_candidate1.yaml"
 
 
 @pytest.fixture
@@ -235,13 +236,16 @@ def test_risk_signals_include_unambiguous_misses_but_do_not_claim_api_pass(packe
     assert not s["release_accepted"]
 
 
-def test_candidate_is_offline_and_only_two_wordings_change():
+@pytest.mark.parametrize("path", [CANDIDATE, HISTORICAL_CANDIDATE])
+def test_candidate_is_offline_and_only_two_wordings_change(path):
     baseline = load_bank(E.BANK)
-    candidate, audit = E.candidate_for(CANDIDATE, baseline)
+    candidate, audit = E.candidate_for(path, baseline)
     assert audit["changed_questions"] == ["speech_act", "detail_level"]
     assert candidate.model == baseline.model and candidate.ambiguity == baseline.ambiguity
     assert candidate.by_id()["arranged"] == baseline.by_id()["arranged"]
-    assert CANDIDATE.stem not in discover(E.ROOT / "banks")
+    assert path.stem not in discover(E.ROOT / "banks")
+    if path == HISTORICAL_CANDIDATE:
+        assert candidate.sha256 == "82d159dc2481afecf813d0e61c280aece2623e5dcff9e8444656ffc49b488f64"
 
 
 def test_candidate_development_run_keeps_frozen_labels_and_binds_both_banks(packet):
@@ -278,6 +282,7 @@ def test_baseline_checkpoint_cannot_be_reused_by_candidate(packet):
     lambda d: d["questions"][0]["options"].pop(),
     lambda d: d["questions"][0].update({"on_ambiguous": "pass"}),
     lambda d: d["questions"][0]["instructions"].update({"zh": "new missing {extra_context}"}),
+    lambda d: d["questions"][4]["options"].reverse(),
 ])
 def test_candidate_scope_and_missing_fill_rejected_before_calls(packet, tmp_path, monkeypatch, mutation):
     root = tmp_path / "offline"

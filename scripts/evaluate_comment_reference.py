@@ -103,8 +103,8 @@ def candidate_for(path: Path, baseline):
         raise ValueError("candidate may not change model, labels/order, thresholds or fill defaults")
     changed = []
     for q, old in zip(candidate.questions, baseline.questions):
-        if q.jtype != old.jtype or set(q.criteria) != set(old.criteria):
-            raise ValueError("candidate must preserve question types and closed labels")
+        if q.jtype != old.jtype or list(q.criteria) != list(old.criteria):
+            raise ValueError("candidate must preserve question types and ordered closed labels")
         for attr in ("scope", "evidence", "unclear_labels", "feeds", "on_ambiguous", "version", "aw_instruction"):
             if getattr(q, attr) != getattr(old, attr):
                 raise ValueError("candidate may not change evidence, review routing or other operational fields")

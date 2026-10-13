@@ -1,5 +1,5 @@
-# Offline candidate only. NOT discovered by runtime bank glob; owner definition review and independent evaluation pending.
-bank_version: cb-v0.5-candidate1
+# Offline current draft candidate2; NOT live-tested or accepted. Candidate1 is preserved separately for its one authorized run.
+bank_version: cb-v0.5-candidate2
 model: jev-1.13.0
 fill_defaults:
   subject: 这家机构
@@ -15,14 +15,15 @@ questions:
 - id: speech_act
   type: choice
   instructions:
-    zh: 这条评论在做什么？只选最主要的一种。先判断评论自身的主要主张，再结合帖子或明确的回复对象。本人或家人使用后的正面结果是主要内容时，归亲历背书；主要是在劝别人用而没有以亲身使用为主要论据时，归旁观推荐。不要仅因为评论回应了他人的困境、用了建议口吻、出自贴主或带专业术语就判回复答疑。回复答疑需要对应帖子或回复对象中明确的提问/信息请求，以实际解答、联系方式或渠道为主要内容；没有明确问题的分情景荐用不属于答疑。若既有使用经历又有劝用，按主要表达目的选择，不按句子中的单个词投票。只判断文本声称的行为，不验证使用经历或效果是否真实。
-    en: Pick the main speech act, using the comment first and explicit questions in the post or reply
-      target second. A positive outcome from the speaker or family use, when central, is endorsement.
-      Urging others to use a product without personal use as the main basis is recommendation. Addressing
-      a difficulty, giving advice, author status or technical terms alone does not make an answer. Answering
-      requires a specific question or information request and mainly supplies the requested answer, contact
-      or channel. Unsolicited conditional recommendations are not answers. With mixed acts, use the main
-      purpose. Classify textual claims, not whether experience or efficacy is true.
+    zh: 这条评论在做什么？只选最主要的一种。先判断评论自身的主要主张，再结合可见帖子和已提供的回复对象。本人或家人使用后的正面结果是主要内容时，归亲历背书；主要是在劝别人用而没有以亲身使用为主要论据时，归旁观推荐。不要仅因为评论回应他人的困境、用了建议口吻、出自贴主或带专业术语就判回复答疑。明确提问或信息请求可支持答疑判断；但回复对象未提供时，不能把没有看到问题当成没有问题。简短的款型确认、事实答复、联系方式或购买渠道指引本身不等于劝用或好评，可按其答复/指路功能判断。只有评论自身主动主张好处或劝别人去用，才据此判推荐；仅提到品牌或渠道不够。若既有使用经历又有劝用，按主要表达目的选择。只判断文本声称的行为，不验证使用经历或效果是否真实。
+    en: Pick the main act from the comment, visible post and any supplied reply target. A positive personal
+      or family-use outcome that is central is endorsement; mainly urging others to use without personal
+      use as the main basis is recommendation. Addressing a difficulty, advice, author status or technical
+      terms alone is not answering. An explicit question supports an answer, but an absent reply target
+      is not evidence that no question existed. Brief factual replies, model confirmations, contact or
+      buying-channel guidance alone are not recommendation; classify their answering/guidance function.
+      Recommendation requires the comment itself to claim benefits or urge use, not merely name a brand
+      or channel. With mixed acts, use the main purpose. This does not verify the claims.
   options:
   - label: 提问
     zh: 向作者或其他人问事情（在哪里、多少钱、怎么联系、文科能不能做）
@@ -42,9 +43,11 @@ questions:
     zh: 没有以本人或家人的实际使用为主要论据，但主要是在夸{subject}或劝别人去用。
     en: Mainly praises {subject} or urges use without personal or family use as the main basis.
   - label: 回复答疑
-    zh: 主要回答帖子或明确回复对象提出的问题/信息请求，给联系方式或渠道指路；没有明确提问的主动荐用不能仅凭建议口吻归此。
-    en: Mainly answers a specific question or information request in the post or explicit reply target,
-      or gives requested contact/channel guidance; unsolicited recommendation alone is insufficient.
+    zh: 主要回答问题、确认事实/款型、给联系方式或购买渠道指路。可见提问或回复对象提供支持；缺失回复对象不自动排除此类。单纯品牌名/渠道信息不等于推荐，主动夸产品或劝用才需按推荐/背书主行为判断。
+    en: Mainly answers a question, confirms a fact/model, or gives contact/buying-channel guidance. A
+      visible question or reply target supports it, but an absent target does not automatically exclude
+      it. Names/channels alone do not imply recommendation; active praise or urging use needs classification
+      by its main act.
   - label: 闲聊表情
     zh: 打招呼、表情、感叹，没有实质内容
     en: Small talk, emoji or exclamation with no substance
