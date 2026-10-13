@@ -34,7 +34,7 @@ def packet(tmp_path):
     doc = {**{k: m[k] for k in ("sample_version", "sample_sha256", "bank_sha256", "filled_questions_sha256")},
         "reference_version": "synthetic-final", "model": bank.model,
         "reference_ready": True, "label_decisions_final": True, "accepted": False,
-        "reference_provenance": {"human_arbitration_claimed": False, "AI_arbitration_cells_adopted_by_user": 1},
+        "reference_provenance": {"human_arbitration_claimed": False, "AI_arbitration_cells_adopted_by_user": 1, "AB_agreed_cells": 699},
         "cases": cases}
     reference.write_text(json.dumps(doc, ensure_ascii=False))
     manifest = tmp_path / "manifest.json"
@@ -129,6 +129,44 @@ def test_resume_retries_invalid_and_failed_cases_without_rerunning_success(packe
     packet["output"] = packet["output"].parent / "bad-resume"
     with pytest.raises(ValueError, match="non-live"):
         E.evaluate(**arguments(packet), resume=checkpoint, client=Client(packet))
+
+
+def test_complete_live_resume_recovers_report_without_credentials_or_model_calls(packet, monkeypatch):
+    assert E.evaluate(**arguments(packet), client=Client(packet)) == 0
+    checkpoint = packet["output"] / "checkpoint.json"
+    packet["output"] = packet["output"].parent / "recovered"
+    def must_not_construct_client():
+        raise AssertionError("complete resume needs no client")
+    monkeypatch.setattr(E, "JevClient", must_not_construct_client)
+    assert E.evaluate(**arguments(packet), resume=checkpoint) == 0
+    assert json.loads((packet["output"] / "summary.json").read_text())["answer_agreement_cells"] == 700
+
+
+@pytest.mark.parametrize("metadata", [None, {}, {"human_arbitration_claimed": False}])
+def test_provenance_metadata_required_before_any_calls(packet, metadata):
+    packet["doc"]["reference_provenance"] = metadata
+    reseal(packet)
+    client = Client(packet)
+    with pytest.raises(ValueError, match="provenance"):
+        E.evaluate(**arguments(packet), client=client)
+    assert not client.calls
+
+
+@pytest.mark.parametrize("bad_probability", [float("nan"), float("inf"), -0.1, 1.1])
+def test_nonselected_probability_is_validated_before_interpret(packet, bad_probability):
+    original = Client(packet)
+    class BadClient:
+        mock = False
+        def call(self, body):
+            response = original.call(body)
+            if body["state"]["评论原文"] == packet["doc"]["cases"][0]["state"]["评论原文"]:
+                answer = response["answers"]["speech_act"]
+                other = next(label for label in answer["probabilities"] if label != answer["choice"])
+                answer["probabilities"][other] = bad_probability
+            return response
+    assert E.evaluate(**arguments(packet), client=BadClient()) == 1
+    summary = json.loads((packet["output"] / "summary.json").read_text())
+    assert summary["invalid_or_missing_cells"] == 1 and summary["answer_agreement_cells"] == 699
 
 
 @pytest.mark.parametrize("mutation", [

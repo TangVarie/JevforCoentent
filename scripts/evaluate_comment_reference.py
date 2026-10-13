@@ -24,6 +24,7 @@ from scripts.ingest_comment_annotations import normalize_answer
 ROOT = Path(__file__).resolve().parent.parent
 BANK = ROOT / "banks/comment_reader_v0.4.yaml"
 INVALID = "<invalid>"
+EVALUATOR_VERSION = "comment-reference-eval-v2"
 
 
 def sha(path):
@@ -38,6 +39,12 @@ def load_reference(reference: Path, manifest: Path, questions: Path):
         raise ValueError("reference digest mismatch")
     if doc.get("reference_ready") is not True or doc.get("label_decisions_final") is not True:
         raise ValueError("reference labels have not been finalized")
+    provenance = doc.get("reference_provenance")
+    if not isinstance(provenance, dict) or type(provenance.get("human_arbitration_claimed")) is not bool:
+        raise ValueError("reference provenance missing or malformed")
+    for key in ("AB_agreed_cells", "AI_arbitration_cells_adopted_by_user"):
+        if type(provenance.get(key)) is not int or not 0 <= provenance[key] <= 700:
+            raise ValueError("reference provenance counts missing or malformed")
     for key in ("reference_version", "sample_version", "sample_sha256", "bank_sha256", "filled_questions_sha256", "model"):
         if not doc.get(key) or doc[key] != meta.get(key):
             raise ValueError(f"manifest binding mismatch: {key}")
@@ -57,14 +64,59 @@ def load_reference(reference: Path, manifest: Path, questions: Path):
             raise ValueError("each case needs seven final labels and provenance records")
         for q in bank.questions:
             normalize_answer(c["expect"][q.id], q)
+            origin = c["provenance"][q.id]
+            if not isinstance(origin, dict) or origin.get("kind") not in ("AB_agreement", "user_adopted_final_arbitration"):
+                raise ValueError("case provenance missing or malformed")
         fill = c.get("fill")
         if not isinstance(fill, dict) or unfilled(bank, fill):
             raise ValueError("per-case question fill incomplete")
         if c["state"] != by_id[c["id"]]["state"] or build_questions(bank, fill=fill) != by_id[c["id"]]["questions"]:
             raise ValueError("per-case state or wording differs from annotation packet")
+    kinds = Counter(v["kind"] for c in cases for v in c["provenance"].values())
+    if provenance["AB_agreed_cells"] != kinds["AB_agreement"] or provenance["AI_arbitration_cells_adopted_by_user"] != kinds["user_adopted_final_arbitration"]:
+        raise ValueError("reference provenance counts differ from cases")
     binding = {k: doc[k] for k in ("reference_version", "sample_sha256", "bank_sha256", "filled_questions_sha256", "model")}
     binding["reference_sha256"] = sha(reference)
+    binding["evaluator_version"] = EVALUATOR_VERSION
     return bank, doc, binding
+
+
+def probability(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return False
+    try:
+        number = float(value)
+    except (ValueError, TypeError):
+        return False
+    return math.isfinite(number) and 0 <= number <= 1
+
+
+class ProbabilityCheckedClient:
+    """Validate all returned probabilities before interpret() discards the full choice map."""
+    def __init__(self, client):
+        self.client = client
+        self.mock = bool(getattr(client, "mock", False))
+
+    def call(self, body):
+        response = self.client.call(body)
+        if not isinstance(response, dict) or not isinstance(response.get("answers", {}), dict):
+            raise ValueError("malformed answer response")
+        answers = dict(response.get("answers", {}))
+        for qid, question in body["questions"].items():
+            answer = answers.get(qid)
+            if answer is None:
+                continue
+            valid = isinstance(answer, dict)
+            if valid and question["type"] == "choice":
+                probs = answer.get("probabilities")
+                valid = isinstance(probs, dict) and bool(probs) and all(
+                    label in question["criteria"] and probability(p) for label, p in probs.items())
+            elif valid:
+                valid = probability(answer.get("noul"))
+            if not valid:
+                # Missing is already an invalid answer in interpret(); preserve other valid qids.
+                answers.pop(qid, None)
+        return {**response, "answers": answers}
 
 
 def safe_item(item: dict | None, q) -> dict:
@@ -183,12 +235,14 @@ def evaluate(reference: Path, manifest: Path, questions: Path, output: Path, *, 
     bank, doc, binding = load_reference(reference, manifest, questions)
     results = validate_resume(resume, binding, bank, {c["id"] for c in doc["cases"]})
     output.mkdir(parents=True, exist_ok=True)
-    try:
-        client = client if client is not None else JevClient()
-    except JevError:
-        save_json(output / "status.json", {"status": "blocked_missing_jev_credentials", "binding": binding,
-            "live": False, "model_calls": 0, "release_accepted": False})
-        return 4
+    pending = [c for c in doc["cases"] if c["id"] not in results]
+    if pending:
+        try:
+            client = ProbabilityCheckedClient(client if client is not None else JevClient())
+        except JevError:
+            save_json(output / "status.json", {"status": "blocked_missing_jev_credentials", "binding": binding,
+                "live": False, "model_calls": 0, "release_accepted": False})
+            return 4
     live = not bool(getattr(client, "mock", False))
     if results and not live:
         raise ValueError("cannot combine live checkpoints with a non-live client")
@@ -207,7 +261,7 @@ def evaluate(reference: Path, manifest: Path, questions: Path, output: Path, *, 
 
     checkpoint()
     with cf.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(run, c): c["id"] for c in doc["cases"] if c["id"] not in results}
+        futures = {pool.submit(run, c): c["id"] for c in pending}
         for f in cf.as_completed(futures):
             results[futures[f]] = f.result()
             checkpoint()
