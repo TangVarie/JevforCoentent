@@ -102,4 +102,4 @@ POST https://api.typesafe.ai/v1/systemone
 
 ## 6. 还没做的
 
-真实生成端没接（`AnthropicCompatGenerator` 现成，接三省六部的中转站即可）；评论回路没联网跑过（密钥不在这个环境里）；评论金标准只有途鸽一篇（求职留学），大健康品类要按 v0.4 的占位符另标一组。
+真实生成端没接（`AnthropicCompatGenerator` 现成，接三省六部的中转站即可）；评论回路的候选HTTP端点与deskcore转发已实现，默认关闭；本轮已出大健康100条两人独立标注包，尚未收到人工答案，真实服务回路和正式回填仍待验收。见 `comment-tools-rollout-2026-10-12.md`。

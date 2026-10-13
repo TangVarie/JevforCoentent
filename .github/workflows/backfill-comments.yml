@@ -1,0 +1,76 @@
+name: backfill-comments
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "新批评论上限（1..30000）；续跑自动沿用快照总数，忽略此值"
+        default: "100"
+      project:
+        description: "note_id 前缀过滤；留空全库"
+        default: ""
+      write_shadow:
+        description: "只写 shadow 账本；默认只导出产物，不写数据库"
+        type: boolean
+        default: false
+      resume_run:
+        description: "续跑的同仓 run ID；沿用该 run 的 shadow tag 和 rows.json"
+        default: ""
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: backfill-comments
+  cancel-in-progress: false
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      LIMIT: ${{ inputs.limit }}
+      PROJECT: ${{ inputs.project }}
+      RESUME_RUN: ${{ inputs.resume_run }}
+      WRITE_SHADOW: ${{ inputs.write_shadow }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: prepare artifacts / optional resume
+        run: |
+          mkdir -p artifacts
+          if [ -n "$RESUME_RUN" ]; then
+            [[ "$RESUME_RUN" =~ ^[0-9]+$ ]] || exit 2
+            gh run download "$RESUME_RUN" --repo "$GITHUB_REPOSITORY" --name comment-backfill --dir resume
+          fi
+      - name: judge historical comments (shadow only)
+        run: |
+          if [ -n "$RESUME_RUN" ]; then
+            LIMIT=$(python -c 'import json; print(len(json.load(open("resume/inputs.json"))))')
+          fi
+          cmd=(python scripts/backfill_comments.py --limit "$LIMIT" --workers 4
+            --sql artifacts/comments.sql --rows-json artifacts/rows.json
+            --input-snapshot artifacts/inputs.json
+            --summary artifacts/summary.csv --raw artifacts/raw.json)
+          if [ -n "$RESUME_RUN" ]; then
+            run_tag=$(cat resume/run_tag.txt)
+            [[ "$run_tag" =~ ^shadow-comments-[0-9]+$ ]] || exit 2
+            cmd+=(--input resume/inputs.json --run-tag "$run_tag" --resume resume/rows.json)
+          else
+            run_tag="shadow-comments-$GITHUB_RUN_ID"
+            cmd+=(--from-db --run-tag "$run_tag")
+            if [ -n "$PROJECT" ]; then cmd+=(--project "$PROJECT"); fi
+          fi
+          printf '%s\n' "$run_tag" > artifacts/run_tag.txt
+          if [ "$WRITE_SHADOW" = true ]; then cmd+=(--write); fi
+          "${cmd[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: comment-backfill
+          path: artifacts/
+          retention-days: 30

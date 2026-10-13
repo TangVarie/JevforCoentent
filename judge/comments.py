@@ -152,14 +152,14 @@ def comment_state(post: dict, text: str, *, account: str = "", reply_to_text: st
 
 def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot], reader: Bank, *,
                   ops: Optional[Bank] = None, fill: Optional[dict] = None, reply_to_text: str = "",
-                  subject_id: str = "cand") -> CommentJudgement:
+                  subject_id: str = "cand", role: str = "", account: str = "") -> CommentJudgement:
     """判一条候选评论。slot 为 None 时只判、只打旗，不算硬伤（给 judge_comments / 回填用）。"""
     fill = fill or fill_for(post)
     left = unfilled(reader, fill)
     if left:
         raise ValueError(f"题库 {reader.name} 还有没填的占位符：{left}")
     cj = CommentJudgement(text=text)
-    st = comment_state(post, text, reply_to_text=reply_to_text, role=(slot.role if slot else ""))
+    st = comment_state(post, text, reply_to_text=reply_to_text, role=(slot.role if slot else role), account=account)
     r = judge_state(client, reader, subject_id, st, subject_type="comment", fill=fill)
     cj.items.update(r.items); cj.calls += r.calls; cj.usage = dict(r.usage or {})
     if ops is not None:

@@ -5,5 +5,7 @@ __pycache__/
 raw*.json
 *.sql
 !migrations/*.sql
+!scripts/sql/*.sql
 state/
 out/
+fixtures/local/
