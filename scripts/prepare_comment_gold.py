@@ -72,6 +72,7 @@ def prepare(sample: Path, output: Path):
     (output / "标注说明.md").write_text("\n".join(lines), encoding="utf-8")
     manifest = {"sample_version": data["sample_version"], "sample_sha256": hashlib.sha256(sample.read_bytes()).hexdigest(),
                 "bank": bank.name, "bank_sha256": bank.sha256, "count": len(ids),
+                "filled_questions_sha256": hashlib.sha256((output / "逐条题面.json").read_bytes()).hexdigest(),
                 "categories": dict(Counter(c["category"] for c in comments)),
                 "roles": dict(Counter(c["comment_role"] for c in comments)),
                 "sampling_query": data["sampling_query"], "answers_prefilled": False, "csv_formula_escaped": True}

@@ -121,6 +121,11 @@ def test_complete_human_agreement_is_not_model_acceptance(packet):
     packet["sample"].write_text(json.dumps(sample))
     manifest = json.loads(packet["manifest"].read_text())
     manifest["sample_sha256"] = I.digest(packet["sample"])
+    definitions_path = packet["manifest"].parent / "逐条题面.json"
+    definitions = json.loads(definitions_path.read_text())
+    definitions[0]["state"]["评论原文"] = "合成评论0"
+    definitions_path.write_text(json.dumps(definitions))
+    manifest["filled_questions_sha256"] = I.digest(definitions_path)
     packet["manifest"].write_text(json.dumps(manifest))
     for who in ("a", "b"):
         def change(rows):
@@ -138,3 +143,38 @@ def test_complete_human_agreement_is_not_model_acceptance(packet):
 def test_empty_permission_sentinel_is_not_a_repository(packet):
     (packet["output"].parent / ".git").mkdir()
     assert run(packet)["count"] == 100
+
+
+@pytest.mark.parametrize("same_path", [True, False])
+def test_same_annotator_sheet_cannot_be_counted_twice(packet, same_path):
+    if same_path:
+        packet["b"] = packet["a"]
+    else:
+        packet["b"].write_bytes(packet["a"].read_bytes())
+    with pytest.raises(ValueError, match="same sheet"):
+        run(packet)
+
+
+def test_changed_renderer_rejected_even_when_bank_sample_and_csv_match(packet, monkeypatch):
+    fill = I.fill_for
+    monkeypatch.setattr(I, "fill_for", lambda post: {**fill(post), "arranger": "机构"})
+    with pytest.raises(ValueError, match="filled-question wording"):
+        run(packet)
+
+
+def test_original_filled_question_digest_is_verified(packet):
+    manifest = json.loads(packet["manifest"].read_text())
+    manifest["filled_questions_sha256"] = "wrong"
+    packet["manifest"].write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="filled-question digest"):
+        run(packet)
+
+
+@pytest.mark.parametrize("text", ["", " \t\n", "【贴主回复】", "[素人科普评论]", "读者评论：", "贴主：", "【运营引导评论】", "评论D："])
+def test_empty_and_role_only_markers_need_source_review(text):
+    assert I.sample_issue({"comment_text": text})
+
+
+@pytest.mark.parametrize("text", ["【贴主回复】真的买到了", "作者回复太慢了", "这条评论问的是价格"])
+def test_substantive_comments_are_not_role_only_markers(text):
+    assert I.sample_issue({"comment_text": text}) is None
