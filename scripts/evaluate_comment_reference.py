@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BANK = ROOT / "banks/comment_reader_v0.4.yaml"
 INVALID = "<invalid>"
 EVALUATOR_VERSION = "comment-reference-eval-v2"
+CANDIDATE_ROOT = ROOT / "banks/candidates"
 
 
 def sha(path):
@@ -89,6 +90,32 @@ def probability(value):
     except (ValueError, TypeError):
         return False
     return math.isfinite(number) and 0 <= number <= 1
+
+
+def candidate_for(path: Path, baseline):
+    if not path.resolve().is_relative_to(CANDIDATE_ROOT.resolve()):
+        raise ValueError("candidate must be an offline bank under banks/candidates")
+    candidate = load_bank(path)
+    if "candidate" not in candidate.version or candidate.version == baseline.version:
+        raise ValueError("candidate needs its own explicitly experimental bank version")
+    if (candidate.ids() != baseline.ids() or candidate.model != baseline.model
+            or candidate.ambiguity != baseline.ambiguity or candidate.fill_defaults != baseline.fill_defaults):
+        raise ValueError("candidate may not change model, labels/order, thresholds or fill defaults")
+    changed = []
+    for q, old in zip(candidate.questions, baseline.questions):
+        if q.jtype != old.jtype or set(q.criteria) != set(old.criteria):
+            raise ValueError("candidate must preserve question types and closed labels")
+        for attr in ("scope", "evidence", "unclear_labels", "feeds", "on_ambiguous", "version", "aw_instruction"):
+            if getattr(q, attr) != getattr(old, attr):
+                raise ValueError("candidate may not change evidence, review routing or other operational fields")
+        if q.instructions != old.instructions or q.criteria != old.criteria:
+            changed.append(q.id)
+    if not changed or not set(changed) <= {"speech_act", "detail_level"}:
+        raise ValueError("candidate changes must be limited to speech_act/detail_level wording")
+    return candidate, {"candidate_version": candidate.version, "candidate_sha256": candidate.sha256,
+        "baseline_bank_sha256": baseline.sha256, "changed_questions": changed,
+        "owner_definition_review_pending": True,
+        "evaluation_scope": "development_regression_on_old_reference_not_independent_acceptance"}
 
 
 class ProbabilityCheckedClient:
@@ -224,7 +251,7 @@ def save_json(path, data):
     temporary.replace(path)
 
 
-def evaluate(reference: Path, manifest: Path, questions: Path, output: Path, *, workers=4, resume=None, client=None):
+def evaluate(reference: Path, manifest: Path, questions: Path, output: Path, *, workers=4, resume=None, client=None, candidate=None):
     target = output.resolve()
     if target.is_relative_to(ROOT.resolve()) or any((p / ".git").is_file() or (p / ".git/HEAD").is_file() for p in (target, *target.parents)):
         raise ValueError("evaluation artifacts must remain outside any Git repository")
@@ -233,6 +260,13 @@ def evaluate(reference: Path, manifest: Path, questions: Path, output: Path, *, 
     if not 1 <= workers <= 8:
         raise ValueError("workers must be 1..8")
     bank, doc, binding = load_reference(reference, manifest, questions)
+    experiment = None
+    if candidate is not None:
+        bank, experiment = candidate_for(candidate, bank)
+        if any(unfilled(bank, c["fill"]) for c in doc["cases"]):
+            raise ValueError("candidate has unfilled per-case placeholders")
+        binding = {**binding, "reference_bank_sha256": binding["bank_sha256"],
+                   "bank_sha256": bank.sha256, "candidate_experiment": experiment}
     results = validate_resume(resume, binding, bank, {c["id"] for c in doc["cases"]})
     output.mkdir(parents=True, exist_ok=True)
     pending = [c for c in doc["cases"] if c["id"] not in results]
@@ -268,12 +302,17 @@ def evaluate(reference: Path, manifest: Path, questions: Path, output: Path, *, 
             if len(results) % 25 == 0:
                 print(f"comment reference evaluation: {len(results)}/100 cases saved", flush=True)
     summary = summarize(bank, doc, results)
+    if experiment is not None:
+        summary["candidate_experiment"] = experiment
+        summary["metrics_kind"] = "development_regression_with_frozen_old_reference_not_candidate_acceptance"
     summary.update({"binding": binding, "live": live, "status": "evaluation_complete" if all(r["status"] == "ok" for r in results.values()) else "evaluation_incomplete"})
     save_json(output / "summary.json", summary)
     lines = [f"# 模型对照 · {doc['reference_version']} · {bank.version} · {bank.model}", "",
         "参考标签包含用户明确采用的AI来源仲裁；结果表示与该参考的一致性，不能称为独立真人准确率。",
         "非live结果不用于模型验收。统计固定100条/700格，缺答与无效不能从分母删除。",
         "", "| 题 | 答案一致 / 100 | 无歧义一致 | 缺答/无效 | 歧义 |", "|---|---|---|---|---|"]
+    if experiment is not None:
+        lines[1:1] = ["", "候选定义尚待owner审阅；旧100条仅用于开发回归，不能据此宣称候选题库独立验收通过。"]
     for qid, m in summary["per_question"].items():
         lines.append(f"| {qid} | {m['answer_agreement']} | {m['unambiguous_agreement']} | {m['invalid_or_missing']} | {m['ambiguous']} |")
     lines += ["", f"答案一致 {summary['answer_agreement_cells']}/700；无歧义一致 {summary['unambiguous_agreement_cells']}/700。",
@@ -290,10 +329,12 @@ def main(argv=None):
     for name in ("reference", "manifest", "questions", "output"):
         ap.add_argument("--" + name, type=Path, required=True)
     ap.add_argument("--resume", type=Path)
+    ap.add_argument("--candidate-bank", type=Path, help="offline wording experiment; never changes runtime bank")
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args(argv)
     try:
-        return evaluate(args.reference, args.manifest, args.questions, args.output, workers=args.workers, resume=args.resume)
+        return evaluate(args.reference, args.manifest, args.questions, args.output,
+                        workers=args.workers, resume=args.resume, candidate=args.candidate_bank)
     except (ValueError, KeyError, TypeError, OSError) as exc:
         # Input validation errors are controlled messages, not source text dumps.
         print(f"invalid evaluation input: {type(exc).__name__}", file=sys.stderr)
