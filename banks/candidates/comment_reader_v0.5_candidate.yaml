@@ -1,5 +1,5 @@
-# Offline current draft candidate2; NOT live-tested or accepted. Candidate1 is preserved separately for its one authorized run.
-bank_version: cb-v0.5-candidate2
+# Current offline candidate3: owner confirmed non-personal specifications and explicit steps are concrete. NOT live-tested or released.
+bank_version: cb-v0.5-candidate3
 model: jev-1.13.0
 fill_defaults:
   subject: 这家机构
@@ -91,29 +91,29 @@ questions:
 - id: detail_level
   type: choice
   instructions:
-    zh: 评论里可核对的经历细节到什么程度？看评论者或评论中具体人物的事件/经历，而不是文句有多长、术语有多专业或建议有多可执行。品牌/药品名称、商品规格、通用机制、一般用法剂量和泛化购买指引本身不能把答案升级为具体；这些信息可以有行动价值，但不等于经历细节。先区分有没有具体人物的实际情境，再看有没有能定位那段经历的时长、数量变化、明确过程等信息。只评价文本给出的细节，不断言经历或效果真实。
-    en: How checkable are the details of the speaker's or a specific person's event or experience? Do
-      not substitute length, technical vocabulary or actionable advice for experiential detail. A brand/drug
-      name, specification, general mechanism, standard dose or generic buying instruction alone is not
-      concrete experiential detail. First identify a specific person's situation, then identifiable duration,
-      quantity change or concrete process. Assess what is stated, without verifying the claimed experience
-      or outcome.
+    zh: 评论里可核对的文本细节到什么程度？不要求评论者讲自己的使用经历。具体的规格、价格、年龄、日期/时长、数量、地点或实质操作步骤，都可构成细节；这些信息可来自个人叙述、产品说明或操作指引。只看评论给出的具体信息，不从帖子补细节，也不因它是产品介绍/建议就自动降档。品牌名、专业术语、笼统动作、泛泛好评本身不算具体。具体数字应说明一个对象的规格/价格/时间/数量等，随口编号、夸张套话不自动升级。只判是否给出了可核对的信息形式，不验证信息、经历或疗效是否真实。
+    en: How checkable are the details stated in the comment? Personal use is not required. Specific specifications,
+      prices, ages, dates/durations, quantities, locations or substantive actionable steps may be concrete
+      detail, whether in personal narration, product information or instructions. Use only the comment;
+      do not borrow detail from the post or downgrade solely because it is advice/product information.
+      Names, jargon, vague actions or generic praise alone are insufficient. A number should identify
+      an object's specification, price, time or quantity; numbering or empty hyperbole alone is not detail.
+      This evaluates stated information, not its truth or efficacy.
   options:
   - label: 无
-    zh: 没有评论者或具体人物实际经历的情境，只有评价、感受、结论、泛化建议/知识或商品信息。一般剂量、规格、购买关键词等即使带数字，也不单独算经历细节。
-    en: 'No actual situation of the speaker or a specific person: only evaluation, feelings, conclusions,
-      generic advice/knowledge or product information. Standard doses, specifications or buying terms
-      alone are not experiential detail, even with numbers.'
+    zh: 没有可核对的具体信息，也没有具体情境，只有评价、感受或一个结论。只报品牌/药品名、堆专业术语或口号本身不算细节。
+    en: No checkable specific information or concrete situation, only evaluation, feelings or a conclusion.
+      A brand/drug name, jargon or slogan alone is insufficient.
   - label: 模糊
-    zh: 点到评论者或具体人物的实际情境/经历，但没有能定位这段经历的具体时长、量化变化或实质过程。品牌名、笼统动作、泛化频率和常规用量本身不升级到具体。
-    en: A specific person's situation or experience is mentioned, but lacks identifiable duration, quantitative
-      change or a concrete process. Names, vague actions, general frequency or standard doses alone do
-      not upgrade it.
+    zh: 点到一个情境、做法或泛化过程，但没有明确的数值/对象/时间或实质步骤能对上号，例如只说以前用过、早起用一下、找售后处理。
+    en: A situation, action or general process is mentioned but lacks identifiable values, objects, timing
+      or substantive steps; e.g. used it before, used it in the morning, or contacted support.
   - label: 具体
-    zh: 有能定位具体人物那段经历的事实，如具体持续时间、实际数量/前后变化或明确发生过的过程步骤。需要与那段经历相连；通用医学/产品知识、剂量说明、购买指引和品牌称呼本身不够。只判文本提供的事实形式，不证明其真伪。
-    en: 'Facts identify a specific person''s experience: stated duration, actual quantity/change or concrete
-      steps that happened. They must belong to that experience; generic medical/product knowledge, dosing/buying
-      advice or names alone are insufficient. This does not prove truth.'
+    zh: 有能对上号的信息：具体规格、价格、年龄、日期/时长、数量、地点，或有明确对象/入口/操作的流程步骤。无需个人使用经历；产品参数、明确购买/售后流程也可属于此档。品牌名或术语本身不够。只评价文本细节，不证明信息真实。
+    en: Identifiable information such as specifications, prices, ages, dates/durations, quantities, locations,
+      or a process with concrete objects, entry points and actions. Personal use is not required; product
+      parameters and explicit buying/support instructions may qualify. Names or jargon alone do not. This
+      does not verify truth.
   feeds: 可信度线索
   on_ambiguous: 按「模糊」处理
 - id: register

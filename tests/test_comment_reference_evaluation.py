@@ -13,6 +13,7 @@ from judge.banks import discover
 
 CANDIDATE = E.ROOT / "banks/candidates/comment_reader_v0.5_candidate.yaml"
 HISTORICAL_CANDIDATE = E.ROOT / "banks/candidates/comment_reader_v0.5_candidate1.yaml"
+SECOND_DRAFT = E.ROOT / "banks/candidates/comment_reader_v0.5_candidate2.yaml"
 
 
 @pytest.fixture
@@ -236,7 +237,7 @@ def test_risk_signals_include_unambiguous_misses_but_do_not_claim_api_pass(packe
     assert not s["release_accepted"]
 
 
-@pytest.mark.parametrize("path", [CANDIDATE, HISTORICAL_CANDIDATE])
+@pytest.mark.parametrize("path", [CANDIDATE, HISTORICAL_CANDIDATE, SECOND_DRAFT])
 def test_candidate_is_offline_and_only_two_wordings_change(path):
     baseline = load_bank(E.BANK)
     candidate, audit = E.candidate_for(path, baseline)
@@ -246,6 +247,8 @@ def test_candidate_is_offline_and_only_two_wordings_change(path):
     assert path.stem not in discover(E.ROOT / "banks")
     if path == HISTORICAL_CANDIDATE:
         assert candidate.sha256 == "82d159dc2481afecf813d0e61c280aece2623e5dcff9e8444656ffc49b488f64"
+    elif path == SECOND_DRAFT:
+        assert candidate.sha256 == "c81abda5d74c2f42a13786acd395e381cf076280a75a51579fa74b9e537edc45"
 
 
 def test_candidate_development_run_keeps_frozen_labels_and_binds_both_banks(packet):
