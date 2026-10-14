@@ -1,0 +1,178 @@
+# Current offline candidate3: owner confirmed non-personal specifications and explicit steps are concrete. NOT live-tested or released.
+bank_version: cb-v0.5-candidate3
+model: jev-1.13.0
+fill_defaults:
+  subject: 这家机构
+  arranger: 机构
+  decide: 找机构
+ambiguity:
+  choice_top_min: 0.6
+  choice_margin_min: 0.2
+  noul_band:
+  - 0.35
+  - 0.65
+questions:
+- id: speech_act
+  type: choice
+  instructions:
+    zh: 这条评论在做什么？只选最主要的一种。先判断评论自身的主要主张，再结合可见帖子和已提供的回复对象。本人或家人使用后的正面结果是主要内容时，归亲历背书；主要是在劝别人用而没有以亲身使用为主要论据时，归旁观推荐。不要仅因为评论回应他人的困境、用了建议口吻、出自贴主或带专业术语就判回复答疑。明确提问或信息请求可支持答疑判断；但回复对象未提供时，不能把没有看到问题当成没有问题。简短的款型确认、事实答复、联系方式或购买渠道指引本身不等于劝用或好评，可按其答复/指路功能判断。只有评论自身主动主张好处或劝别人去用，才据此判推荐；仅提到品牌或渠道不够。若既有使用经历又有劝用，按主要表达目的选择。只判断文本声称的行为，不验证使用经历或效果是否真实。
+    en: Pick the main act from the comment, visible post and any supplied reply target. A positive personal
+      or family-use outcome that is central is endorsement; mainly urging others to use without personal
+      use as the main basis is recommendation. Addressing a difficulty, advice, author status or technical
+      terms alone is not answering. An explicit question supports an answer, but an absent reply target
+      is not evidence that no question existed. Brief factual replies, model confirmations, contact or
+      buying-channel guidance alone are not recommendation; classify their answering/guidance function.
+      Recommendation requires the comment itself to claim benefits or urge use, not merely name a brand
+      or channel. With mixed acts, use the main purpose. This does not verify the claims.
+  options:
+  - label: 提问
+    zh: 向作者或其他人问事情（在哪里、多少钱、怎么联系、文科能不能做）
+    en: Asking a question of the author or others (where, how much, how to contact, does it work for my
+      major)
+  - label: 质疑
+    zh: 表示怀疑、反驳或提醒风险（割韭菜、别信、先看合同）
+    en: Doubting, pushing back or warning (scam, don't trust it, read the contract first)
+  - label: 补充经验
+    zh: 讲自己的相关经历或看法，但不对{subject}下结论
+    en: Sharing their own related experience or view without passing judgment on {subject}
+  - label: 亲历背书
+    zh: 说自己或家人实际使用过{subject}，并以正面使用结果或好评为主要论据；只是转述泛化知识不算。这里只判文本声称，不验证真伪。
+    en: Uses claimed personal or family use and a positive result as the main basis for praising {subject};
+      generic knowledge is insufficient. This does not verify the claim.
+  - label: 旁观推荐
+    zh: 没有以本人或家人的实际使用为主要论据，但主要是在夸{subject}或劝别人去用。
+    en: Mainly praises {subject} or urges use without personal or family use as the main basis.
+  - label: 回复答疑
+    zh: 主要回答问题、确认事实/款型、给联系方式或购买渠道指路。可见提问或回复对象提供支持；缺失回复对象不自动排除此类。单纯品牌名/渠道信息不等于推荐，主动夸产品或劝用才需按推荐/背书主行为判断。
+    en: Mainly answers a question, confirms a fact/model, or gives contact/buying-channel guidance. A
+      visible question or reply target supports it, but an absent target does not automatically exclude
+      it. Names/channels alone do not imply recommendation; active praise or urging use needs classification
+      by its main act.
+  - label: 闲聊表情
+    zh: 打招呼、表情、感叹，没有实质内容
+    en: Small talk, emoji or exclamation with no substance
+  - label: 说不清
+    zh: 上面都不像
+    en: None of the above fits
+  unclear_labels:
+  - 说不清
+  feeds: 路由——亲历背书 / 旁观推荐 直接进「高风险复核」，其余按后面几题走
+  on_ambiguous: 进人工
+- id: names_brand
+  type: noul
+  instructions:
+    zh: 评论里有没有直接写出机构或品牌的名字（包括「某某老师」带机构名、@ 机构账号）？
+    en: Does the comment spell out the agency's or brand's name (including "Teacher X" with the agency
+      name, or @-mentioning its account)?
+  criteria:
+    'true':
+      zh: 写出了机构或品牌的名字
+      en: The agency or brand name appears
+    'false':
+      zh: 没写名字，只说「这家」「他们」「机构」，或者根本没提
+      en: No name; only "this one", "they", "the agency", or no mention at all
+  feeds: 可信度线索——普通用户夸一家机构时很少主动打全名
+  on_ambiguous: 按「写出了」处理
+- id: echoes_post
+  type: noul
+  instructions:
+    zh: 这条评论有没有接住这篇帖子里具体说到的事？帖子说了：{post_points}。
+    en: 'Does the comment pick up something specific this post said? The post mentioned: {post_points}.'
+  criteria:
+    'true':
+      zh: 提到了帖子里的某个具体事实，或者用了帖子里的具体说法（比如接{post_examples}）
+      en: Mentions a specific fact from the post or reuses its specific wording (e.g. picks up {post_examples})
+    'false':
+      zh: 只是同一个品类、同一类人群的话（留学生、文科、求职、机构），换到任何一篇同类帖子下面也能贴
+      en: Only same-category talk (students abroad, humanities, job hunting, agencies); could be pasted
+        under any similar post
+  feeds: 可信度线索——自发评论是在回这篇帖，安排的评论是在回一个品类
+  on_ambiguous: 按「泛泛」处理
+- id: detail_level
+  type: choice
+  instructions:
+    zh: 评论里可核对的文本细节到什么程度？不要求评论者讲自己的使用经历。具体的规格、价格、年龄、日期/时长、数量、地点或实质操作步骤，都可构成细节；这些信息可来自个人叙述、产品说明或操作指引。只看评论给出的具体信息，不从帖子补细节，也不因它是产品介绍/建议就自动降档。品牌名、专业术语、笼统动作、泛泛好评本身不算具体。具体数字应说明一个对象的规格/价格/时间/数量等，随口编号、夸张套话不自动升级。只判是否给出了可核对的信息形式，不验证信息、经历或疗效是否真实。
+    en: How checkable are the details stated in the comment? Personal use is not required. Specific specifications,
+      prices, ages, dates/durations, quantities, locations or substantive actionable steps may be concrete
+      detail, whether in personal narration, product information or instructions. Use only the comment;
+      do not borrow detail from the post or downgrade solely because it is advice/product information.
+      Names, jargon, vague actions or generic praise alone are insufficient. A number should identify
+      an object's specification, price, time or quantity; numbering or empty hyperbole alone is not detail.
+      This evaluates stated information, not its truth or efficacy.
+  options:
+  - label: 无
+    zh: 没有可核对的具体信息，也没有具体情境，只有评价、感受或一个结论。只报品牌/药品名、堆专业术语或口号本身不算细节。
+    en: No checkable specific information or concrete situation, only evaluation, feelings or a conclusion.
+      A brand/drug name, jargon or slogan alone is insufficient.
+  - label: 模糊
+    zh: 点到一个情境、做法或泛化过程，但没有明确的数值/对象/时间或实质步骤能对上号，例如只说以前用过、早起用一下、找售后处理。
+    en: A situation, action or general process is mentioned but lacks identifiable values, objects, timing
+      or substantive steps; e.g. used it before, used it in the morning, or contacted support.
+  - label: 具体
+    zh: 有能对上号的信息：具体规格、价格、年龄、日期/时长、数量、地点，或有明确对象/入口/操作的流程步骤。无需个人使用经历；产品参数、明确购买/售后流程也可属于此档。品牌名或术语本身不够。只评价文本细节，不证明信息真实。
+    en: Identifiable information such as specifications, prices, ages, dates/durations, quantities, locations,
+      or a process with concrete objects, entry points and actions. Personal use is not required; product
+      parameters and explicit buying/support instructions may qualify. Names or jargon alone do not. This
+      does not verify truth.
+  feeds: 可信度线索
+  on_ambiguous: 按「模糊」处理
+- id: register
+  type: choice
+  instructions:
+    zh: 这条评论的说话方式更像哪一种？
+    en: Which register does the comment read as?
+  options:
+  - label: 随手口语
+    zh: 短、省略、有语气词或错字，像刷手机时随手打的
+    en: Short, elliptical, with particles or typos, like something typed while scrolling
+  - label: 认真分享
+    zh: 用自己的话讲一件具体发生过的事，有过程或细节，像认真回陌生人一条
+    en: Tells a specific thing that happened, in their own words, with some process or detail, like a
+      considered reply to a stranger
+  - label: 文案腔
+    zh: 没有过程只有结论，句式像感谢信或宣传语：痛点一句 + 机构帮我 + 结果一句，形容词齐整（专业、精准、满意、本土化）
+    en: 'No process, only conclusions, phrased like a thank-you note or ad copy: one pain point + the
+      agency helped me + one outcome, with tidy adjectives'
+  - label: 说不清
+    zh: 都不像
+    en: None fits
+  unclear_labels:
+  - 说不清
+  feeds: 可信度线索
+  on_ambiguous: 进人工
+- id: reader_value
+  type: choice
+  instructions:
+    zh: 一个正在考虑要不要{decide}的读者，从这条评论能拿到什么？
+    en: What does a reader who is deciding whether to {decide} get from this comment?
+  options:
+  - label: 可行动信息
+    zh: 读者拿了就能用的东西：联系方式、@ 账号、店名、可搜索的关键词、价格、流程、时间线
+    en: 'Something the reader can act on directly: contact details, an @ account, a shop name, a searchable
+      keyword, price, process, timeline'
+  - label: 判断依据
+    zh: 有过程或对比的具体经历，能让读者判断适不适合自己；只说一个结果（帮我做好了 X）不算
+    en: A concrete experience with process or comparison that helps the reader judge fit; a bare outcome
+      (they did X for me) does not count
+  - label: 只有评价
+    zh: 好、专业、靠谱之类的结论，没有依据
+    en: Only a verdict (good, professional, reliable) with nothing behind it
+  - label: 无
+    zh: 什么也拿不到
+    en: Nothing
+  feeds: 承接——评论区的营销职能是承接，不是背书
+  on_ambiguous: 进人工
+- id: arranged
+  type: noul
+  instructions:
+    zh: 站在一个普通读者的角度，这条评论像不像{arranger}安排发的？
+    en: From an ordinary reader's point of view, does this comment look arranged by the {arranger}?
+  criteria:
+    'true':
+      zh: 像安排的
+      en: Looks arranged
+    'false':
+      zh: 像普通用户自发写的
+      en: Looks like a spontaneous user comment
+  feeds: 总判——和前六题分开看，用来检验前六题是否解释了总判
+  on_ambiguous: 进人工

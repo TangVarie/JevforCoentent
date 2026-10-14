@@ -2,12 +2,18 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from judge.banks import load_bank
 from judge.comments import fill_for
 from scripts.backfill_comments import post_for
 from scripts.prepare_comment_gold import prepare
 from scripts import evaluate_comment_reference as E
+from judge.banks import discover
+
+CANDIDATE = E.ROOT / "banks/candidates/comment_reader_v0.5_candidate.yaml"
+HISTORICAL_CANDIDATE = E.ROOT / "banks/candidates/comment_reader_v0.5_candidate1.yaml"
+SECOND_DRAFT = E.ROOT / "banks/candidates/comment_reader_v0.5_candidate2.yaml"
 
 
 @pytest.fixture
@@ -229,3 +235,67 @@ def test_risk_signals_include_unambiguous_misses_but_do_not_claim_api_pass(packe
     assert s["reader_bank_risk_signals"]["endorsement_unambiguous_nonendorsement"] == ["c0"]
     assert s["reader_bank_risk_signals"]["arranged_unambiguous_false_negative"] == ["c1"]
     assert not s["release_accepted"]
+
+
+@pytest.mark.parametrize("path", [CANDIDATE, HISTORICAL_CANDIDATE, SECOND_DRAFT])
+def test_candidate_is_offline_and_only_two_wordings_change(path):
+    baseline = load_bank(E.BANK)
+    candidate, audit = E.candidate_for(path, baseline)
+    assert audit["changed_questions"] == ["speech_act", "detail_level"]
+    assert candidate.model == baseline.model and candidate.ambiguity == baseline.ambiguity
+    assert candidate.by_id()["arranged"] == baseline.by_id()["arranged"]
+    assert path.stem not in discover(E.ROOT / "banks")
+    if path == HISTORICAL_CANDIDATE:
+        assert candidate.sha256 == "82d159dc2481afecf813d0e61c280aece2623e5dcff9e8444656ffc49b488f64"
+    elif path == SECOND_DRAFT:
+        assert candidate.sha256 == "c81abda5d74c2f42a13786acd395e381cf076280a75a51579fa74b9e537edc45"
+
+
+def test_candidate_development_run_keeps_frozen_labels_and_binds_both_banks(packet):
+    before = E.sha(packet["reference"])
+    client = Client(packet)
+    assert E.evaluate(**arguments(packet), client=client, candidate=CANDIDATE) == 0
+    summary = json.loads((packet["output"] / "summary.json").read_text())
+    assert summary["metrics_kind"].endswith("not_candidate_acceptance")
+    assert summary["candidate_experiment"]["owner_definition_review_pending"] is True
+    assert not summary["release_accepted"]
+    assert E.sha(packet["reference"]) == before
+    candidate = load_bank(CANDIDATE)
+    assert summary["binding"]["bank_sha256"] == candidate.sha256
+    assert summary["binding"]["reference_bank_sha256"] == packet["bank"].sha256
+    for body in client.calls:
+        case = client.by_text[body["state"]["评论原文"]]
+        assert body["questions"] == E.build_questions(candidate, fill=case["fill"])
+
+
+def test_baseline_checkpoint_cannot_be_reused_by_candidate(packet):
+    assert E.evaluate(**arguments(packet), client=Client(packet)) == 0
+    resume = packet["output"] / "checkpoint.json"
+    packet["output"] = packet["output"].parent / "candidate"
+    client = Client(packet)
+    with pytest.raises(ValueError, match="mismatch"):
+        E.evaluate(**arguments(packet), client=client, candidate=CANDIDATE, resume=resume)
+    assert not client.calls
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda d: d["ambiguity"].update({"choice_top_min": 0.1}),
+    lambda d: d.update({"model": "jev-latest"}),
+    lambda d: d["questions"][-1]["instructions"].update({"zh": "changed arranged"}),
+    lambda d: d["questions"][0]["options"].pop(),
+    lambda d: d["questions"][0].update({"on_ambiguous": "pass"}),
+    lambda d: d["questions"][0]["instructions"].update({"zh": "new missing {extra_context}"}),
+    lambda d: d["questions"][4]["options"].reverse(),
+])
+def test_candidate_scope_and_missing_fill_rejected_before_calls(packet, tmp_path, monkeypatch, mutation):
+    root = tmp_path / "offline"
+    root.mkdir()
+    path = root / "candidate.yaml"
+    data = yaml.safe_load(CANDIDATE.read_text())
+    mutation(data)
+    path.write_text(yaml.safe_dump(data, allow_unicode=True))
+    monkeypatch.setattr(E, "CANDIDATE_ROOT", root)
+    client = Client(packet)
+    with pytest.raises(ValueError):
+        E.evaluate(**arguments(packet), client=client, candidate=path)
+    assert not client.calls
