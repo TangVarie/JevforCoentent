@@ -1,5 +1,7 @@
 # J-03 · 已收两份标注，等待第三人仲裁（2026-10-13）
 
+> **当前阶段更新（2026-10-15）见 [HANDOFF.md](../HANDOFF.md)**：旧100条参考和模型对照已完成；新40条零背景答题包已交人员复核，用户明确暂不冻结，C3未试跑、评论关闭。下文原有阶段快照保留追溯。
+
 Jev #9 / autowriter #96 / truth-vault #178 已合并。Jev生产部署的GitHub状态success，正确域名为 `https://judge-production-601c.up.railway.app`；`/health`确认鉴权开启、非mock、评论开关false。写作台生产commit `487403b75fb0`、协议 `3fdff2c0b985`，24工具已部署。
 
 用户提供A/B已完成表，各100条、700格。按comment_id对齐，两份ID集合与固定样本一致；帖子、评论、角色、要点均未改动。A表用是/否，B表300个布尔答案使用true/false，仅作等价格式规范化，不改实质标注。
