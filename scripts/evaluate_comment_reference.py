@@ -197,6 +197,7 @@ def validate_resume(path: Path | None, binding: dict, bank, ids: set) -> dict:
 
 
 def summarize(bank, doc: dict, results: dict) -> dict:
+    count = len(doc["cases"])
     by_question = {}
     for q in bank.questions:
         confusion = Counter()
@@ -212,7 +213,7 @@ def summarize(bank, doc: dict, results: dict) -> dict:
             hits += hit
             usable_hits += hit and not it["ambiguous"]
             confusion[(expected, it["answer"] if not it["invalid"] else INVALID)] += 1
-        by_question[q.id] = {"total": 100, "answer_agreement": hits, "unambiguous_agreement": usable_hits,
+        by_question[q.id] = {"total": count, "answer_agreement": hits, "unambiguous_agreement": usable_hits,
             "invalid_or_missing": invalid, "ambiguous": ambiguous, "not_called": pending,
             "confusion": [{"reference": a, "model": b, "count": n} for (a, b), n in sorted(confusion.items())]}
     risks = {"endorsement_reference_cases": 0, "endorsement_unambiguous_nonendorsement": [],
@@ -234,7 +235,7 @@ def summarize(bank, doc: dict, results: dict) -> dict:
             it = safe_item(items.get("arranged"), bank.by_id()["arranged"])
             if not it["invalid"] and not it["ambiguous"] and it["answer"] == "否":
                 risks["arranged_unambiguous_false_negative"].append(c["id"])
-    return {"count": 100, "cells": 700, "called_cases": len(results),
+    return {"count": count, "cells": count * len(bank.questions), "called_cases": len(results),
         "answer_agreement_cells": sum(x["answer_agreement"] for x in by_question.values()),
         "unambiguous_agreement_cells": sum(x["unambiguous_agreement"] for x in by_question.values()),
         "invalid_or_missing_cells": sum(x["invalid_or_missing"] for x in by_question.values()),
