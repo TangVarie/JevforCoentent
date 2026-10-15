@@ -1,12 +1,14 @@
 # Jev交接 · 2026-10-15
 
+> 评论线本轮最终核对：2026-10-15 20:28（北京时间）；C4不推广。其他生产快照仍按各段原时间，不表示一并重测。
+
 本轮接管记录覆盖10-12～15；此前生产快照核对 **10-15 12:04，北京时间**；本次评论返回、C3真实复验及结果核对 **10-15 19:34，北京时间**。本库默认分支`main`，功能基线为已合并 [PR12](https://github.com/TangVarie/JevforCoentent/pull/12)，merge `59e4f6f7fb4fa0f0a51ee30b29b6306561f3b3a7`。
 
 跨库总览和统一待办：[TV交接](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)、[OPEN-ITEMS](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)；写手端：[autowriter交接](https://github.com/TangVarie/autowriter/blob/claude/xhs-content-workstation-BSEuH/HANDOFF.md)。
 
 ## 当前可以直接接着做什么
 
-**后续收尾正在本轮推进**：C4已固定七题的单选边界，231项测试通过，20条虚构合成模型验证131/140；真实旧40开发回归/新40 AI参考验证已零调用预检，因自动审批要求这80条C4的明确出境许可而暂未发送。见[收尾记录](docs/comment-line-closeout-2026-10-15.md)。下面C3结果保留，不覆盖原参考或生产默认。
+**本轮收尾结论：C4不推广。** 初次工程231项通过，审阅后242项通过，合成20条131/140；用户明确许可后真实旧40开发回归187/280、新40 AI参考225/280，80/80有效、0缺答。新40总分/语气/安排/背书边界未达事先诊断标准，按停止规则不追加候选或调低标准。纯虚构本地HTTP联真实Jev通过，不冒充生产验收；无shadow/primary写库，生产评论关闭。见[完整收尾与下一轮边界](docs/comment-line-closeout-2026-10-15.md)。下面C3记录原样保留。
 
 **40条人员复核已返回并核验，280格原判已另存为固定参考。** 与AI草稿92格不同，AI覆盖0格；来源为单人判断，保留题意边界差异，不称双人金标准。专用评估入口已完成、全量217项测试通过，真实输入离线预检0调用。已获此次明确许可并完成C3独立复验：172/280一致、137无歧义一致、69歧义、0缺答/无效；相对参考背书漏报0/28、误报4/12。不推广C3；下一步先统一分类边界，生产评论仍关闭。详见[本次返回报告](docs/comment-holdout-return-2026-10-15.md)。
 
@@ -112,3 +114,5 @@ gh run list --repo TangVarie/JevforCoentent --limit 10
 ```
 
 `TYPESAFE_API_KEY`或既有key-file机制只在运行环境使用，不写文档/源码/产物。完整有效checkpoint可无凭据重建报告；错误/无效要重试才会新调用，先核对授权与摘要。更细资料：[原参考评估](docs/comment-reference-evaluation-2026-10-13.md)、[候选与回退](docs/comment-reader-candidate-2026-10-13.md)、[HTTP和回填合同](docs/comment-tools-rollout-2026-10-12.md)。这些早期文档的阶段性“尚未标注”描述以本交接明确日期的状态为准。
+
+**C4审阅补丁说明：** 当前评估器v2已补原判独立摘要、20/40/40范围、调用前阈值类型/范围和全选项概率检查。初次v1批次未保存完整概率向量，仅作为历史诊断，不能追认严格v2验收；无追加模型调用。三组v2零调用预检与242项工程回归通过，见Jev收尾报告。

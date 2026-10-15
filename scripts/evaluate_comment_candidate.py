@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -19,7 +20,8 @@ from scripts.evaluate_comment_holdout import output_target
 
 BANK = E.CANDIDATE_ROOT / "comment_reader_v0.6_candidate4.yaml"
 BASE = E.CANDIDATE_ROOT / "comment_reader_v0.5_candidate.yaml"
-VERSION = "comment-candidate4-diagnostic-v1"
+VERSION = "comment-candidate4-diagnostic-v2"
+CONTRACT = E.ROOT / "config/comment_candidate4_diagnostic_contract.json"
 SCOPES = {"development_single_reviewer", "unseen_AI_definition_reference", "synthetic_specification"}
 
 
@@ -40,9 +42,26 @@ def candidate():
 
 def read_packet(sample, reference, protocol, source_reference=None):
     bank = candidate()
+    contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    if contract["candidate_version"] != bank.version or contract["bank_sha256"] != bank.sha256:
+        raise ValueError("trusted C4 contract differs from candidate")
     sample_doc = json.loads(sample.read_text(encoding="utf-8"))
     doc = json.loads(reference.read_text(encoding="utf-8"))
     plan = json.loads(protocol.read_text(encoding="utf-8"))
+    thresholds = plan.get("diagnostic_thresholds")
+    required = {"overall_agreement_min", "per_question_agreement_min", "ambiguous_fraction_max",
+                "unambiguous_endorsement_false_negatives_max"}
+    if not isinstance(thresholds, dict) or set(thresholds) != required:
+        raise ValueError("diagnostic threshold schema incomplete")
+    for key in required - {"unambiguous_endorsement_false_negatives_max"}:
+        value = thresholds[key]
+        if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError("diagnostic threshold must be a finite numeric fraction")
+    misses = thresholds["unambiguous_endorsement_false_negatives_max"]
+    if type(misses) is not int or misses < 0:
+        raise ValueError("diagnostic false-negative limit must be a nonnegative integer")
+    if thresholds != contract["diagnostic_thresholds"]:
+        raise ValueError("thresholds differ from trusted pre-registered values")
     freeze_path = Path(plan["design_freeze"]["path"])
     if E.sha(freeze_path) != plan["design_freeze"]["sha256"]:
         raise ValueError("pre-registered design digest mismatch")
@@ -51,7 +70,7 @@ def read_packet(sample, reference, protocol, source_reference=None):
             or freeze.get("model_diagnostic_gate") != plan.get("diagnostic_thresholds")):
         raise ValueError("diagnostic protocol differs from pre-registered design")
     scope, count = plan.get("scope"), plan.get("count")
-    if scope not in SCOPES or type(count) is not int or not 1 <= count <= 100:
+    if scope not in SCOPES or type(count) is not int or count != contract["scope_counts"][scope]:
         raise ValueError("invalid evaluation scope or count")
     if (plan.get("sample_sha256") != E.sha(sample) or plan.get("reference_sha256") != E.sha(reference)
             or plan.get("bank_sha256") != bank.sha256 or plan.get("bank_version") != bank.version
@@ -78,7 +97,8 @@ def read_packet(sample, reference, protocol, source_reference=None):
     if {r["comment_id"] for r in rows} != {c["id"] for c in cases}:
         raise ValueError("sample/reference ID sets differ")
     if scope == "development_single_reviewer":
-        if source_reference is None or plan.get("source_reference_sha256") != E.sha(source_reference):
+        if (source_reference is None or E.sha(source_reference) != contract["returned_reference_sha256"]
+                or plan.get("source_reference_sha256") != contract["returned_reference_sha256"]):
             raise ValueError("development reference needs unchanged source")
         original = json.loads(source_reference.read_text(encoding="utf-8"))
         old = {c["id"]: c["expect"] for c in original["cases"]}
@@ -115,6 +135,7 @@ def read_packet(sample, reference, protocol, source_reference=None):
                 raise ValueError("reference label outside closed vocabulary")
     binding = {"sample_sha256": E.sha(sample), "reference_sha256": E.sha(reference),
                "protocol_sha256": E.sha(protocol), "bank_sha256": bank.sha256,
+               "trusted_contract_sha256": E.sha(CONTRACT),
                "bank_version": bank.version, "model": bank.model, "scope": scope,
                "count": count, "evaluator_version": VERSION}
     return bank, doc, plan, binding
@@ -143,7 +164,8 @@ def evaluate(sample, reference, protocol, output, *, source_reference=None, auth
                 or not receipt.get("owner_instruction")):
             raise ValueError("authorization not bound to this one batch")
         try:
-            client = E.ProbabilityCheckedClient(client if client is not None else JevClient())
+            client = E.ProbabilityCheckedClient(client if client is not None else JevClient(),
+                                                require_all_choice_labels=True)
         except JevError:
             E.save_json(output / "status.json", {"status": "blocked_missing_credentials", "model_calls": 0})
             return 4

@@ -1,0 +1,19 @@
+{
+  "contract_version": "C4-diagnostic-contract-v2",
+  "recording_note": "Post-run validator hardening of the previously fixed counts/thresholds and original reviewer digest; does not retroactively certify v1 raw probability completeness.",
+  "candidate_version": "cb-v0.6-candidate4",
+  "bank_sha256": "a0c04acf37cb05005ed2f3c01ae3b0410221a392da39b665b25879a678cd534d",
+  "returned_reference_sha256": "953dc0975d58574045324d55b7f01b97a352b724c12e2c08ee8ff616045341d3",
+  "scope_counts": {
+    "synthetic_specification": 20,
+    "development_single_reviewer": 40,
+    "unseen_AI_definition_reference": 40
+  },
+  "diagnostic_thresholds": {
+    "overall_agreement_min": 0.85,
+    "per_question_agreement_min": 0.75,
+    "ambiguous_fraction_max": 0.25,
+    "unambiguous_endorsement_false_negatives_max": 0
+  },
+  "production_release_accepted": false
+}
