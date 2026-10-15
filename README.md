@@ -1,5 +1,7 @@
 # judge —— BYWOOD 内容生产的共用判定服务（Jev）
 
+> **接手当前进度（2026-10-15）先读 [HANDOFF.md](HANDOFF.md)**：本轮检查、已合并改动、生产验证、未完成事项和下一步执行顺序。
+
 一句话：同一个模型（Jev）、同一套题库纪律、同一张账本（`truth_vault.note_feature_answers`），在内容生产的写前、写中、写后
 和数据飞轮的特征层、评论层、外部语料上做同一件事——把文字变成带概率、带证据句的闭集事实。它不写字，不解释理由，不判「会不会爆」。
 逻辑与拍板见 docs/00-decisions.md 和本仓的 docs/31（它不在 truth-vault 里；它引用的 docs/30 是一份没有入库的草稿）；**Jev 具体怎么介入、评论怎么写，看 docs/01-how-jev-is-used.md（一页）**。
@@ -15,7 +17,7 @@
 | `migrations/` | `notes_v1_17_judge_subjects.sql`（账本加 comment / ssll_sample / external_note，prob 口径统一）· `notes_v1_18_external_notes.sql`（外部笔记表 + 参考分布视图 `v_external_reference`） |
 | `fixtures/` | gate1 的 50 篇笔记 + Opus 答案（覆盖其中 47 篇，所以报告里有 921 与 999 两个分母）+ D-081 Jev 表；33 条运营评论（运营前缀【贴主回复】等已剥掉、角色已改正）；评论用例 |
 | `docs/` | 实跑报告（特征层 50 篇、评论 33 条、评论金标准）与拍板记录 |
-| `tests/` | 103 个测试，全 mock（评论回路用按关键词给答案的假 Jev；MCP 薄客户端的 urllib 打到进程内 TestClient），不联网 |
+| `tests/` | 合成工程测试（本轮功能基线200项），全 mock（评论回路用按关键词给答案的假 Jev；MCP 薄客户端的 urllib 打到进程内 TestClient），不联网 |
 
 ## 跑起来
 
@@ -27,7 +29,7 @@ python3 scripts/run_gold.py banks/comment_reader_v0.4.yaml fixtures/comment_case
 python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --opus fixtures/fq_opus_gate1_50.tsv --gate1 fixtures/fq_jev_d081_A_gate1_50.tsv --out fq.md --sql fq.sql --run-tag shadow-$(date +%F)
 uvicorn judge.api:app --port 8080              # HTTP：POST /judge（一个题库、一批 subject，并行）· POST /judge_draft（一篇稿、多层题库、带修改单）· GET /banks · GET /health（不鉴权）
 JUDGE_URL=https://… JUDGE_API_KEY=… python3 -m judge.mcp_server   # 内部 / 运维机器的 MCP 工具（上面那个 HTTP 服务的薄客户端）：judge_draft · repair_plan_for · list_banks。写手不用它：这三个工具 2026-10-09 起由写作台 deskcore 转发（写手只配 deskcore 那一个 MCP）；
-                                                #   judge_comments · comment_repair_plan_for · judge_thread 暂无 HTTP 端点，只在显式设 JUDGE_ALLOW_LOCAL_JEV=1 的内部机器上进程内跑
+                                                #   旧 stdio MCP 的 judge_comments · comment_repair_plan_for · judge_thread 仍为显式本机路径；写手通过 deskcore 转发已实现的评论HTTP（默认关闭），见 HANDOFF
 python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要花多少钱；--probe 花一次请求钉字段；正式跑由 .github/workflows/external-corpus.yml 每周一触发
 ```
 
@@ -39,7 +41,7 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`（或 `MOONSHOT_API_KEY`）（`loop.AnthropicCompatGenerator` 的生成端；末尾带不带 `/v1` 都行）。
 环境变量（`judge.mcp_server` 所在机器的 `.mcp.json` env；2026-10-09 审计 A-09。写手机器**不再**起它——写手通过 deskcore 的 `judge_draft` / `repair_plan_for` / `list_banks` 判稿，deskcore 用服务端的管理 key 转发）：`JUDGE_URL`（判定服务地址）+ `JUDGE_API_KEY`（填服务端 `JUDGE_WRITER_API_KEYS` 里的一把写手 key，**不是**服务端的管理 key；鉴权头 `X-Judge-Key`）两个必需，没配则启动记一条警告、工具返回 `{"error": …}` ·
 `JUDGE_PROJECT` / `JUDGE_CATEGORY`（默认项目代号与品类；`project` 两处都没有在本地就拒绝，其余数据出境规则由服务端执行并回显在 `policy`）· `JUDGE_HTTP_TIMEOUT_SEC`（默认 180；429 / 5xx 退避重试最多 2 次）·
-`JUDGE_ALLOW_LOCAL_JEV=1`（评论三个工具暂无 HTTP 端点，默认拒绝；只有合法持有 vendor 密钥的内部 / 运维机器显式设它才进程内跑，那台机器另需 `TYPESAFE_API_KEY` + 本地 `banks/`）。写手机器上**没有** `TYPESAFE_API_KEY`，MCP 不读 `banks/`、不 import `judge.hidden`。
+`JUDGE_ALLOW_LOCAL_JEV=1`（旧stdio MCP三个评论工具的本机路径默认拒绝；内部机器需合法持有vendor密钥及本地banks。写手使用deskcore转发的HTTP接口，服务开关仍关闭，见HANDOFF）。写手机器上**没有** `TYPESAFE_API_KEY`，MCP 不读 `banks/`、不 import `judge.hidden`。
 账本里的 `bank_sha256` 用 TV 同款规范化摘要（剔掉 `status:` / `frozen_sha256:` 两行再算），与 TV 自己写的行同口径，冻结题库不会把行劈成两批；`banks/vendor/SHA256SUMS` 钉的是整文件。
 
 ## 数据出境、暗题、闸二门禁
