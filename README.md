@@ -1,5 +1,7 @@
 # judge —— BYWOOD 内容生产的共用判定服务（Jev）
 
+> **评论线云端交接**：[完整中文交接、180条对照及完整Excel/交接包](docs/handoff/2026-10-15/README.md)，可直接在GitHub阅读。
+
 > **接手当前进度（2026-10-15）先读 [HANDOFF.md](HANDOFF.md)**：本轮检查、已合并改动、生产验证、未完成事项和下一步执行顺序。
 
 评论线本轮工程与固定验证已收尾，C4新40与AI参考225/280未达预注册标准，生产评论继续关闭；见[收尾报告与接手边界](docs/comment-line-closeout-2026-10-15.md)。人员返回及C3历史结果见[原返回说明](docs/comment-holdout-return-2026-10-15.md)。

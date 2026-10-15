@@ -1,0 +1,1271 @@
+{
+  "schema_version": "comment-cloud-handoff-v1",
+  "as_of_date": "2026-10-15",
+  "publication_scope": "this_JSON_contains_aggregate_statistics_only",
+  "raw_text_included": false,
+  "per_case_labels_included": false,
+  "reviewer_names_included": false,
+  "private_source_IDs_included": false,
+  "final_decision": "do_not_promote_C4",
+  "production_comments_enabled": false,
+  "comment_ledger_rows_at_closeout": 0,
+  "comment_ledger_batches_at_closeout": 0,
+  "engineering_tests_passed": 242,
+  "old100_reference": {
+    "cases": 100,
+    "cells": 700,
+    "AB_agreement_cells": 522,
+    "AI_arbitration_cells_adopted_by_user": 178
+  },
+  "returned40_reference": {
+    "cases": 40,
+    "cells": 280,
+    "reviewer_count": 1,
+    "AI_overrides": 0,
+    "differences_from_previous_AI_draft": 92
+  },
+  "new40_reference": {
+    "cases": 40,
+    "cells": 280,
+    "source": "AI",
+    "not_independent_human_gold": true,
+    "category_counts": {
+      "OTC药": 14,
+      "保健品": 14,
+      "处方药": 12
+    },
+    "stored_role_counts": {
+      "素人": 40
+    },
+    "overlapping_development_posts": 0,
+    "overlapping_comment_texts_within_project": 0
+  },
+  "diagnostic_thresholds": {
+    "overall_agreement_min": 0.85,
+    "per_question_agreement_min": 0.75,
+    "ambiguous_fraction_max": 0.25,
+    "unambiguous_endorsement_false_negatives_max": 0
+  },
+  "historical_evaluator_version": "comment-candidate4-diagnostic-v1",
+  "current_evaluator_version": "comment-candidate4-diagnostic-v2",
+  "strict_v2_real_model_acceptance": false,
+  "experiments": {
+    "C3_returned40": {
+      "count": 40,
+      "cells": 280,
+      "called_cases": 40,
+      "answer_agreement_cells": 172,
+      "unambiguous_agreement_cells": 137,
+      "invalid_or_missing_cells": 0,
+      "ambiguous_cells": 69,
+      "per_question": {
+        "speech_act": {
+          "total": 40,
+          "answer_agreement": 29,
+          "unambiguous_agreement": 28,
+          "invalid_or_missing": 0,
+          "ambiguous": 3,
+          "confusion": [
+            {
+              "reference": "亲历背书",
+              "model": "亲历背书",
+              "count": 19
+            },
+            {
+              "reference": "亲历背书",
+              "model": "旁观推荐",
+              "count": 1
+            },
+            {
+              "reference": "回复答疑",
+              "model": "回复答疑",
+              "count": 2
+            },
+            {
+              "reference": "回复答疑",
+              "model": "旁观推荐",
+              "count": 3
+            },
+            {
+              "reference": "回复答疑",
+              "model": "补充经验",
+              "count": 1
+            },
+            {
+              "reference": "提问",
+              "model": "提问",
+              "count": 1
+            },
+            {
+              "reference": "旁观推荐",
+              "model": "亲历背书",
+              "count": 1
+            },
+            {
+              "reference": "旁观推荐",
+              "model": "旁观推荐",
+              "count": 7
+            },
+            {
+              "reference": "补充经验",
+              "model": "旁观推荐",
+              "count": 1
+            },
+            {
+              "reference": "说不清",
+              "model": "补充经验",
+              "count": 3
+            },
+            {
+              "reference": "说不清",
+              "model": "质疑",
+              "count": 1
+            }
+          ]
+        },
+        "names_brand": {
+          "total": 40,
+          "answer_agreement": 32,
+          "unambiguous_agreement": 30,
+          "invalid_or_missing": 0,
+          "ambiguous": 3,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 13
+            },
+            {
+              "reference": "否",
+              "model": "是",
+              "count": 2
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 6
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 19
+            }
+          ]
+        },
+        "echoes_post": {
+          "total": 40,
+          "answer_agreement": 26,
+          "unambiguous_agreement": 19,
+          "invalid_or_missing": 0,
+          "ambiguous": 13,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 1
+            },
+            {
+              "reference": "否",
+              "model": "是",
+              "count": 1
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 13
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 25
+            }
+          ]
+        },
+        "detail_level": {
+          "total": 40,
+          "answer_agreement": 22,
+          "unambiguous_agreement": 16,
+          "invalid_or_missing": 0,
+          "ambiguous": 9,
+          "confusion": [
+            {
+              "reference": "具体",
+              "model": "具体",
+              "count": 15
+            },
+            {
+              "reference": "具体",
+              "model": "无",
+              "count": 1
+            },
+            {
+              "reference": "具体",
+              "model": "模糊",
+              "count": 2
+            },
+            {
+              "reference": "无",
+              "model": "具体",
+              "count": 1
+            },
+            {
+              "reference": "无",
+              "model": "无",
+              "count": 2
+            },
+            {
+              "reference": "模糊",
+              "model": "具体",
+              "count": 10
+            },
+            {
+              "reference": "模糊",
+              "model": "无",
+              "count": 4
+            },
+            {
+              "reference": "模糊",
+              "model": "模糊",
+              "count": 5
+            }
+          ]
+        },
+        "register": {
+          "total": 40,
+          "answer_agreement": 24,
+          "unambiguous_agreement": 20,
+          "invalid_or_missing": 0,
+          "ambiguous": 9,
+          "confusion": [
+            {
+              "reference": "文案腔",
+              "model": "文案腔",
+              "count": 2
+            },
+            {
+              "reference": "认真分享",
+              "model": "文案腔",
+              "count": 3
+            },
+            {
+              "reference": "认真分享",
+              "model": "认真分享",
+              "count": 10
+            },
+            {
+              "reference": "随手口语",
+              "model": "文案腔",
+              "count": 4
+            },
+            {
+              "reference": "随手口语",
+              "model": "认真分享",
+              "count": 9
+            },
+            {
+              "reference": "随手口语",
+              "model": "随手口语",
+              "count": 12
+            }
+          ]
+        },
+        "reader_value": {
+          "total": 40,
+          "answer_agreement": 16,
+          "unambiguous_agreement": 8,
+          "invalid_or_missing": 0,
+          "ambiguous": 19,
+          "confusion": [
+            {
+              "reference": "判断依据",
+              "model": "判断依据",
+              "count": 6
+            },
+            {
+              "reference": "判断依据",
+              "model": "只有评价",
+              "count": 2
+            },
+            {
+              "reference": "判断依据",
+              "model": "可行动信息",
+              "count": 3
+            },
+            {
+              "reference": "判断依据",
+              "model": "无",
+              "count": 2
+            },
+            {
+              "reference": "只有评价",
+              "model": "判断依据",
+              "count": 1
+            },
+            {
+              "reference": "只有评价",
+              "model": "只有评价",
+              "count": 2
+            },
+            {
+              "reference": "可行动信息",
+              "model": "判断依据",
+              "count": 13
+            },
+            {
+              "reference": "可行动信息",
+              "model": "只有评价",
+              "count": 1
+            },
+            {
+              "reference": "可行动信息",
+              "model": "可行动信息",
+              "count": 7
+            },
+            {
+              "reference": "可行动信息",
+              "model": "无",
+              "count": 1
+            },
+            {
+              "reference": "无",
+              "model": "只有评价",
+              "count": 1
+            },
+            {
+              "reference": "无",
+              "model": "无",
+              "count": 1
+            }
+          ]
+        },
+        "arranged": {
+          "total": 40,
+          "answer_agreement": 23,
+          "unambiguous_agreement": 16,
+          "invalid_or_missing": 0,
+          "ambiguous": 13,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 10
+            },
+            {
+              "reference": "否",
+              "model": "是",
+              "count": 11
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 6
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 13
+            }
+          ]
+        }
+      },
+      "source_artifact_sha256": "0b1ea91b28687c0e700d1230cece602f6ff202a1b146bb6641694038c66f1ee2",
+      "reference_source": "single_returned_reviewer",
+      "raw_probability_completeness_certified": false
+    },
+    "C4_returned40": {
+      "count": 40,
+      "cells": 280,
+      "called_cases": 40,
+      "answer_agreement_cells": 187,
+      "unambiguous_agreement_cells": 163,
+      "invalid_or_missing_cells": 0,
+      "ambiguous_cells": 55,
+      "per_question": {
+        "speech_act": {
+          "total": 40,
+          "answer_agreement": 29,
+          "unambiguous_agreement": 27,
+          "invalid_or_missing": 0,
+          "ambiguous": 4,
+          "confusion": [
+            {
+              "reference": "亲历背书",
+              "model": "亲历背书",
+              "count": 19
+            },
+            {
+              "reference": "亲历背书",
+              "model": "旁观推荐",
+              "count": 1
+            },
+            {
+              "reference": "回复答疑",
+              "model": "回复答疑",
+              "count": 2
+            },
+            {
+              "reference": "回复答疑",
+              "model": "旁观推荐",
+              "count": 3
+            },
+            {
+              "reference": "回复答疑",
+              "model": "补充经验",
+              "count": 1
+            },
+            {
+              "reference": "提问",
+              "model": "提问",
+              "count": 1
+            },
+            {
+              "reference": "旁观推荐",
+              "model": "亲历背书",
+              "count": 1
+            },
+            {
+              "reference": "旁观推荐",
+              "model": "旁观推荐",
+              "count": 7
+            },
+            {
+              "reference": "补充经验",
+              "model": "旁观推荐",
+              "count": 1
+            },
+            {
+              "reference": "说不清",
+              "model": "回复答疑",
+              "count": 2
+            },
+            {
+              "reference": "说不清",
+              "model": "补充经验",
+              "count": 2
+            }
+          ]
+        },
+        "names_brand": {
+          "total": 40,
+          "answer_agreement": 33,
+          "unambiguous_agreement": 32,
+          "invalid_or_missing": 0,
+          "ambiguous": 2,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 13
+            },
+            {
+              "reference": "否",
+              "model": "是",
+              "count": 2
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 5
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 20
+            }
+          ]
+        },
+        "echoes_post": {
+          "total": 40,
+          "answer_agreement": 34,
+          "unambiguous_agreement": 27,
+          "invalid_or_missing": 0,
+          "ambiguous": 10,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 1
+            },
+            {
+              "reference": "否",
+              "model": "是",
+              "count": 1
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 5
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 33
+            }
+          ]
+        },
+        "detail_level": {
+          "total": 40,
+          "answer_agreement": 20,
+          "unambiguous_agreement": 18,
+          "invalid_or_missing": 0,
+          "ambiguous": 10,
+          "confusion": [
+            {
+              "reference": "具体",
+              "model": "具体",
+              "count": 12
+            },
+            {
+              "reference": "具体",
+              "model": "无",
+              "count": 2
+            },
+            {
+              "reference": "具体",
+              "model": "模糊",
+              "count": 4
+            },
+            {
+              "reference": "无",
+              "model": "具体",
+              "count": 1
+            },
+            {
+              "reference": "无",
+              "model": "无",
+              "count": 2
+            },
+            {
+              "reference": "模糊",
+              "model": "具体",
+              "count": 10
+            },
+            {
+              "reference": "模糊",
+              "model": "无",
+              "count": 3
+            },
+            {
+              "reference": "模糊",
+              "model": "模糊",
+              "count": 6
+            }
+          ]
+        },
+        "register": {
+          "total": 40,
+          "answer_agreement": 24,
+          "unambiguous_agreement": 22,
+          "invalid_or_missing": 0,
+          "ambiguous": 2,
+          "confusion": [
+            {
+              "reference": "文案腔",
+              "model": "文案腔",
+              "count": 1
+            },
+            {
+              "reference": "文案腔",
+              "model": "认真分享",
+              "count": 1
+            },
+            {
+              "reference": "认真分享",
+              "model": "文案腔",
+              "count": 3
+            },
+            {
+              "reference": "认真分享",
+              "model": "认真分享",
+              "count": 10
+            },
+            {
+              "reference": "随手口语",
+              "model": "文案腔",
+              "count": 3
+            },
+            {
+              "reference": "随手口语",
+              "model": "认真分享",
+              "count": 9
+            },
+            {
+              "reference": "随手口语",
+              "model": "随手口语",
+              "count": 13
+            }
+          ]
+        },
+        "reader_value": {
+          "total": 40,
+          "answer_agreement": 26,
+          "unambiguous_agreement": 21,
+          "invalid_or_missing": 0,
+          "ambiguous": 11,
+          "confusion": [
+            {
+              "reference": "判断依据",
+              "model": "判断依据",
+              "count": 6
+            },
+            {
+              "reference": "判断依据",
+              "model": "可行动信息",
+              "count": 3
+            },
+            {
+              "reference": "判断依据",
+              "model": "无",
+              "count": 4
+            },
+            {
+              "reference": "只有评价",
+              "model": "判断依据",
+              "count": 1
+            },
+            {
+              "reference": "只有评价",
+              "model": "可行动信息",
+              "count": 2
+            },
+            {
+              "reference": "可行动信息",
+              "model": "判断依据",
+              "count": 3
+            },
+            {
+              "reference": "可行动信息",
+              "model": "只有评价",
+              "count": 1
+            },
+            {
+              "reference": "可行动信息",
+              "model": "可行动信息",
+              "count": 18
+            },
+            {
+              "reference": "无",
+              "model": "无",
+              "count": 2
+            }
+          ]
+        },
+        "arranged": {
+          "total": 40,
+          "answer_agreement": 21,
+          "unambiguous_agreement": 16,
+          "invalid_or_missing": 0,
+          "ambiguous": 16,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 10
+            },
+            {
+              "reference": "否",
+              "model": "是",
+              "count": 11
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 8
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 11
+            }
+          ]
+        }
+      },
+      "source_artifact_sha256": "af14d6de7a46d2041f62e3dbafe05e6abe2ab59babdf65772ba0767bc5c45830",
+      "reference_source": "single_returned_reviewer",
+      "raw_probability_completeness_certified": false,
+      "endorsement_boundary": {
+        "reference_positive": 28,
+        "reference_negative": 12,
+        "false_negative": 0,
+        "false_positive": 4,
+        "unambiguous_false_negative": 0,
+        "unambiguous_false_positive": 4
+      }
+    },
+    "C4_new40_AI": {
+      "count": 40,
+      "cells": 280,
+      "called_cases": 40,
+      "answer_agreement_cells": 225,
+      "unambiguous_agreement_cells": 193,
+      "invalid_or_missing_cells": 0,
+      "ambiguous_cells": 57,
+      "per_question": {
+        "speech_act": {
+          "total": 40,
+          "answer_agreement": 36,
+          "unambiguous_agreement": 35,
+          "invalid_or_missing": 0,
+          "ambiguous": 2,
+          "confusion": [
+            {
+              "reference": "亲历背书",
+              "model": "亲历背书",
+              "count": 15
+            },
+            {
+              "reference": "回复答疑",
+              "model": "回复答疑",
+              "count": 1
+            },
+            {
+              "reference": "提问",
+              "model": "提问",
+              "count": 2
+            },
+            {
+              "reference": "旁观推荐",
+              "model": "亲历背书",
+              "count": 2
+            },
+            {
+              "reference": "旁观推荐",
+              "model": "旁观推荐",
+              "count": 14
+            },
+            {
+              "reference": "旁观推荐",
+              "model": "补充经验",
+              "count": 1
+            },
+            {
+              "reference": "补充经验",
+              "model": "旁观推荐",
+              "count": 1
+            },
+            {
+              "reference": "补充经验",
+              "model": "补充经验",
+              "count": 3
+            },
+            {
+              "reference": "质疑",
+              "model": "质疑",
+              "count": 1
+            }
+          ]
+        },
+        "names_brand": {
+          "total": 40,
+          "answer_agreement": 39,
+          "unambiguous_agreement": 37,
+          "invalid_or_missing": 0,
+          "ambiguous": 3,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 15
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 1
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 24
+            }
+          ]
+        },
+        "echoes_post": {
+          "total": 40,
+          "answer_agreement": 32,
+          "unambiguous_agreement": 25,
+          "invalid_or_missing": 0,
+          "ambiguous": 12,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 1
+            },
+            {
+              "reference": "否",
+              "model": "是",
+              "count": 5
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 3
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 31
+            }
+          ]
+        },
+        "detail_level": {
+          "total": 40,
+          "answer_agreement": 32,
+          "unambiguous_agreement": 23,
+          "invalid_or_missing": 0,
+          "ambiguous": 15,
+          "confusion": [
+            {
+              "reference": "具体",
+              "model": "具体",
+              "count": 14
+            },
+            {
+              "reference": "具体",
+              "model": "模糊",
+              "count": 5
+            },
+            {
+              "reference": "无",
+              "model": "无",
+              "count": 3
+            },
+            {
+              "reference": "模糊",
+              "model": "具体",
+              "count": 1
+            },
+            {
+              "reference": "模糊",
+              "model": "无",
+              "count": 2
+            },
+            {
+              "reference": "模糊",
+              "model": "模糊",
+              "count": 15
+            }
+          ]
+        },
+        "register": {
+          "total": 40,
+          "answer_agreement": 29,
+          "unambiguous_agreement": 26,
+          "invalid_or_missing": 0,
+          "ambiguous": 6,
+          "confusion": [
+            {
+              "reference": "文案腔",
+              "model": "文案腔",
+              "count": 5
+            },
+            {
+              "reference": "文案腔",
+              "model": "认真分享",
+              "count": 2
+            },
+            {
+              "reference": "文案腔",
+              "model": "随手口语",
+              "count": 1
+            },
+            {
+              "reference": "认真分享",
+              "model": "认真分享",
+              "count": 14
+            },
+            {
+              "reference": "随手口语",
+              "model": "文案腔",
+              "count": 4
+            },
+            {
+              "reference": "随手口语",
+              "model": "认真分享",
+              "count": 4
+            },
+            {
+              "reference": "随手口语",
+              "model": "随手口语",
+              "count": 10
+            }
+          ]
+        },
+        "reader_value": {
+          "total": 40,
+          "answer_agreement": 30,
+          "unambiguous_agreement": 27,
+          "invalid_or_missing": 0,
+          "ambiguous": 5,
+          "confusion": [
+            {
+              "reference": "判断依据",
+              "model": "判断依据",
+              "count": 4
+            },
+            {
+              "reference": "只有评价",
+              "model": "只有评价",
+              "count": 3
+            },
+            {
+              "reference": "可行动信息",
+              "model": "判断依据",
+              "count": 5
+            },
+            {
+              "reference": "可行动信息",
+              "model": "只有评价",
+              "count": 2
+            },
+            {
+              "reference": "可行动信息",
+              "model": "可行动信息",
+              "count": 20
+            },
+            {
+              "reference": "可行动信息",
+              "model": "无",
+              "count": 1
+            },
+            {
+              "reference": "无",
+              "model": "只有评价",
+              "count": 2
+            },
+            {
+              "reference": "无",
+              "model": "无",
+              "count": 3
+            }
+          ]
+        },
+        "arranged": {
+          "total": 40,
+          "answer_agreement": 27,
+          "unambiguous_agreement": 20,
+          "invalid_or_missing": 0,
+          "ambiguous": 14,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 14
+            },
+            {
+              "reference": "否",
+              "model": "是",
+              "count": 9
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 4
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 13
+            }
+          ]
+        }
+      },
+      "source_artifact_sha256": "b2dbc744f56397c9236c509161ecb6d991381e74640557276aba0a750684097b",
+      "reference_source": "AI_authored_before_Jev_outputs",
+      "raw_probability_completeness_certified": false,
+      "endorsement_boundary": {
+        "reference_positive": 32,
+        "reference_negative": 8,
+        "false_negative": 1,
+        "false_positive": 1,
+        "unambiguous_false_negative": 1,
+        "unambiguous_false_positive": 1
+      }
+    },
+    "C4_synthetic20": {
+      "count": 20,
+      "cells": 140,
+      "called_cases": 20,
+      "answer_agreement_cells": 131,
+      "unambiguous_agreement_cells": 122,
+      "invalid_or_missing_cells": 0,
+      "ambiguous_cells": 11,
+      "per_question": {
+        "speech_act": {
+          "total": 20,
+          "answer_agreement": 20,
+          "unambiguous_agreement": 19,
+          "invalid_or_missing": 0,
+          "ambiguous": 1,
+          "confusion": [
+            {
+              "reference": "亲历背书",
+              "model": "亲历背书",
+              "count": 1
+            },
+            {
+              "reference": "回复答疑",
+              "model": "回复答疑",
+              "count": 8
+            },
+            {
+              "reference": "提问",
+              "model": "提问",
+              "count": 2
+            },
+            {
+              "reference": "旁观推荐",
+              "model": "旁观推荐",
+              "count": 4
+            },
+            {
+              "reference": "补充经验",
+              "model": "补充经验",
+              "count": 3
+            },
+            {
+              "reference": "质疑",
+              "model": "质疑",
+              "count": 1
+            },
+            {
+              "reference": "闲聊表情",
+              "model": "闲聊表情",
+              "count": 1
+            }
+          ]
+        },
+        "names_brand": {
+          "total": 20,
+          "answer_agreement": 19,
+          "unambiguous_agreement": 19,
+          "invalid_or_missing": 0,
+          "ambiguous": 0,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 14
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 1
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 5
+            }
+          ]
+        },
+        "echoes_post": {
+          "total": 20,
+          "answer_agreement": 18,
+          "unambiguous_agreement": 16,
+          "invalid_or_missing": 0,
+          "ambiguous": 2,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 6
+            },
+            {
+              "reference": "是",
+              "model": "否",
+              "count": 2
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 12
+            }
+          ]
+        },
+        "detail_level": {
+          "total": 20,
+          "answer_agreement": 18,
+          "unambiguous_agreement": 17,
+          "invalid_or_missing": 0,
+          "ambiguous": 1,
+          "confusion": [
+            {
+              "reference": "具体",
+              "model": "具体",
+              "count": 7
+            },
+            {
+              "reference": "无",
+              "model": "无",
+              "count": 7
+            },
+            {
+              "reference": "模糊",
+              "model": "具体",
+              "count": 1
+            },
+            {
+              "reference": "模糊",
+              "model": "无",
+              "count": 1
+            },
+            {
+              "reference": "模糊",
+              "model": "模糊",
+              "count": 4
+            }
+          ]
+        },
+        "register": {
+          "total": 20,
+          "answer_agreement": 19,
+          "unambiguous_agreement": 18,
+          "invalid_or_missing": 0,
+          "ambiguous": 1,
+          "confusion": [
+            {
+              "reference": "文案腔",
+              "model": "文案腔",
+              "count": 2
+            },
+            {
+              "reference": "认真分享",
+              "model": "认真分享",
+              "count": 5
+            },
+            {
+              "reference": "随手口语",
+              "model": "文案腔",
+              "count": 1
+            },
+            {
+              "reference": "随手口语",
+              "model": "随手口语",
+              "count": 12
+            }
+          ]
+        },
+        "reader_value": {
+          "total": 20,
+          "answer_agreement": 17,
+          "unambiguous_agreement": 16,
+          "invalid_or_missing": 0,
+          "ambiguous": 3,
+          "confusion": [
+            {
+              "reference": "判断依据",
+              "model": "判断依据",
+              "count": 2
+            },
+            {
+              "reference": "只有评价",
+              "model": "只有评价",
+              "count": 1
+            },
+            {
+              "reference": "可行动信息",
+              "model": "只有评价",
+              "count": 1
+            },
+            {
+              "reference": "可行动信息",
+              "model": "可行动信息",
+              "count": 8
+            },
+            {
+              "reference": "可行动信息",
+              "model": "无",
+              "count": 1
+            },
+            {
+              "reference": "无",
+              "model": "判断依据",
+              "count": 1
+            },
+            {
+              "reference": "无",
+              "model": "无",
+              "count": 6
+            }
+          ]
+        },
+        "arranged": {
+          "total": 20,
+          "answer_agreement": 20,
+          "unambiguous_agreement": 17,
+          "invalid_or_missing": 0,
+          "ambiguous": 3,
+          "confusion": [
+            {
+              "reference": "否",
+              "model": "否",
+              "count": 17
+            },
+            {
+              "reference": "是",
+              "model": "是",
+              "count": 3
+            }
+          ]
+        }
+      },
+      "source_artifact_sha256": "5f25abf11d6ffb57f3d007e8451282fe18aef3b2974cc85b536a62a6012718dc",
+      "reference_source": "AI_authored_before_Jev_outputs",
+      "raw_probability_completeness_certified": false,
+      "endorsement_boundary": {
+        "reference_positive": 5,
+        "reference_negative": 15,
+        "false_negative": 0,
+        "false_positive": 0,
+        "unambiguous_false_negative": 0,
+        "unambiguous_false_positive": 0
+      }
+    }
+  },
+  "merged_work": [
+    {
+      "repo": "JevforCoentent",
+      "number": 15,
+      "branch": "main",
+      "sha": "ef8969deec8a4659484b082dc76636b3f8617807",
+      "merged": true,
+      "message": "Pull Request successfully merged"
+    },
+    {
+      "repo": "truth-vault",
+      "number": 186,
+      "branch": "main",
+      "sha": "539dc34d0ec05d2d54f650a85574f92390678117",
+      "merged": true,
+      "message": "Pull Request successfully merged"
+    },
+    {
+      "repo": "autowriter",
+      "number": 98,
+      "branch": "claude/xhs-content-workstation-BSEuH",
+      "sha": "90fd242c7eb397370d0d99c3fbd157bd696c54e9",
+      "merged": true,
+      "message": "Pull Request successfully merged"
+    }
+  ],
+  "main_branch_CI": [
+    {
+      "repo": "TangVarie/JevforCoentent",
+      "run": 38736210527,
+      "conclusion": "success"
+    },
+    {
+      "repo": "TangVarie/truth-vault",
+      "run": 38736234233,
+      "conclusion": "success"
+    },
+    {
+      "repo": "TangVarie/autowriter",
+      "run": 38736258830,
+      "conclusion": "success"
+    }
+  ],
+  "complete_source_archive": "assets/comment-line-handoff-20261015.zip",
+  "archive_publication_approved_after_visibility_disclosure": true
+}
