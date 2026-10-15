@@ -1,0 +1,24 @@
+{
+  "publication_date": "2026-10-15",
+  "repository_visibility_at_approval": "public",
+  "owner_explicit_approval": "允许完整Excel和交接包也公开上传到现有仓库",
+  "scope": "The exact complete Excel and handoff ZIP linked in this handoff, plus readable case comparisons from those same materials; no credentials and no automatic approval of future data publication.",
+  "assets": [
+    {
+      "path": "comment-line-closeout-results.xlsx",
+      "original_filename": "评论线收尾_中文结果与交接.xlsx",
+      "bytes": 66315,
+      "sha256": "493b89fdfd8c631d1916dd7e31bfe242ad0ae3102231b875cb2624e6f79c59e9",
+      "includes_real_source_material": true
+    },
+    {
+      "path": "comment-line-handoff-20261015.zip",
+      "original_filename": "评论线收尾_私有交接包_20261015.zip",
+      "bytes": 1612552,
+      "sha256": "e0ce0f40a46b3dee8c5b831b666238f2a2b3a3984d7619b70d484735d6c8ac7d",
+      "includes_real_source_material": true
+    }
+  ],
+  "private_bundle_files": 139,
+  "source_metadata_note": "Stored roles and is_displayed values do not independently verify actual authorship or current platform visibility."
+}
