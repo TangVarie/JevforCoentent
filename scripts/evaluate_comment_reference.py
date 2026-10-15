@@ -120,9 +120,10 @@ def candidate_for(path: Path, baseline):
 
 class ProbabilityCheckedClient:
     """Validate all returned probabilities before interpret() discards the full choice map."""
-    def __init__(self, client):
+    def __init__(self, client, *, require_all_choice_labels=False):
         self.client = client
         self.mock = bool(getattr(client, "mock", False))
+        self.require_all_choice_labels = require_all_choice_labels
 
     def call(self, body):
         response = self.client.call(body)
@@ -138,6 +139,8 @@ class ProbabilityCheckedClient:
                 probs = answer.get("probabilities")
                 valid = isinstance(probs, dict) and bool(probs) and all(
                     label in question["criteria"] and probability(p) for label, p in probs.items())
+                if valid and self.require_all_choice_labels:
+                    valid = set(probs) == set(question["criteria"])
             elif valid:
                 valid = probability(answer.get("noul"))
             if not valid:

@@ -1,0 +1,391 @@
+{
+  "sample_version": "candidate4-synthetic-spec-v1",
+  "notes": [
+    {
+      "comment_id": "spec-01",
+      "note_id": "synthetic-post-01",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】想买台灯，想知道宁光LX-12的参数和价格。",
+      "comment_text": "宁光LX-12是12W，三档亮度，129元。"
+    },
+    {
+      "comment_id": "spec-02",
+      "note_id": "synthetic-post-02",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】官网找不到换新入口，要怎么申请？",
+      "comment_text": "先搜索型号LX-12，进入售后页，上传订单号申请换新。"
+    },
+    {
+      "comment_id": "spec-03",
+      "note_id": "synthetic-post-03",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】这盏灯的价格没写，有人知道吗？",
+      "comment_text": "请问多少钱一盏？"
+    },
+    {
+      "comment_id": "spec-04",
+      "note_id": "synthetic-post-04",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】我家旧台灯开了十分钟就闪。",
+      "comment_text": "我买了宁光，用了三个月一直没闪，晚上看书舒服多了。"
+    },
+    {
+      "comment_id": "spec-05",
+      "note_id": "synthetic-post-05",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】我家旧台灯开了十分钟就闪。",
+      "comment_text": "直接买宁光吧，亮度稳，值得入。"
+    },
+    {
+      "comment_id": "spec-06",
+      "note_id": "synthetic-post-06",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】刚才有人问到货后怎样查型号。",
+      "comment_text": "型号印在底座背面的白色贴纸上。"
+    },
+    {
+      "comment_id": "spec-07",
+      "note_id": "synthetic-post-07",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】有人比较过不同台灯吗？",
+      "comment_text": "太好了，真的太满意了！"
+    },
+    {
+      "comment_id": "spec-08",
+      "note_id": "synthetic-post-08",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】今天终于把桌面收拾好了。",
+      "comment_text": "哈哈哈😂"
+    },
+    {
+      "comment_id": "spec-09",
+      "note_id": "synthetic-post-09",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】店家要求先交钱，合同以后再给。",
+      "comment_text": "没看到合同先别付款，小心被骗。"
+    },
+    {
+      "comment_id": "spec-10",
+      "note_id": "synthetic-post-10",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】台灯的夹子会不会占桌面？",
+      "comment_text": "我之前桌面太窄，只能把本子叠起来，后来把杂物移到抽屉才放得开。"
+    },
+    {
+      "comment_id": "spec-11",
+      "note_id": "synthetic-post-11",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】分享一个新出的台灯。",
+      "comment_text": "我得等发工资再考虑，最近预算紧。"
+    },
+    {
+      "comment_id": "spec-12",
+      "note_id": "synthetic-post-12",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】包装上这个规格字太小，有人看清了吗？",
+      "comment_text": "包装写的是5mg，不是50mg。"
+    },
+    {
+      "comment_id": "spec-13",
+      "note_id": "synthetic-post-13",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】店里只写了新款台灯，没有列购买入口。",
+      "comment_text": "青禾商城的宁光官方店可以买到。"
+    },
+    {
+      "comment_id": "spec-14",
+      "note_id": "synthetic-post-14",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】这个产品用了什么技术？",
+      "comment_text": "采用ABF机制。"
+    },
+    {
+      "comment_id": "spec-15",
+      "note_id": "synthetic-post-15",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】我以前用的台灯有噪声，想听听大家用后的实际感受。",
+      "comment_text": "我换了一盏无牌灯，先放在卧室嫌太亮，后来移到客厅才合适。"
+    },
+    {
+      "comment_id": "spec-16",
+      "note_id": "synthetic-post-16",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】大家睡前都会关闭台灯吗？",
+      "comment_text": "宁光省电又护眼，三重科技守护，立刻下单开启品质生活！"
+    },
+    {
+      "comment_id": "spec-17",
+      "note_id": "synthetic-post-17",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】灯的规格是20W，大家觉得如何？",
+      "comment_text": "它到底多少瓦？"
+    },
+    {
+      "comment_id": "spec-18",
+      "note_id": "synthetic-post-18",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】今天的主题是晚餐，晒晒大家做的饭。",
+      "comment_text": "宁光台灯现在129元，三档调光，快来抢购！"
+    },
+    {
+      "comment_id": "spec-19",
+      "note_id": "synthetic-post-19",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】台灯支架折了，想知道更换流程。",
+      "comment_text": "先拍断裂处照片，再在订单页点申请售后，选择更换支架。"
+    },
+    {
+      "comment_id": "spec-20",
+      "note_id": "synthetic-post-20",
+      "project_id": "synthetic",
+      "category": "合成规格用例",
+      "comment_role": "素人",
+      "title": "合成帖子",
+      "raw_content": "【正文】布地奈德是品牌还是通用药名？",
+      "comment_text": "布地奈德是通用药名，不是品牌名。"
+    }
+  ],
+  "reference_labels": null,
+  "model_calls": 0,
+  "used_for_prompt_design": false,
+  "expected_labels": [
+    {
+      "speech_act": "回复答疑",
+      "names_brand": "是",
+      "echoes_post": "是",
+      "detail_level": "具体",
+      "register": "随手口语",
+      "reader_value": "可行动信息",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "回复答疑",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "具体",
+      "register": "认真分享",
+      "reader_value": "可行动信息",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "提问",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "无",
+      "register": "随手口语",
+      "reader_value": "无",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "亲历背书",
+      "names_brand": "是",
+      "echoes_post": "是",
+      "detail_level": "具体",
+      "register": "认真分享",
+      "reader_value": "可行动信息",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "旁观推荐",
+      "names_brand": "是",
+      "echoes_post": "否",
+      "detail_level": "模糊",
+      "register": "随手口语",
+      "reader_value": "可行动信息",
+      "arranged": "是"
+    },
+    {
+      "speech_act": "回复答疑",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "具体",
+      "register": "随手口语",
+      "reader_value": "可行动信息",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "旁观推荐",
+      "names_brand": "否",
+      "echoes_post": "否",
+      "detail_level": "无",
+      "register": "随手口语",
+      "reader_value": "只有评价",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "闲聊表情",
+      "names_brand": "否",
+      "echoes_post": "否",
+      "detail_level": "无",
+      "register": "随手口语",
+      "reader_value": "无",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "质疑",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "模糊",
+      "register": "随手口语",
+      "reader_value": "无",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "补充经验",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "模糊",
+      "register": "认真分享",
+      "reader_value": "判断依据",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "补充经验",
+      "names_brand": "否",
+      "echoes_post": "否",
+      "detail_level": "模糊",
+      "register": "随手口语",
+      "reader_value": "无",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "回复答疑",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "具体",
+      "register": "随手口语",
+      "reader_value": "可行动信息",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "回复答疑",
+      "names_brand": "是",
+      "echoes_post": "是",
+      "detail_level": "模糊",
+      "register": "随手口语",
+      "reader_value": "可行动信息",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "回复答疑",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "无",
+      "register": "随手口语",
+      "reader_value": "无",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "补充经验",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "模糊",
+      "register": "认真分享",
+      "reader_value": "判断依据",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "旁观推荐",
+      "names_brand": "是",
+      "echoes_post": "否",
+      "detail_level": "无",
+      "register": "文案腔",
+      "reader_value": "可行动信息",
+      "arranged": "是"
+    },
+    {
+      "speech_act": "提问",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "无",
+      "register": "随手口语",
+      "reader_value": "无",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "旁观推荐",
+      "names_brand": "是",
+      "echoes_post": "否",
+      "detail_level": "具体",
+      "register": "文案腔",
+      "reader_value": "可行动信息",
+      "arranged": "是"
+    },
+    {
+      "speech_act": "回复答疑",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "具体",
+      "register": "认真分享",
+      "reader_value": "可行动信息",
+      "arranged": "否"
+    },
+    {
+      "speech_act": "回复答疑",
+      "names_brand": "否",
+      "echoes_post": "是",
+      "detail_level": "无",
+      "register": "随手口语",
+      "reader_value": "无",
+      "arranged": "否"
+    }
+  ],
+  "source": "AI-authored synthetic specification cases; not empirical accuracy"
+}
