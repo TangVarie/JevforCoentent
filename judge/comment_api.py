@@ -12,9 +12,10 @@ from .jev_client import JevError
 
 # 2026-10-16 owner 验收 D-112（truth-vault DECISIONS）：写手评论工具用 C4 题库原样（digest a0c04acf…）。
 # 通过与否只看四道门槛题（speech_act / names_brand / echoes_post / detail_level）和背书复核；
-# register / reader_value / arranged 只给提示。运营侧 comment_intent 没有验收过，同样只提示。
+# register / reader_value / arranged 只给提示。运营侧整套（comment_intent、is_scripted）没有验收过，同样只提示
+# （测试钉住：运营侧题库的每道题都在这里，新加的运营题不会悄悄变成门槛）。
 READER_BANK = "comment_reader_v0.6"
-ADVISORY = frozenset({"register", "reader_value", "arranged", "comment_intent"})
+ADVISORY = frozenset({"register", "reader_value", "arranged", "comment_intent", "is_scripted"})
 
 
 class InputModel(BaseModel):

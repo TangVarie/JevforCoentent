@@ -244,9 +244,13 @@ def comment_repair_plan(cj: CommentJudgement, banks: dict, fill: Optional[dict] 
         ptxt = f"（{p}）" if p is not None else ""
         plan.append({"qid": qid, "now": now, "want": want, "p": p, "definition": defn,
                      "instruction": f"「{fill_text(q.ask, merged)}」现在判「{now}」{ptxt}，要改成「{want}」" + (f"：{defn}" if defn else "")})
-    arranged_is_hint = "arranged" in cj.advisory
-    if "像安排的" in cj.flags and not cj.hard_fails and hints == arranged_is_hint:
-        plan.append({"qid": "arranged", "now": "是", "want": "否", "p": cj.items.get("arranged", {}).get("p"), "definition": "",
+    arranged_p = cj.items.get("arranged", {}).get("p")
+    if "像安排的" in cj.flags and hints and "arranged" in cj.advisory:
+        # 只提示的口径：跟门槛题过没过无关，判了「像安排的」就提示（不改也不算没过）
+        plan.append({"qid": "arranged", "now": "是", "want": "否", "p": arranged_p, "definition": "",
+                     "instruction": "总判「像安排的」：多半是句子太完整、太顺；可以缩短、留一个口语痕迹。"})
+    elif "像安排的" in cj.flags and not hints and "arranged" not in cj.advisory and not cj.hard_fails:
+        plan.append({"qid": "arranged", "now": "是", "want": "否", "p": arranged_p, "definition": "",
                      "instruction": "七题都过了但总判仍「像安排的」：多半是句子太完整、太顺；缩短、留一个口语痕迹。"})
     return plan
 

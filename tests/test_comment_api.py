@@ -90,6 +90,32 @@ def test_advisory_questions_only_hint(wired, qid, value):
     assert qid in data["advisory"] and not data["hard_fails"]
 
 
+def test_arranged_hint_is_kept_alongside_gate_failures(wired):
+    client, jev = wired
+    jev.overrides.update(names_brand=True, arranged=True)
+    data = single(client).json()
+    assert data["passed"] is False and [p["qid"] for p in data["plan"]] == ["names_brand"]
+    assert [h["qid"] for h in data["hints"]] == ["arranged"]
+
+
+@pytest.mark.parametrize("how", ["ambiguous", "missing"])
+def test_unaccepted_ops_questions_never_gate(wired, how):
+    """运营侧题库整套没验收过：is_scripted 标歧义或漏答都不送复核、不判不过（D-112 口径）。"""
+    client, jev = wired
+    if how == "ambiguous":
+        jev.ambiguous = {"is_scripted"}
+    else:
+        jev.omit.add("is_scripted")
+    data = single(client, slot={**SLOT, "intent": "补充信息"}).json()
+    assert data["passed"] is True and data["needs_review"] is False, data
+
+
+def test_every_ops_question_is_advisory():
+    from judge.comment_api import ADVISORY
+    ops = A.get_bank("comment_ops_v0.2")
+    assert {q.id for q in ops.questions} <= ADVISORY
+
+
 def test_reader_bank_is_the_accepted_c4(wired):
     client, jev = wired
     single(client)
