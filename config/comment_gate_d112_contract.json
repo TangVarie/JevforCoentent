@@ -1,0 +1,257 @@
+{
+  "decision": "D-112",
+  "contract_version": "comment-gate-d112-contract-v1",
+  "registered_utc": "2026-10-15T13:22:25Z",
+  "note": "Pre-registered before sampling and before any model call (truth-vault DECISIONS.md D-112). Sample text is not stored here; the workflow re-reads it from production and must reproduce sample_sha256 exactly.",
+  "candidate_version": "cb-v0.6-candidate4",
+  "bank_sha256": "a0c04acf37cb05005ed2f3c01ae3b0410221a392da39b665b25879a678cd534d",
+  "model": "jev-1.13.0",
+  "sample": {
+    "sha256": "f7b7ffc5e82f7732c17860c055d98e9409a3d87c376d8ec92d144c4dfb73d6f1",
+    "count": 40,
+    "seed": "J03-gate-new40-v1",
+    "raw_content_prefix_chars": 1000,
+    "quotas": {
+      "OTC药": 14,
+      "保健品": 14,
+      "处方药": 12
+    },
+    "ids": [
+      "NRT_phase2_recuYXUhTuPP0p_c1",
+      "NRT_phase3_recv0rz7EHeapg_c1",
+      "NRT_phase2_recuXkwGJK2Qvv_c1",
+      "NRT_phase3_recv18huoy8ovf_c1",
+      "NRT_phase2_recuXYBYBcNOOp_c1",
+      "NRT_phase3_recv0whF4cwFy4_c1",
+      "LNKT_phase1_recvsUIA0MInHr_hefb060293361_1",
+      "LNKT_phase1_recvu2v3C8PWPh_h44bdee024342_1",
+      "NRT_phase3_recv1vrL72s3K7_c1",
+      "LNKT_phase1_recvs34tDOAJNo_h52c488e05bdf_1",
+      "NRT_phase3_recv18huoyoJua_c1",
+      "LNKT_phase1_recvtbKH2RwDcz_h8fa34aa36fcd_1",
+      "LNKT_phase1_recvs34tDORhG5_h847b2d91ce8d_1",
+      "NRT_phase2_recuYXUhTu8tjU_c1",
+      "NUC_phase1_recv3K4xf0ALFN_c1",
+      "SPX_phase1_recvqVAd4GWfST_hb031bce646c5_1",
+      "NUC_phase1_recv2xd6lzMOEj_c1",
+      "NUC_phase1_recv3UT9F1yI58_c1",
+      "NUC_phase1_recv46L7dYe6Ko_c1",
+      "NUC_phase1_recv1nDNcce4cC_c1",
+      "NUC_phase1_recv3WcbrVtjk1_c1",
+      "NUC_phase1_recv2YL0GQg2Tz_c1",
+      "NUC_phase1_recv4M1Vyak2lZ_c1",
+      "NUC_phase1_recv47G0uFLfgS_c1",
+      "NUC_phase1_recv4ZeTmz1MP4_c1",
+      "NUC_phase1_recv3G0QHWEPNT_c1",
+      "NUC_phase1_recv3RoQTa17im_c1",
+      "NUC_phase1_recv59erAa3i0b_c1",
+      "OKMAN_phase1_recvmpA0N0Un6M_c1",
+      "OKMAN_phase1_recvmpA0N0SjFH_h53d06a6ac147_1",
+      "OKMAN_phase1_recvmpA0N05o4A_h4317d06a0126_1",
+      "OKMAN_phase1_recvoyQzJgouvM_c2",
+      "OKMAN_phase1_recvnBzfdUJKQP_h8a29aede9bfe_1",
+      "OKMAN_phase1_recvnBzfdU4nzS_hac2074433509_1",
+      "OKMAN_phase1_recvnUQdR5IVrC_h8dead82ad91c_1",
+      "OKMAN_phase1_recvqtis0iFQJ9_h2c70891c9c32_1",
+      "OKMAN_phase1_recvrd83rmz4FY_c7",
+      "OKMAN_phase1_recvsE8E0MPxfg_c1",
+      "OKMAN_phase1_recvqtis0izcn1_hd09f614929bb_1",
+      "OKMAN_phase1_recvoyQzJgWhCn_h66ba7dcb7e6d_1"
+    ],
+    "md5": {
+      "NRT_phase2_recuYXUhTuPP0p_c1": [
+        "4ae801a974b3bfb7db3d8f6ce1b157e1",
+        "7465aee2228ab771de90822bf859cdb9"
+      ],
+      "NRT_phase3_recv0rz7EHeapg_c1": [
+        "f1a7e8c97375ce1a72525e933d7794c9",
+        "66fa443d945c58e679f468991fec877a"
+      ],
+      "NRT_phase2_recuXkwGJK2Qvv_c1": [
+        "1d84389c83434f276366ada2a1cf33a5",
+        "f5f341422052b90226b97a6b4e20f6da"
+      ],
+      "NRT_phase3_recv18huoy8ovf_c1": [
+        "9845587a34c3bac3b5c9802e219ff151",
+        "aba8f44ed45354d24ab4cc5e614b39f5"
+      ],
+      "NRT_phase2_recuXYBYBcNOOp_c1": [
+        "dd515261fca7878a1a65de16633fcefa",
+        "03b7e71ab83de9ba50de47f2d2508fd8"
+      ],
+      "NRT_phase3_recv0whF4cwFy4_c1": [
+        "654cde7dd022e43791b28b7d47be9afd",
+        "63dc0bea9a40ca7d3cbaceb1442cebbb"
+      ],
+      "LNKT_phase1_recvsUIA0MInHr_hefb060293361_1": [
+        "38935f37807430224724b2c8fbc668f8",
+        "7c37071840c6dd98a49bd69390e73c42"
+      ],
+      "LNKT_phase1_recvu2v3C8PWPh_h44bdee024342_1": [
+        "321d8353559c9e85adcf72e4ce4955bf",
+        "5bd801f3d8f511f44055823415358b4a"
+      ],
+      "NRT_phase3_recv1vrL72s3K7_c1": [
+        "072f543c08f55d0515d9fcecf075b6a9",
+        "dd9282789fef308bb278027e8b016951"
+      ],
+      "LNKT_phase1_recvs34tDOAJNo_h52c488e05bdf_1": [
+        "431f5ce05ee86fa4aafef824c799c56d",
+        "2e0b8637f71376e40f2b8382058ea113"
+      ],
+      "NRT_phase3_recv18huoyoJua_c1": [
+        "4ff3989b73ce7b44dea8b254aef0fa9e",
+        "0429bab90c8d3f9c12c397d6b5c8a46c"
+      ],
+      "LNKT_phase1_recvtbKH2RwDcz_h8fa34aa36fcd_1": [
+        "b3d3456fda9298c4a45a69ee17e8119a",
+        "538e88d1086ba9677da774314873e980"
+      ],
+      "LNKT_phase1_recvs34tDORhG5_h847b2d91ce8d_1": [
+        "b7978286e138e96ebe0897215448c3fd",
+        "bd940045d1363bcc0916d51ef63ef9e3"
+      ],
+      "NRT_phase2_recuYXUhTu8tjU_c1": [
+        "bb9de2b4e93e51b477566568442a45de",
+        "6b3f58404d4131fd8f1eb624462cec73"
+      ],
+      "NUC_phase1_recv3K4xf0ALFN_c1": [
+        "971b69e5eea1c783ac4a8c1c7facb7b3",
+        "ae1830bef9d4a426078a0c73e2193da6"
+      ],
+      "SPX_phase1_recvqVAd4GWfST_hb031bce646c5_1": [
+        "11bec26e091539d757df2fa698625ba9",
+        "2635ef4bc9e2949ec390155e846fdd73"
+      ],
+      "NUC_phase1_recv2xd6lzMOEj_c1": [
+        "e45e29ef0e9ee97ec53651ecb3119bc7",
+        "e2d00798d794f70888d68b1d7d63d031"
+      ],
+      "NUC_phase1_recv3UT9F1yI58_c1": [
+        "c0c81a30317563acf597308dc2ee82b1",
+        "c6559942155ff1914ad9b40ea6c4f25d"
+      ],
+      "NUC_phase1_recv46L7dYe6Ko_c1": [
+        "e8a094f4fa6b7909124e753279d51d3f",
+        "b89e714223dc7f9cb29df9fc516726a0"
+      ],
+      "NUC_phase1_recv1nDNcce4cC_c1": [
+        "d1cd12e736f423ac6e46dd55fefc8963",
+        "cd5eb12ce3555e94db6c3cb8bb3b76ff"
+      ],
+      "NUC_phase1_recv3WcbrVtjk1_c1": [
+        "0dcf6677c8a94f0c1bbcd416542bfd5f",
+        "60f4efee8b8f432af7cfeeebce38a22c"
+      ],
+      "NUC_phase1_recv2YL0GQg2Tz_c1": [
+        "8c4226c017622307a83eb08f025ff87d",
+        "d5355de7a71c3abcec2677b62b99a414"
+      ],
+      "NUC_phase1_recv4M1Vyak2lZ_c1": [
+        "393b24a2a1801fc805a1b221d46f6f26",
+        "38903dc4a21386c12cc08aee37d7f68d"
+      ],
+      "NUC_phase1_recv47G0uFLfgS_c1": [
+        "470ac0112283def7425e98ba9cfec659",
+        "6294b7f4314ab7f75085dc0b04cecdd3"
+      ],
+      "NUC_phase1_recv4ZeTmz1MP4_c1": [
+        "32a9f8a8c887cf7a16b4a8462757a24c",
+        "3d45092a837b70d72c71bd0137f0f2fc"
+      ],
+      "NUC_phase1_recv3G0QHWEPNT_c1": [
+        "311ed508e2180dbd2f727534543f97cb",
+        "11bf304da43f62c0ee31e7aab1802a92"
+      ],
+      "NUC_phase1_recv3RoQTa17im_c1": [
+        "236734db23215c24711a1878ee17aa65",
+        "7bad33cc641b20c05af6bfa390f12942"
+      ],
+      "NUC_phase1_recv59erAa3i0b_c1": [
+        "093dc795a093a8d2affb6d1e3c97d0c3",
+        "14ecb641d3ebb50aa0250e5d2d209399"
+      ],
+      "OKMAN_phase1_recvmpA0N0Un6M_c1": [
+        "3acfedf4cd226f80e940e2de9f5f08f3",
+        "e11d1a9a60db56487f1b7b7853af7f3e"
+      ],
+      "OKMAN_phase1_recvmpA0N0SjFH_h53d06a6ac147_1": [
+        "df115b8470570a669e6649b4aa8bec1d",
+        "d0ddefdc661a4914c9418a6c4dc13a62"
+      ],
+      "OKMAN_phase1_recvmpA0N05o4A_h4317d06a0126_1": [
+        "c420108032bb7e66da0616d9aceeada5",
+        "3385a8baa6a8801e898e1dc11ea95cb2"
+      ],
+      "OKMAN_phase1_recvoyQzJgouvM_c2": [
+        "cfd5d893c100ada9a48b7a0bdba78546",
+        "7ed219667f1590d39526b6458f8161fd"
+      ],
+      "OKMAN_phase1_recvnBzfdUJKQP_h8a29aede9bfe_1": [
+        "ed9c716866fd5de8d4957be4b0825b49",
+        "b4ea4a04c3d733350479b4ad9951879e"
+      ],
+      "OKMAN_phase1_recvnBzfdU4nzS_hac2074433509_1": [
+        "c5e79c66cf03a74eee3f0b998a835172",
+        "fb2d73d1452f586767f331dbd3650760"
+      ],
+      "OKMAN_phase1_recvnUQdR5IVrC_h8dead82ad91c_1": [
+        "b3ed9e2415526bc52da277d4ea2b47d5",
+        "e8d19a6de730c6e80e7a6dfad247514d"
+      ],
+      "OKMAN_phase1_recvqtis0iFQJ9_h2c70891c9c32_1": [
+        "10b011b286764b3881c0e0f062948846",
+        "45c467bc6a2274a797a4a53f390f9b0c"
+      ],
+      "OKMAN_phase1_recvrd83rmz4FY_c7": [
+        "921d81d119a582c973fc535592387e2b",
+        "af1902462b180c34ba49cf1fa858a173"
+      ],
+      "OKMAN_phase1_recvsE8E0MPxfg_c1": [
+        "435bf9fd67800d8ec9e170c0feb9a3cd",
+        "04a8462d63f0e1e62d0ee09a1f84d5f8"
+      ],
+      "OKMAN_phase1_recvqtis0izcn1_hd09f614929bb_1": [
+        "ca7fc9ead826b68f3b5499b130fcbe94",
+        "1e44e9a7bd45fdd8a645ea4107fb94f1"
+      ],
+      "OKMAN_phase1_recvoyQzJgWhCn_h66ba7dcb7e6d_1": [
+        "5cf5c102968223dddd691571b3cd9236",
+        "c6f721a648721ab6b754303cbe294783"
+      ]
+    }
+  },
+  "gating_questions": [
+    "speech_act",
+    "names_brand",
+    "echoes_post",
+    "detail_level"
+  ],
+  "advisory_questions": [
+    "register",
+    "reader_value",
+    "arranged"
+  ],
+  "thresholds": {
+    "gating_agreement_min": 0.85,
+    "gating_per_question_min": 0.75,
+    "gating_ambiguous_fraction_max": 0.25,
+    "unambiguous_endorsement_false_negatives_max": 0,
+    "reference_unresolved_gating_cells_max": 8
+  },
+  "reference": {
+    "path": "config/comment_gate_d112_reference.json",
+    "sha256": null,
+    "source_kind": "single_human_reviewer",
+    "frozen": false
+  },
+  "authorization": {
+    "owner_instruction": "同意，复核人员有时间，这批40条批了",
+    "given_utc": "2026-10-15",
+    "scope": "these 40 comments with their visible post context, sent once to the existing Jev-1.13.0 for this evaluation; no production switch, shadow, primary or ledger writes",
+    "max_live_runs": 1
+  },
+  "result_path": "docs/comment-gate-d112/summary.json",
+  "release_accepted": false,
+  "unresolved_reference_rule": "Cells the reviewer left blank or marked unresolved are never filled in by anyone; they are excluded from that question's denominator and listed. More than 8 unresolved gating cells (5% of 160) means the gate cannot pass."
+}
