@@ -47,6 +47,10 @@ class Client:
                 for qid, q in body["questions"].items()}}
 
 
+def NOCLAIM():
+    return None
+
+
 def test_production_contract_matches_preregistration():
     c = G.load_contract()
     assert c["gating_questions"] == ["speech_act", "names_brand", "echoes_post", "detail_level"]
@@ -54,7 +58,10 @@ def test_production_contract_matches_preregistration():
     assert c["thresholds"]["gating_ambiguous_fraction_max"] == .25
     assert c["thresholds"]["unambiguous_endorsement_false_negatives_max"] == 0
     assert c["sample"]["count"] == 40 and len(c["sample"]["ids"]) == 40
-    assert c["reference"]["frozen"] is False and c["release_accepted"] is False
+    ref = c["reference"]   # 10-16 起参考已冻结: 必须保持冻结, 合同里的 sha 就是仓里这份参考文件的 sha
+    assert ref["frozen"] is True and ref["source_kind"] == "single_human_reviewer"
+    assert ref["sha256"] == hashlib.sha256((E.ROOT / ref["path"]).read_bytes()).hexdigest()
+    assert c["release_accepted"] is False
     assert c["authorization"]["max_live_runs"] == 1
 
 
@@ -79,7 +86,7 @@ def test_reference_must_be_frozen_before_any_call(contract):
 
 def test_perfect_agreement_passes_but_never_accepts_release(contract, tmp_path):
     doc = G.load_reference(G.Path(contract["reference"]["path"]), contract, rows(), G.C.candidate())
-    assert G.run(contract, rows(), doc, tmp_path / "out", client=Client()) == 0
+    assert G.run(contract, rows(), doc, tmp_path / "out", client=Client(), claim=NOCLAIM) == 0
     s = json.loads((tmp_path / "out/summary.json").read_text())
     assert s["gate"]["passed"] and s["release_accepted"] is False and s["model_calls"] == 20
     raw = (tmp_path / "out/answers.json").read_text() + (tmp_path / "out/summary.json").read_text()
@@ -91,11 +98,11 @@ def test_advisory_misses_do_not_fail_but_gating_and_endorsement_do(contract, tmp
     texts = [r["comment_text"] for r in rows()]
     flip_register = {t: {"register": "说不清", "arranged": "是" if FIX["expected_labels"][i]["arranged"] == "否" else "否"}
                      for i, t in enumerate(texts)}
-    assert G.run(contract, rows(), doc, tmp_path / "a", client=Client(flip_register)) == 0
+    assert G.run(contract, rows(), doc, tmp_path / "a", client=Client(flip_register), claim=NOCLAIM) == 0
     endorse = [i for i, lab in enumerate(FIX["expected_labels"]) if lab["speech_act"] in G.ENDORSE]
     assert endorse, "fixture needs an endorsement case"
     miss = {texts[endorse[0]]: {"speech_act": "补充经验"}}
-    assert G.run(contract, rows(), doc, tmp_path / "b", client=Client(miss)) == 3
+    assert G.run(contract, rows(), doc, tmp_path / "b", client=Client(miss), claim=NOCLAIM) == 3
     s = json.loads((tmp_path / "b/summary.json").read_text())
     assert "endorsement_false_negative" in s["gate"]["reasons"]
 
@@ -107,6 +114,61 @@ def test_unresolved_reference_cells_are_excluded_not_filled(contract, tmp_path):
     ref.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
     contract["reference"]["sha256"] = E.sha(ref)
     doc = G.load_reference(ref, contract, rows(), G.C.candidate())
-    assert G.run(contract, rows(), doc, tmp_path / "out", client=Client()) == 0
+    assert G.run(contract, rows(), doc, tmp_path / "out", client=Client(), claim=NOCLAIM) == 0
     s = json.loads((tmp_path / "out/summary.json").read_text())
     assert s["per_question"]["detail_level"]["resolved"] == 19 and s["gating"]["unresolved_reference_cells"] == 1
+
+
+def test_the_single_run_is_claimed_before_the_first_model_call(contract, tmp_path):
+    doc = G.load_reference(G.Path(contract["reference"]["path"]), contract, rows(), G.C.candidate())
+    order = []
+
+    class Watching(Client):
+        def call(self, body):
+            order.append("call")
+            return super().call(body)
+    assert G.run(contract, rows(), doc, tmp_path / "out", client=Watching(), claim=lambda: order.append("claim")) == 0
+    assert order[0] == "claim" and order.count("claim") == 1
+
+
+def test_an_already_claimed_run_sends_nothing(contract, tmp_path):
+    doc = G.load_reference(G.Path(contract["reference"]["path"]), contract, rows(), G.C.candidate())
+    client = Client()
+
+    def taken():
+        raise G.RunAlreadyClaimed("tag exists")
+    assert G.run(contract, rows(), doc, tmp_path / "out", client=client, claim=taken) == 2
+    assert client.calls == 0 and not (tmp_path / "out" / G.STARTED_MARKER).exists()
+
+
+@pytest.mark.parametrize("status", [422, 403, 500])
+def test_claim_is_fail_closed(status):
+    seen = []
+    with pytest.raises(G.RunAlreadyClaimed):
+        G.github_claim(repo="o/r", token="t", sha="s", post=lambda url, payload: (seen.append(payload), status)[1])
+    assert seen == [{"ref": f"refs/tags/{G.CLAIM_TAG}", "sha": "s"}]
+
+
+def test_claim_succeeds_only_on_a_fresh_tag_and_needs_credentials(monkeypatch):
+    G.github_claim(repo="o/r", token="t", sha="s", post=lambda url, payload: 201)
+    for k in ("GITHUB_REPOSITORY", "GITHUB_TOKEN", "GITHUB_SHA"):
+        monkeypatch.delenv(k, raising=False)
+    with pytest.raises(G.RunAlreadyClaimed):
+        G.github_claim(post=lambda url, payload: 201)
+
+
+def test_missing_credentials_do_not_use_up_the_run(contract, tmp_path, monkeypatch):
+    def refuse():
+        raise G.JevError("no key")
+    monkeypatch.setattr(G, "JevClient", refuse)
+    claimed = []
+    doc = G.load_reference(G.Path(contract["reference"]["path"]), contract, rows(), G.C.candidate())
+    assert G.run(contract, rows(), doc, tmp_path / "out", claim=lambda: claimed.append(1)) == 4
+    assert claimed == [] and not (tmp_path / "out" / G.STARTED_MARKER).exists()
+
+
+def test_workflow_gives_the_claim_token_to_run_mode_only():
+    wf = (E.ROOT / ".github/workflows/comment-gate-eval.yml").read_text(encoding="utf-8")
+    assert "contents: write" in wf
+    assert "GITHUB_TOKEN: ${{ inputs.mode == 'run' && github.token || '' }}" in wf
+    assert "run-started" not in wf and "actions/artifacts" not in wf   # the expiring-artifact guard is gone

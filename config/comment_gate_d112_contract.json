@@ -241,9 +241,11 @@
   },
   "reference": {
     "path": "config/comment_gate_d112_reference.json",
-    "sha256": null,
+    "sha256": "01023661ff5c3b74f7cee66f59c20bf02903204746c6d8470a4606ee5980c98a",
     "source_kind": "single_human_reviewer",
-    "frozen": false
+    "frozen": true,
+    "frozen_utc": "2026-10-16",
+    "note": "280/280 cells filled by the single reviewer, all inside the closed vocabulary, 0 unresolved; no question/context cell edited; reviewer free-text notes not included. ids + labels only."
   },
   "authorization": {
     "owner_instruction": "同意，复核人员有时间，这批40条批了",

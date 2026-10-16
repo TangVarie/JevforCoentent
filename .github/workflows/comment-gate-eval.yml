@@ -2,7 +2,8 @@ name: comment-gate-eval
 # D-112: one evaluation of the frozen new-40 sample with C4 unchanged.
 # Raw comment/post text is re-read from production by id and never written to the repo or artifacts;
 # the evaluator refuses unless the sample reproduces its frozen sha256 and the human reference is frozen
-# in config/comment_gate_d112_contract.json, and refuses again once a result is committed (max_live_runs=1).
+# in config/comment_gate_d112_contract.json; the run mode consumes its single authorization by creating the git tag
+# comment-gate-d112-run-claimed before the first model call (max_live_runs=1).
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +16,7 @@ on:
         description: "type D-112 to confirm"
         required: true
 permissions:
-  contents: read
+  contents: write   # run mode claims the single authorized run by creating tag comment-gate-d112-run-claimed
 concurrency:
   group: comment-gate-eval
   cancel-in-progress: false
@@ -39,6 +40,10 @@ jobs:
       - name: Install
         run: pip install -q -r requirements.txt requests
       - name: Evaluate
+        env:
+          # only the run mode gets a token: the evaluator creates the claim tag right before the first model call
+          # (atomic, durable, re-runs included); an existing tag or any API error refuses with zero model calls
+          GITHUB_TOKEN: ${{ inputs.mode == 'run' && github.token || '' }}
         run: |
           set +e
           python scripts/evaluate_comment_gate.py "${{ inputs.mode }}" --output out
