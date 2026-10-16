@@ -1,0 +1,82 @@
+{
+  "per_question": {
+    "speech_act": {
+      "resolved": 40,
+      "agreement": 38,
+      "ambiguous": 5,
+      "invalid_or_missing": 0,
+      "role": "gating"
+    },
+    "names_brand": {
+      "resolved": 40,
+      "agreement": 40,
+      "ambiguous": 1,
+      "invalid_or_missing": 0,
+      "role": "gating"
+    },
+    "echoes_post": {
+      "resolved": 40,
+      "agreement": 38,
+      "ambiguous": 8,
+      "invalid_or_missing": 0,
+      "role": "gating"
+    },
+    "detail_level": {
+      "resolved": 40,
+      "agreement": 34,
+      "ambiguous": 6,
+      "invalid_or_missing": 0,
+      "role": "gating"
+    },
+    "register": {
+      "resolved": 40,
+      "agreement": 28,
+      "ambiguous": 9,
+      "invalid_or_missing": 0,
+      "role": "advisory"
+    },
+    "reader_value": {
+      "resolved": 40,
+      "agreement": 32,
+      "ambiguous": 3,
+      "invalid_or_missing": 0,
+      "role": "advisory"
+    },
+    "arranged": {
+      "resolved": 40,
+      "agreement": 33,
+      "ambiguous": 14,
+      "invalid_or_missing": 0,
+      "role": "advisory"
+    }
+  },
+  "gating": {
+    "resolved_cells": 160,
+    "agreement": 150,
+    "ambiguous": 20,
+    "unresolved_reference_cells": 0
+  },
+  "unambiguous_endorsement_false_negatives": [],
+  "gate": {
+    "passed": true,
+    "reasons": [],
+    "thresholds": {
+      "gating_agreement_min": 0.85,
+      "gating_per_question_min": 0.75,
+      "gating_ambiguous_fraction_max": 0.25,
+      "unambiguous_endorsement_false_negatives_max": 0,
+      "reference_unresolved_gating_cells_max": 8
+    }
+  },
+  "decision": "D-112",
+  "evaluator_version": "comment-gate-d112-v1",
+  "sample_sha256": "f7b7ffc5e82f7732c17860c055d98e9409a3d87c376d8ec92d144c4dfb73d6f1",
+  "reference_sha256": "01023661ff5c3b74f7cee66f59c20bf02903204746c6d8470a4606ee5980c98a",
+  "bank_sha256": "a0c04acf37cb05005ed2f3c01ae3b0410221a392da39b665b25879a678cd534d",
+  "model": "jev-1.13.0",
+  "live": true,
+  "model_calls": 40,
+  "status": "evaluation_complete",
+  "reference_source": "single_human_reviewer",
+  "release_accepted": false
+}
