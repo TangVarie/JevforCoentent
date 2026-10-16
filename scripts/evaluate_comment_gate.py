@@ -158,9 +158,40 @@ def score(bank, contract: dict, doc: dict, results: dict) -> dict:
 
 
 STARTED_MARKER = "started.json"
+CLAIM_TAG = "comment-gate-d112-run-claimed"
 
 
-def run(contract: dict, rows: list, doc: dict, output: Path, *, client=None, workers: int = 4) -> int:
+class RunAlreadyClaimed(ValueError):
+    pass
+
+
+def github_claim(*, repo: str = None, token: str = None, sha: str = None, post=None) -> None:
+    """Consume the single authorized run (max_live_runs=1) before the first model call.
+
+    Creates the git tag ``CLAIM_TAG`` through the GitHub refs API. Creating a ref is atomic and fails with 422
+    when it already exists, so concurrent dispatches, re-runs of the same workflow run (same run_id) and runs months
+    later all see the same answer; tags do not expire the way artifacts do. Anything other than a fresh 201 refuses
+    (fail closed) and no request is sent to the model. Removing the tag is a deliberate admin act, not an accident.
+    """
+    repo = repo or os.environ.get("GITHUB_REPOSITORY", "")
+    token = token or os.environ.get("GITHUB_TOKEN", "")
+    sha = sha or os.environ.get("GITHUB_SHA", "")
+    if not (repo and token and sha):
+        raise RunAlreadyClaimed("cannot claim the single run: GITHUB_REPOSITORY / GITHUB_TOKEN / GITHUB_SHA missing")
+    if post is None:
+        import requests
+        def post(url, payload):
+            r = requests.post(url, json=payload, timeout=30, headers={
+                "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+            return r.status_code
+    status = post(f"https://api.github.com/repos/{repo}/git/refs", {"ref": f"refs/tags/{CLAIM_TAG}", "sha": sha})
+    if status == 422:
+        raise RunAlreadyClaimed(f"D-112 already ran against the model (tag {CLAIM_TAG} exists); max_live_runs=1")
+    if status != 201:
+        raise RunAlreadyClaimed(f"could not claim the single run (GitHub refs API answered {status}); refusing")
+
+
+def run(contract: dict, rows: list, doc: dict, output: Path, *, client=None, workers: int = 4, claim=None) -> int:
     bank = C.candidate()
     output.mkdir(parents=True, exist_ok=True)
     if client is None:
@@ -170,8 +201,14 @@ def run(contract: dict, rows: list, doc: dict, output: Path, *, client=None, wor
             E.save_json(output / "status.json", {"status": "blocked_missing_credentials", "model_calls": 0})
             return 4
     source = {r["comment_id"]: r for r in rows}
-    # 先落「开始调用」标记再发第一个请求: workflow 把它作为单独的 artifact 上传 (成功、失败、半途中断都传),
-    # 下一次 run 先查有没有这个 artifact —— 结论文件提交入库之前的空档里再点一次 run 也会被拒 (max_live_runs=1)。
+    # 发第一个请求之前把这唯一一次授权用掉 (max_live_runs=1): 打 git tag, 已存在就拒。
+    # 缺凭据的那种在上面就返回了, 不占用这一次。
+    try:
+        (claim or github_claim)()
+    except RunAlreadyClaimed as exc:
+        E.save_json(output / "status.json", {"status": "refused_single_run_used", "detail": str(exc), "model_calls": 0})
+        print(f"D-112 gate evaluation refused: {exc}", file=sys.stderr)
+        return 2
     E.save_json(output / STARTED_MARKER, {"decision": "D-112", "status": "model_calls_started",
                                           "sample_sha256": contract["sample"]["sha256"],
                                           "reference_sha256": contract["reference"]["sha256"]})

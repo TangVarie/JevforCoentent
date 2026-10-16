@@ -2,7 +2,8 @@ name: comment-gate-eval
 # D-112: one evaluation of the frozen new-40 sample with C4 unchanged.
 # Raw comment/post text is re-read from production by id and never written to the repo or artifacts;
 # the evaluator refuses unless the sample reproduces its frozen sha256 and the human reference is frozen
-# in config/comment_gate_d112_contract.json, and refuses again once a result is committed (max_live_runs=1).
+# in config/comment_gate_d112_contract.json; the run mode consumes its single authorization by creating the git tag
+# comment-gate-d112-run-claimed before the first model call (max_live_runs=1).
 on:
   workflow_dispatch:
     inputs:
@@ -15,8 +16,7 @@ on:
         description: "type D-112 to confirm"
         required: true
 permissions:
-  contents: read
-  actions: read   # the single-use guard lists this repo's artifacts
+  contents: write   # run mode claims the single authorized run by creating tag comment-gate-d112-run-claimed
 concurrency:
   group: comment-gate-eval
   cancel-in-progress: false
@@ -39,20 +39,11 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -q -r requirements.txt requests
-      - name: Single use (max_live_runs=1)
-        if: inputs.mode == 'run'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # The committed summary only blocks runs after someone commits it. Any earlier run that reached the
-          # model (it uploads comment-gate-d112-run-started, whether it passed, failed or died half-way) has
-          # already used the one authorization, so a second dispatch in that window is refused here.
-          prior=$(gh api -X GET "repos/${{ github.repository }}/actions/artifacts" -f name=comment-gate-d112-run-started -f per_page=100 \
-                  --jq '[.artifacts[] | select(.workflow_run.id != ${{ github.run_id }})] | length')
-          if [ "$prior" != "0" ]; then
-            echo "::error::D-112 already ran against the model ($prior earlier run(s)); max_live_runs=1"; exit 2
-          fi
       - name: Evaluate
+        env:
+          # only the run mode gets a token: the evaluator creates the claim tag right before the first model call
+          # (atomic, durable, re-runs included); an existing tag or any API error refuses with zero model calls
+          GITHUB_TOKEN: ${{ inputs.mode == 'run' && github.token || '' }}
         run: |
           set +e
           python scripts/evaluate_comment_gate.py "${{ inputs.mode }}" --output out
@@ -74,13 +65,6 @@ jobs:
           echo "evaluator exit code: $rc"
           # 0 = passed, 3 = completed but not passed (a valid outcome); 1/2/4 = incomplete or refused
           if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then exit "$rc"; fi
-      - name: Record that the one run has been used
-        if: always() && inputs.mode == 'run' && hashFiles('out/started.json') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: comment-gate-d112-run-started
-          path: out/started.json
-          retention-days: 90
       - name: Upload ids/labels/probabilities only
         if: always()
         uses: actions/upload-artifact@v4
