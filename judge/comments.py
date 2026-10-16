@@ -122,6 +122,8 @@ class CommentJudgement:
     flags: list = field(default_factory=list)          # 背书体 / 文案腔 / 只有评价 / 像安排的 / 像脚本
     ambiguous: list = field(default_factory=list)
     needs_review: bool = False                         # 背书体：进高风险复核
+    hints: list = field(default_factory=list)          # 只提示不判定的题没达到评论位要求时记这里，同 hard_fails 的形状
+    advisory: frozenset = frozenset()                  # 本次按「只提示」处理的题；空 = 老口径，全部题都能判硬伤
     calls: int = 0
     usage: dict = field(default_factory=dict)
 
@@ -130,6 +132,10 @@ class CommentJudgement:
 
     def profile(self) -> dict:
         return {k: v.get("answer") for k, v in self.items.items()}
+
+    def review_ambiguous(self) -> list:
+        """该进人工复核的歧义：只提示的题标了歧义不算（它们本来就不决定通过与否）。"""
+        return [q for q in self.ambiguous if q not in self.advisory]
 
 
 DETAIL_RANK = {"无": 0, "模糊": 1, "具体": 2}
@@ -152,13 +158,18 @@ def comment_state(post: dict, text: str, *, account: str = "", reply_to_text: st
 
 def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot], reader: Bank, *,
                   ops: Optional[Bank] = None, fill: Optional[dict] = None, reply_to_text: str = "",
-                  subject_id: str = "cand", role: str = "", account: str = "") -> CommentJudgement:
-    """判一条候选评论。slot 为 None 时只判、只打旗，不算硬伤（给 judge_comments / 回填用）。"""
+                  subject_id: str = "cand", role: str = "", account: str = "",
+                  advisory: frozenset = frozenset()) -> CommentJudgement:
+    """判一条候选评论。slot 为 None 时只判、只打旗，不算硬伤（给 judge_comments / 回填用）。
+
+    ``advisory``：只提示、不判定的题（D-112：写手评论工具里 register / reader_value / arranged，以及没验收过的
+    运营侧 comment_intent）。它们照常作答、照常打旗；不合评论位要求时进 ``hints`` 而不是 ``hard_fails``，
+    漏答或标歧义也不送人工复核。空集合 = 老口径（生成循环、回填不受影响）。"""
     fill = fill or fill_for(post)
     left = unfilled(reader, fill)
     if left:
         raise ValueError(f"题库 {reader.name} 还有没填的占位符：{left}")
-    cj = CommentJudgement(text=text)
+    cj = CommentJudgement(text=text, advisory=frozenset(advisory))
     st = comment_state(post, text, reply_to_text=reply_to_text, role=(slot.role if slot else role), account=account)
     r = judge_state(client, reader, subject_id, st, subject_type="comment", fill=fill)
     cj.items.update(r.items); cj.calls += r.calls; cj.usage = dict(r.usage or {})
@@ -166,7 +177,9 @@ def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot]
         r2 = judge_state(client, ops, subject_id, st, subject_type="comment", fill=fill)
         cj.items.update(r2.items); cj.calls += r2.calls; cj.usage = add_usage(cj.usage, r2.usage)
     a = cj.profile()
-    missing = sorted(q for q, it in cj.items.items() if it.get("answer") is None)
+    missing = sorted(q for q, it in cj.items.items() if it.get("answer") is None and q not in cj.advisory)
+    if any(it.get("answer") is None for q, it in cj.items.items() if q in cj.advisory):
+        cj.flags.append("参考题漏答")
     if missing:
         # 漏答 / 选项外：是非题和选择题一样处理 —— 不当硬伤（不会下发「现在判『None』」的修改单），整条进复核
         cj.flags.append("漏答"); cj.needs_review = True
@@ -198,6 +211,9 @@ def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot]
             cj.hard_fails.append(("detail_level", a.get("detail_level"), f"至少{slot.min_detail}", p("detail_level")))
         if ops is not None and slot.intent and a.get("comment_intent") not in (slot.intent, None):
             cj.hard_fails.append(("comment_intent", a.get("comment_intent"), slot.intent, p("comment_intent")))
+        if cj.advisory:
+            cj.hints = [f for f in cj.hard_fails if f[0] in cj.advisory]
+            cj.hard_fails = [f for f in cj.hard_fails if f[0] not in cj.advisory]
     return cj
 
 
@@ -206,15 +222,16 @@ def score_comment(cj: CommentJudgement) -> float:
     return 100.0 * len(cj.hard_fails) + 10.0 * (("像安排的" in cj.flags) + ("像脚本" in cj.flags)) + 1.0 * len(cj.ambiguous)
 
 
-def comment_repair_plan(cj: CommentJudgement, banks: dict, fill: Optional[dict] = None) -> list:
-    """修改单：只说这条评论现在判成什么、要改成什么、那个选项的定义是什么；不写改法。题干里的占位符按 fill 填好再下发。"""
+def comment_repair_plan(cj: CommentJudgement, banks: dict, fill: Optional[dict] = None, *, hints: bool = False) -> list:
+    """修改单：只说这条评论现在判成什么、要改成什么、那个选项的定义是什么；不写改法。题干里的占位符按 fill 填好再下发。
+    ``hints=True`` 给只提示的题出同样形状的条目（可参考着改，不改也不算没过）。"""
     plan = []
     byq = {}
     for b in banks.values():
         merged = dict(b.fill_defaults); merged.update(fill or {})
         for q in b.questions:
             byq[q.id] = (q, merged)
-    for qid, now, want, p in cj.hard_fails:
+    for qid, now, want, p in (cj.hints if hints else cj.hard_fails):
         if qid not in byq:
             continue
         q, merged = byq[qid]
@@ -227,8 +244,13 @@ def comment_repair_plan(cj: CommentJudgement, banks: dict, fill: Optional[dict] 
         ptxt = f"（{p}）" if p is not None else ""
         plan.append({"qid": qid, "now": now, "want": want, "p": p, "definition": defn,
                      "instruction": f"「{fill_text(q.ask, merged)}」现在判「{now}」{ptxt}，要改成「{want}」" + (f"：{defn}" if defn else "")})
-    if "像安排的" in cj.flags and not cj.hard_fails:
-        plan.append({"qid": "arranged", "now": "是", "want": "否", "p": cj.items.get("arranged", {}).get("p"), "definition": "",
+    arranged_p = cj.items.get("arranged", {}).get("p")
+    if "像安排的" in cj.flags and hints and "arranged" in cj.advisory:
+        # 只提示的口径：跟门槛题过没过无关，判了「像安排的」就提示（不改也不算没过）
+        plan.append({"qid": "arranged", "now": "是", "want": "否", "p": arranged_p, "definition": "",
+                     "instruction": "总判「像安排的」：多半是句子太完整、太顺；可以缩短、留一个口语痕迹。"})
+    elif "像安排的" in cj.flags and not hints and "arranged" not in cj.advisory and not cj.hard_fails:
+        plan.append({"qid": "arranged", "now": "是", "want": "否", "p": arranged_p, "definition": "",
                      "instruction": "七题都过了但总判仍「像安排的」：多半是句子太完整、太顺；缩短、留一个口语痕迹。"})
     return plan
 

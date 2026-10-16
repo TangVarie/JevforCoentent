@@ -1,0 +1,190 @@
+# Offline candidate4: explicit single-choice precedence and visible-text boundaries. Not released.
+bank_version: cb-v0.6-candidate4
+status: released  # 2026-10-16 owner accepted D-112 (truth-vault DECISIONS); content byte-identical to the candidate, the header comment above is historical
+frozen_sha256: a0c04acf37cb05005ed2f3c01ae3b0410221a392da39b665b25879a678cd534d
+model: jev-1.13.0
+fill_defaults:
+  subject: 这家机构
+  arranger: 机构
+  decide: 找机构
+ambiguity:
+  choice_top_min: 0.6
+  choice_margin_min: 0.2
+  noul_band:
+  - 0.35
+  - 0.65
+questions:
+- id: speech_act
+  type: choice
+  instructions:
+    zh: 这条评论最主要在做什么？只选一种，按评论自身的主要内容判断，可见帖子/回复对象只帮助理解。主要以本人或家人实际使用后的正面结果为论据，选亲历背书；主要夸产品、宣称好处或劝别人去用、没有以本人/家人使用为主要论据，选旁观推荐。即使在回答问题，主动推荐/背书仍按主要内容选，不因贴主、建议口吻或专业知识而自动选答疑。单纯款型/事实确认、联系方式、购买渠道、客观操作说明，没有主动夸好或劝用，才按答复/指路选回复答疑。明确问事情且主要想获得答案，选提问；主要反驳或提醒风险选质疑；只讲相关经历/看法且不对主体作正面使用结论或劝用，选补充经验。看不到回复对象不等于没有问题，但也不能凭空补一个问题。祝愿、许愿不冒充已发生的使用经历；不验证经历或疗效真假。
+    en: Choose the main act of the comment itself. Positive personal/family-use outcomes as the main basis are endorsement;
+      active praise, benefits or urging use without that main basis are recommendation, including promotional answers.
+      Neutral factual/model/contact/channel/procedure answers are answering, not recommendation. A question seeking
+      an answer is asking; pushback or warnings are questioning; related experiences/views without positive product-use
+      conclusions or urging are supplementing. Missing reply context neither proves nor invents a question. Wishes
+      are not completed experiences; do not verify truth.
+  options:
+  - label: 提问
+    zh: 向作者或其他人问事情（在哪里、多少钱、怎么联系、文科能不能做）
+    en: Asking a question of the author or others (where, how much, how to contact, does it work for my major)
+  - label: 质疑
+    zh: 表示怀疑、反驳或提醒风险（割韭菜、别信、先看合同）
+    en: Doubting, pushing back or warning (scam, don't trust it, read the contract first)
+  - label: 补充经验
+    zh: 讲自己的相关经历或看法，但不对{subject}下结论
+    en: Sharing their own related experience or view without passing judgment on {subject}
+  - label: 亲历背书
+    zh: 说自己或家人实际使用过{subject}，并以正面使用结果或好评为主要论据；只是转述泛化知识不算。这里只判文本声称，不验证真伪。
+    en: Uses claimed personal or family use and a positive result as the main basis for praising {subject}; generic
+      knowledge is insufficient. This does not verify the claim.
+  - label: 旁观推荐
+    zh: 没有以本人或家人的实际使用为主要论据，但主要是在夸{subject}或劝别人去用。
+    en: Mainly praises {subject} or urges use without personal or family use as the main basis.
+  - label: 回复答疑
+    zh: 主要确认事实/款型、提供联系方式/购买渠道或客观操作说明，没有以产品好处或劝用作为主要内容。答疑中若主要在主动推荐或讲正面使用结果，仍按旁观推荐/亲历背书。
+    en: Mainly neutral factual/model/contact/channel/procedure guidance, without benefits or urging as the main
+      content. Promotional answers remain recommendation/endorsement according to their main act.
+  - label: 闲聊表情
+    zh: 打招呼、表情、感叹，没有实质内容
+    en: Small talk, emoji or exclamation with no substance
+  - label: 说不清
+    zh: 上面都不像
+    en: None of the above fits
+  unclear_labels:
+  - 说不清
+  feeds: 路由——亲历背书 / 旁观推荐 直接进「高风险复核」，其余按后面几题走
+  on_ambiguous: 进人工
+- id: names_brand
+  type: noul
+  instructions:
+    zh: 只看评论原文，有没有明确写出品牌、公司、机构、医院、药房、店铺或平台的名称？中英文、简称及明确以品牌名使用的陌生名字都可算，不要求完整公司全称。通用成分/药品通用名、剂型、治疗方法缩写、一般品类名不等于品牌；只有这些不算点名。不要从帖子借品牌，也不要把角色/编辑标记当机构名。
+    en: Does the comment explicitly name a brand, company, institution, hospital, pharmacy, shop or platform? English
+      names, abbreviations and unfamiliar names clearly used as brands count. Generic ingredients/drug names, dosage
+      forms, treatment acronyms and categories alone do not. Use only the comment, not names from the post or editorial/role
+      markers.
+  criteria:
+    'true':
+      zh: 评论里明确出现品牌或机构/公司/店铺/平台的名称，包括简称、英文名、带名称的账号。
+      en: An explicit brand/institution/company/shop/platform name appears, including abbreviations, English names
+        and named accounts.
+    'false':
+      zh: 没有上述名称，只有这家/这个产品、一般品类、通用药名/成分/剂型或治疗方法。
+      en: 'No such name: only this product/company, categories, generic drug/ingredient/form or treatment names.'
+  feeds: 可信度线索——普通用户夸一家机构时很少主动打全名
+  on_ambiguous: 按「写出了」处理
+- id: echoes_post
+  type: noul
+  instructions:
+    zh: 这条评论有没有接住可见帖子里具体说到的事？先读state中的完整可见帖子标题和正文；以下自动片段只是提示，不是全部事实：{post_points}。评论可以用不同说法，不必逐字复述。直接回答帖子明确的问题、回应某个具体行为/症状/限制/事件，或复用具体说法，可算接住；必须能指出相同的具体线索。只是同品类/同人群、泛泛建议或换到多数同类帖也能贴的话，不算。不要补写不可见的上下文或仅凭评论自称回应来判。
+    en: 'Read the full visible post title/body in state, not only these clipped hints: {post_points}. Paraphrasing
+      is allowed. Direct answers to a specific visible question or references to a concrete action/symptom/constraint/event
+      count when a matching detail is identifiable. Shared category/audience or generic advice alone does not. Do
+      not invent unseen context or trust a comment merely claiming to respond.'
+  criteria:
+    'true':
+      zh: 能指出与可见帖具体事件/行为/限制/问题相对应的线索，不要求原词；例如接住{post_examples}。
+      en: An identifiable match to a specific visible event/action/constraint/question, including paraphrases; e.g.
+        {post_examples}.
+    'false':
+      zh: 只有同品类/人群或一般性评价建议，找不到对应帖中特定内容的线索。
+      en: Only shared category/audience or generic verdict/advice, with no identifiable specific match.
+  feeds: 可信度线索——自发评论是在回这篇帖，安排的评论是在回一个品类
+  on_ambiguous: 按「泛泛」处理
+- id: detail_level
+  type: choice
+  instructions:
+    zh: 评论里可核对的文本细节到什么程度？只看评论，不从帖子补信息，不要求个人经历。具体规格/成分含量、价格、年龄、日期/时长、数量、地点、明确对象/入口/操作的步骤可算具体；说明某种明确产品款型/属性的规格也可算，不强制必须有数字。品牌或药品名字本身、专业术语、笼统动作和好评不算具体。数字必须在描述一个对象的规格/时间/数量等；随口编号或夸张套话不升级。只有笼统情境/经历/动作选模糊；连情境也没有、只有结论/感受/名字/术语选无。只判断细节的形式，不验证医学或疗效真实性。
+    en: Use only checkable information in the comment, not the post; personal experience and numbers are not required.
+      Concrete specifications/composition, price, age, date/duration, quantity, location, identifiable product attributes
+      or substantive object/entry/action steps count. Names, jargon, vague actions or praise alone do not. Numbers
+      must describe an object/time/quantity, not numbering or hyperbole. General situations/actions are vague; bare
+      verdicts/feelings/names/jargon without a situation have none. This does not validate medical claims.
+  options:
+  - label: 无
+    zh: 没有可核对的具体信息，也没有具体情境，只有评价、感受或一个结论。只报品牌/药品名、堆专业术语或口号本身不算细节。
+    en: No checkable specific information or concrete situation, only evaluation, feelings or a conclusion. A brand/drug
+      name, jargon or slogan alone is insufficient.
+  - label: 模糊
+    zh: 点到一个情境、做法或泛化过程，但没有明确的数值/对象/时间或实质步骤能对上号，例如只说以前用过、早起用一下、找售后处理。
+    en: A situation, action or general process is mentioned but lacks identifiable values, objects, timing or substantive
+      steps; e.g. used it before, used it in the morning, or contacted support.
+  - label: 具体
+    zh: 有能对上号的信息：具体规格、价格、年龄、日期/时长、数量、地点，或有明确对象/入口/操作的流程步骤。无需个人使用经历；产品参数、明确购买/售后流程也可属于此档。品牌名或术语本身不够。只评价文本细节，不证明信息真实。
+    en: Identifiable information such as specifications, prices, ages, dates/durations, quantities, locations, or
+      a process with concrete objects, entry points and actions. Personal use is not required; product parameters
+      and explicit buying/support instructions may qualify. Names or jargon alone do not. This does not verify truth.
+  feeds: 可信度线索
+  on_ambiguous: 按「模糊」处理
+- id: register
+  type: choice
+  instructions:
+    zh: 只判断表达方式，不把是否提品牌、是否真用过、是否有专业词直接当语气结论。先看是否主要由整齐卖点/口号/宣传承诺堆成而没有自然叙事，若是选文案腔；有自然过程和具体叙事、像用自己的话认真解释一件事，选认真分享；短碎、省略、随口感叹/闲聊、没有展开叙事，选随手口语。句子长或有数字不自动等于认真；带语气词也不自动排除文案腔。角色/编辑标记只当元信息，不证明是自然用户或商家。
+    en: Judge expression style, not brand presence, truth of experience or jargon alone. Mostly tidy selling points/slogans/promises
+      without natural narration is copywriting. A naturally narrated process or considered explanation is thoughtful
+      sharing. Short fragmented casual remarks without developed narration are casual. Length/numbers alone do not
+      imply thoughtful sharing; particles do not rule out copywriting. Editorial/role labels are metadata, not evidence
+      of authorship.
+  options:
+  - label: 随手口语
+    zh: 短、省略、有语气词或错字，像刷手机时随手打的
+    en: Short, elliptical, with particles or typos, like something typed while scrolling
+  - label: 认真分享
+    zh: 主要是自然叙事或解释一个过程，有展开的具体内容，像用自己的话认真回复；不因单个专业词就判文案。
+    en: Mainly a natural, developed narrative or explanation of a process in the writer’s own words; jargon alone
+      is not copywriting.
+  - label: 文案腔
+    zh: 没有过程只有结论，句式像感谢信或宣传语：痛点一句 + 机构帮我 + 结果一句，形容词齐整（专业、精准、满意、本土化）
+    en: 'No process, only conclusions, phrased like a thank-you note or ad copy: one pain point + the agency helped
+      me + one outcome, with tidy adjectives'
+  - label: 说不清
+    zh: 都不像
+    en: None fits
+  unclear_labels:
+  - 说不清
+  feeds: 可信度线索
+  on_ambiguous: 进人工
+- id: reader_value
+  type: choice
+  instructions:
+    zh: 一个考虑要不要{decide}的读者，从评论本身能拿到什么？这是一道单选题，按以下顺序排除重叠：①先看有没有可直接用于下一步的明确品牌/店名/平台名/可搜索产品关键词、联系方式、价格、实际流程或可用时间安排，有则选可行动信息，即使同时讲了使用经历；只有泛泛问医生/去了解一下不算。②没有这些可行动信息，但有过程/对比/具体适用条件的经历，能帮助判断是否适合，选判断依据。③只剩好坏/靠谱/有效等无依据结论，选只有评价。④纯提问、许愿、闲聊或没有提供上述信息，选无。不要从帖子补信息，也不把相关术语自动算可行动关键词。
+    en: 'Single choice with explicit precedence: (1) Directly usable brand/shop/platform/searchable product name,
+      contact, price, actual procedure or usable schedule => actionable, even with an experience. Generic ask-a-doctor/look-into-it
+      is insufficient. (2) Without actionable information, a concrete process/comparison/fit experience => decision
+      evidence. (3) Bare evaluative conclusions => verdict only. (4) Questions/wishes/chat without such information
+      => none. Do not borrow information from the post or treat jargon alone as actionable.'
+  options:
+  - label: 可行动信息
+    zh: 明确的下一步入口或信息：品牌/店名/平台名/可搜索的具体产品名、联系方式、价格、实质流程、可用时间安排。和经历同时出现时优先选此项；泛泛建议或术语本身不够。
+    en: 'A concrete next-step entry/information: brand/shop/platform/specific searchable product name, contact,
+      price, substantive procedure or usable schedule. Takes precedence over accompanying experiences; generic advice/jargon
+      is insufficient.'
+  - label: 判断依据
+    zh: 没有可直接行动的信息，但有过程/对比/适用条件的具体经历帮助判断是否适合；只有结果或好评不算。
+    en: No directly actionable information, but a concrete experience with process/comparison/conditions helps judge
+      fit; a bare result or praise is insufficient.
+  - label: 只有评价
+    zh: 好、专业、靠谱之类的结论，没有依据
+    en: Only a verdict (good, professional, reliable) with nothing behind it
+  - label: 无
+    zh: 什么也拿不到
+    en: Nothing
+  feeds: 承接——评论区的营销职能是承接，不是背书
+  on_ambiguous: 进人工
+- id: arranged
+  type: noul
+  instructions:
+    zh: 站在普通读者角度，只根据可见文字，这条评论像不像{arranger}安排发的？观察突兀转向产品、连续整齐卖点、无关场景硬植入、明显宣传号召等组合线索；单个品牌名、专业词、具体数字、写得长或语句通顺本身都不足以下结论。角色/写作标签不当作真实身份凭证。只判断文本读感，不推断实际来源，也不验证经历真假；难以判断应让概率体现不确定。
+    en: From an ordinary reader’s perspective, does the text look arranged by the {arranger}? Consider combined
+      cues such as abrupt product pivots, stacked selling points, irrelevant insertion and promotional urging. A
+      brand, jargon, number, length or fluency alone is insufficient. Role/editorial labels are not identity evidence.
+      Judge appearance only, not actual authorship or truth; represent uncertainty in the probability.
+  criteria:
+    'true':
+      zh: 像安排的
+      en: Looks arranged
+    'false':
+      zh: 像普通用户自发写的
+      en: Looks like a spontaneous user comment
+  feeds: 总判——和前六题分开看，用来检验前六题是否解释了总判
+  on_ambiguous: 进人工

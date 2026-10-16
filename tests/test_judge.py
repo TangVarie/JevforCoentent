@@ -239,7 +239,7 @@ def test_mcp_tools_mock(monkeypatch, mcp_via_testclient):
     monkeypatch.setenv("JUDGE_MOCK", "1"); monkeypatch.setenv("JUDGE_PROJECT", "TUGE"); monkeypatch.setenv("JUDGE_ALLOW_LOCAL_JEV", "1")
     from judge import mcp_server as M
     names = {b["name"] for b in M.list_banks()}
-    assert {"feature_questions_v0_1", "comment_reader_v0.4", "platform_health_v0.1", "human_feel_para_v0.2"} <= names
+    assert {"feature_questions_v0_1", "comment_reader_v0.6", "platform_health_v0.1", "human_feel_para_v0.2"} <= names
     body = "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？"
     d = M.judge_draft("测试标题？", body)
     assert set(d) >= {"passed", "profile", "hard_fails", "para_stats", "policy", "plan"} and d["policy"]["project"] == "TUGE" and "ledger_rows" not in d
@@ -783,14 +783,14 @@ def test_banks_lists_latest_version_only_unless_all(monkeypatch):
     c = TestClient(app); H = {"X-Judge-Key": "k"}
     rows = c.get("/banks", headers=H).json()
     names = {x["name"] for x in rows}
-    assert "comment_reader_v0.4" in names and "comment_reader_v0.3" not in names
+    assert "comment_reader_v0.6" in names and not ({"comment_reader_v0.3", "comment_reader_v0.4"} & names)   # D-112 验收后 v0.6 是最新
     assert "comment_thread_v0.4" in names and not ({"comment_thread_v0.2", "comment_thread_v0.3"} & names)
     assert "human_feel_para_v0.2" in names and "human_feel_para_v0.1" not in names
     assert "ssll_critic_v0.1" in names and "feature_questions_v0_1" in names      # 只有一版 / _v0_1 写法的照常列
     assert all(x["superseded"] is False for x in rows)
     assert next(x for x in rows if x["name"] == "comment_thread_v0.4")["supersedes"] == ["comment_thread_v0.2", "comment_thread_v0.3"]
     full = c.get("/banks", params={"all": 1}, headers=H).json()
-    assert {"comment_reader_v0.3", "comment_thread_v0.2", "human_feel_para_v0.1"} <= {x["name"] for x in full}
+    assert {"comment_reader_v0.3", "comment_reader_v0.4", "comment_thread_v0.2", "human_feel_para_v0.1"} <= {x["name"] for x in full}
     assert {x["name"] for x in full if x["superseded"]} == {x["name"] for x in full} - names
     assert latest_banks(["a_v0.1", "a_v0.10", "a_v0.2", "b", "c_v1_0"]) == {"a_v0.10": ["a_v0.1", "a_v0.2"], "b": [], "c_v1_0": []}
 
