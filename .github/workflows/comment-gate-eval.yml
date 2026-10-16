@@ -1,0 +1,69 @@
+name: comment-gate-eval
+# D-112: one evaluation of the frozen new-40 sample with C4 unchanged.
+# Raw comment/post text is re-read from production by id and never written to the repo or artifacts;
+# the evaluator refuses unless the sample reproduces its frozen sha256 and the human reference is frozen
+# in config/comment_gate_d112_contract.json, and refuses again once a result is committed (max_live_runs=1).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "validate = re-read and verify the frozen sample only (no model calls); run = the one approved evaluation"
+        type: choice
+        options: [validate, run]
+        default: validate
+      confirm:
+        description: "type D-112 to confirm"
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: comment-gate-eval
+  cancel-in-progress: false
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TYPESAFE_API_KEY: ${{ inputs.mode == 'run' && secrets.TYPESAFE_API_KEY || '' }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Confirm
+        if: inputs.confirm != 'D-112'
+        run: |
+          echo "::error::confirm must be D-112"; exit 1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -q -r requirements.txt requests
+      - name: Evaluate
+        run: |
+          set +e
+          python scripts/evaluate_comment_gate.py "${{ inputs.mode }}" --output out
+          rc=$?
+          set -e
+          if [ -f out/summary.json ]; then
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          s = json.load(open("out/summary.json"))
+          g = s["gating"]
+          print(f"## D-112 gate · {'PASS' if s['gate']['passed'] else 'NOT PASSED'}")
+          print(f"gating agreement {g['agreement']}/{g['resolved_cells']} · ambiguous {g['ambiguous']} · unresolved reference cells {g['unresolved_reference_cells']}")
+          print(f"reasons: {s['gate']['reasons']} · unambiguous endorsement misses: {len(s['unambiguous_endorsement_false_negatives'])}")
+          print("\n| question | role | agreement/resolved | ambiguous |\n|---|---|---|---|")
+          for q, m in s["per_question"].items():
+              print(f"| {q} | {m['role']} | {m['agreement']}/{m['resolved']} | {m['ambiguous']} |")
+          PY
+          fi
+          echo "evaluator exit code: $rc"
+          # 0 = passed, 3 = completed but not passed (a valid outcome); 1/2/4 = incomplete or refused
+          if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then exit "$rc"; fi
+      - name: Upload ids/labels/probabilities only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: comment-gate-d112-${{ inputs.mode }}
+          path: out/
+          if-no-files-found: ignore
