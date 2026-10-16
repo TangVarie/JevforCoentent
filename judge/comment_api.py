@@ -10,6 +10,12 @@ from pydantic import BaseModel, Field
 from . import comments as C
 from .jev_client import JevError
 
+# 2026-10-16 owner 验收 D-112（truth-vault DECISIONS）：写手评论工具用 C4 题库原样（digest a0c04acf…）。
+# 通过与否只看四道门槛题（speech_act / names_brand / echoes_post / detail_level）和背书复核；
+# register / reader_value / arranged 只给提示。运营侧 comment_intent 没有验收过，同样只提示。
+READER_BANK = "comment_reader_v0.6"
+ADVISORY = frozenset({"register", "reader_value", "arranged", "comment_intent"})
+
 
 class InputModel(BaseModel):
     model_config = {"extra": "forbid"}
@@ -73,10 +79,11 @@ def _slot(value, reader, ops):
 
 
 def _view(cj, banks, fill):
-    needs_review = cj.needs_review or bool(cj.ambiguous)
+    needs_review = cj.needs_review or bool(cj.review_ambiguous())
     return {"passed": cj.passed() and not needs_review, "needs_review": needs_review,
             "profile": cj.profile(), "flags": cj.flags, "hard_fails": cj.hard_fails,
             "ambiguous": cj.ambiguous, "plan": C.comment_repair_plan(cj, banks, fill),
+            "hints": C.comment_repair_plan(cj, banks, fill, hints=True), "advisory": sorted(cj.advisory),
             "calls": cj.calls, "usage": cj.usage}
 
 
@@ -85,11 +92,11 @@ def attach(app, *, get_bank, get_client, policy, auth, parallel):
         # These endpoints inspect unpublished candidate comments; the caller cannot relax this.
         decision = policy(["comment"], req.project, req.category, False)
         if os.environ.get("JUDGE_COMMENT_TOOLS_ENABLED") != "1":
-            raise HTTPException(503, "评论判定尚未开放，需完成评论题库的人工金标准验收")
+            raise HTTPException(503, "评论判定服务未开启（JUDGE_COMMENT_TOOLS_ENABLED 未设为 1）")
         if not req.post_body.strip():
             raise HTTPException(422, "post_body 不能为空")
         post = {"title": req.post_title, "body": req.post_body[:600], "kind": req.kind, "points": req.points}
-        reader, ops = get_bank("comment_reader_v0.4"), get_bank("comment_ops_v0.2")
+        reader, ops = get_bank(READER_BANK), get_bank("comment_ops_v0.2")
         return decision, post, C.fill_for(post), reader, ops
 
     @app.post("/comment_repair_plan_for", dependencies=[Depends(auth)])
@@ -100,7 +107,7 @@ def attach(app, *, get_bank, get_client, policy, auth, parallel):
         slot = _slot(req.slot, reader, ops)
         try:
             cj = C.judge_comment(get_client(), post, req.text, slot, reader, ops=ops, fill=fill,
-                                 reply_to_text=req.reply_to_text)
+                                 reply_to_text=req.reply_to_text, advisory=ADVISORY)
         except JevError as exc:
             raise HTTPException(502, f"Jev 调用失败：{exc}")
         return {**_view(cj, {"reader": reader, "ops": ops}, fill), "policy": decision.as_dict()}
@@ -119,7 +126,8 @@ def attach(app, *, get_bank, get_client, policy, auth, parallel):
         try:
             judged = parallel(lambda pair: C.judge_comment(
                 client, post, pair[0].text, pair[1], reader, ops=ops, fill=fill,
-                reply_to_text=pair[0].reply_to_text, role=pair[0].role, account=pair[0].account), list(zip(req.comments, slots)))
+                reply_to_text=pair[0].reply_to_text, role=pair[0].role, account=pair[0].account,
+                advisory=ADVISORY), list(zip(req.comments, slots)))
             comments = [{**c.model_dump(exclude={"slot"}), "role": slot.role if slot else c.role}
                         for c, slot in zip(req.comments, slots)]
             tj = C.judge_thread(client, post, comments, thread, fill=fill, judged=judged, max_named=req.max_named)

@@ -70,10 +70,33 @@ def test_writer_key_gets_real_comment_profile_and_unpublished_policy(wired):
 
 def test_slot_failure_returns_an_actionable_plan(wired):
     client, jev = wired
-    jev.overrides["register"] = "文案腔"
+    jev.overrides["names_brand"] = True   # 门槛题：提问位不许点名
     data = single(client).json()
     assert data["passed"] is False
-    assert any(p["qid"] == "register" and p["definition"] for p in data["plan"])
+    assert any(p["qid"] == "names_brand" and p["definition"] for p in data["plan"])
+
+
+@pytest.mark.parametrize("qid,value", [("register", "文案腔"), ("reader_value", "只有评价"), ("arranged", True),
+                                       ("comment_intent", "引导私信")])
+def test_advisory_questions_only_hint(wired, qid, value):
+    """D-112 验收口径：只提示的题不合要求时进 hints，不进 plan，不影响 passed。"""
+    client, jev = wired
+    jev.overrides[qid] = value
+    data = single(client, slot={**SLOT, "value_ok": ["可行动信息"], "intent": "补充信息"} if qid == "reader_value"
+                  else {**SLOT, "intent": "补充信息"}).json()
+    assert data["passed"] is True and data["needs_review"] is False, data
+    assert not any(p["qid"] == qid for p in data["plan"])
+    assert any(h["qid"] == qid for h in data["hints"]), data["hints"]
+    assert qid in data["advisory"] and not data["hard_fails"]
+
+
+def test_reader_bank_is_the_accepted_c4(wired):
+    client, jev = wired
+    single(client)
+    from judge.comment_api import READER_BANK
+    bank = A.get_bank(READER_BANK)
+    assert bank.version == "cb-v0.6-candidate4"
+    assert bank.sha256 == "a0c04acf37cb05005ed2f3c01ae3b0410221a392da39b665b25879a678cd534d"
 
 
 def test_single_ambiguity_routes_to_review(wired):
@@ -102,18 +125,19 @@ def test_thread_uses_slot_author_role_in_both_judgments(wired):
     assert "[贴主]" in thread_call["state"]["评论列表"]
 
 
-def test_ops_unclear_label_is_review_even_when_confidence_is_high(wired):
+def test_advisory_ambiguity_is_reported_but_not_routed_to_review(wired):
+    """运营侧 comment_intent 选了「其他」照样标歧义，但它只提示，不送复核（D-112）；门槛题歧义仍送复核（上面那条）。"""
     client, jev = wired
     jev.overrides["comment_intent"] = "其他"
     data = single(client).json()
-    assert "comment_intent" in data["ambiguous"] and data["needs_review"] is True and data["passed"] is False
+    assert "comment_intent" in data["ambiguous"] and data["needs_review"] is False and data["passed"] is True
 
 
 @pytest.mark.parametrize("which", ["missing", "endorsement"])
 def test_missing_answers_and_endorsements_do_not_pass(wired, which):
     client, jev = wired
     if which == "missing":
-        jev.omit.add("arranged")
+        jev.omit.add("echoes_post")   # 门槛题漏答
     else:
         jev.overrides["speech_act"] = "亲历背书"
     data = single(client).json()
@@ -159,3 +183,10 @@ def test_failure_is_not_a_successful_comment_check(wired):
     client, jev = wired
     jev.fail = True
     assert single(client).status_code == 502
+
+
+def test_missing_advisory_answer_is_flagged_not_reviewed(wired):
+    client, jev = wired
+    jev.omit.add("arranged")
+    data = single(client).json()
+    assert data["passed"] is True and data["needs_review"] is False and "参考题漏答" in data["flags"]

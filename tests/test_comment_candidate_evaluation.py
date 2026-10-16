@@ -245,12 +245,16 @@ def test_receipt_cannot_be_reused_for_another_output_batch(packet):
         C.evaluate(**{**packet, "output": packet["output"].parent / "different"}, authorization=auth)
 
 
-def test_C4_stays_outside_runtime_discovery_and_legacy_contract():
+def test_C4_released_once_byte_identical_and_legacy_contract():
     bank = C.candidate()
     trusted = json.loads((E.ROOT / "config/comment_candidate4_diagnostic_contract.json").read_text())
     assert trusted["scope_counts"] == {"synthetic_specification": 20,
                                         "development_single_reviewer": 40, "unseen_AI_definition_reference": 40}
     assert trusted["returned_reference_sha256"] == "953dc0975d58574045324d55b7f01b97a352b724c12e2c08ee8ff616045341d3"
-    assert not any(E.load_bank(p).version == bank.version for p in discover(E.ROOT / "banks").values())
+    # 2026-10-16 owner 验收 D-112：C4 原样发布成 comment_reader_v0.6（只加了 status / frozen_sha256 两行元数据，
+    # 规范化 digest 不变）；候选目录那份仍不参与 runtime 发现。
+    released = [n for n, p in discover(E.ROOT / "banks").items() if E.load_bank(p).version == bank.version]
+    assert released == ["comment_reader_v0.6"]
+    assert E.load_bank(discover(E.ROOT / "banks")["comment_reader_v0.6"]).sha256 == bank.sha256
     with pytest.raises(ValueError, match="limited to"):
         E.candidate_for(C.BANK, E.load_bank(E.BANK))

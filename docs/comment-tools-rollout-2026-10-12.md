@@ -1,5 +1,14 @@
 # J-01 / J-02 / J-03 · 评论工具与回填
 
+> **2026-10-16 owner 验收 D-112（truth-vault DECISIONS），写手评论工具按下面的口径开放：**
+> - 读者侧题库换成 `comment_reader_v0.6`：C4 原样发布，规范化 digest `a0c04acf…` 与验收时一致，只加了 `status` / `frozen_sha256` 两行元数据。
+> - 通过与否只看四道门槛题（`speech_act` / `names_brand` / `echoes_post` / `detail_level`）和背书复核。
+> - `register` / `reader_value` / `arranged` 只作提示：不合评论位要求时进返回值的 `hints`，不进 `plan`，不影响 `passed`；漏答或标歧义也不送复核。
+> - 运营侧 `comment_intent` 没有验收过，同样只提示。
+> - 整组检查（`comment_thread_v0.4`）不在 D-112 范围内，照旧判定。
+> - 开关仍是 `JUDGE_COMMENT_TOOLS_ENABLED=1`（Railway 环境变量）。
+> - 内部 stdio 工具与历史回填仍用 v0.4，J-02 小批影子回填时再换。
+
 > **当前阶段更新（2026-10-15）见 [收尾结论](comment-line-closeout-2026-10-15.md)及[HANDOFF](../HANDOFF.md)**：人员40条已返回；C3和获此次许可的C4均完成验证，C4新40与AI参考225/280，未达预注册标准，暂不推广。工程及本地合成接口验证完成；生产评论关闭、无shadow/primary，下文早期阶段快照保留追溯。
 
 两个候选评论接口已实现：`POST /comment_repair_plan_for`（帖子 + 单条评论 + slot 目标画像）和 `POST /judge_thread`（帖子 + 1..20 条评论，可带每条 slot）。单条/整组使用同一slot角色（贴主回复不会在整组误标读者位）。两者接受管理 key 或受限 writer key；均只读、不入稿件库、不回账本行。额外的 write / published 参数直接 422，候选评论固定按未发布内容检查出境；未清出的处方药项目 403、一次 Jev 调用也不发。
