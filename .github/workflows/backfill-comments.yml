@@ -47,19 +47,21 @@ jobs:
             [[ "$RESUME_RUN" =~ ^[0-9]+$ ]] || exit 2
             gh run download "$RESUME_RUN" --repo "$GITHUB_REPOSITORY" --name comment-backfill --dir resume
           fi
+      # 产物里没有评论原文和帖子正文：快照 ids.json 只有 id + md5，续跑按 id 回生产重取并逐条比对（D-112「不做」）；
+      # rows.json / comments.sql / raw.json 只有闭集答案和概率（评论题库不要证据句）
       - name: judge historical comments (shadow only)
         run: |
           if [ -n "$RESUME_RUN" ]; then
-            LIMIT=$(python -c 'import json; print(len(json.load(open("resume/inputs.json"))))')
+            LIMIT=$(python -c 'import json; print(len(json.load(open("resume/ids.json"))))')
           fi
           cmd=(python scripts/backfill_comments.py --limit "$LIMIT" --workers 4
             --sql artifacts/comments.sql --rows-json artifacts/rows.json
-            --input-snapshot artifacts/inputs.json
+            --input-snapshot artifacts/ids.json
             --summary artifacts/summary.csv --raw artifacts/raw.json)
           if [ -n "$RESUME_RUN" ]; then
             run_tag=$(cat resume/run_tag.txt)
             [[ "$run_tag" =~ ^shadow-comments-[0-9]+$ ]] || exit 2
-            cmd+=(--input resume/inputs.json --run-tag "$run_tag" --resume resume/rows.json)
+            cmd+=(--resume-ids resume/ids.json --run-tag "$run_tag" --resume resume/rows.json)
           else
             run_tag="shadow-comments-$GITHUB_RUN_ID"
             cmd+=(--from-db --run-tag "$run_tag")
