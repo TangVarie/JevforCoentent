@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from typing import Literal, Optional
 
 from fastapi import Depends, HTTPException
@@ -16,6 +17,9 @@ from .jev_client import JevError
 # （测试钉住：运营侧题库的每道题都在这里，新加的运营题不会悄悄变成门槛）。
 READER_BANK = "comment_reader_v0.6"
 ADVISORY = frozenset({"register", "reader_value", "arranged", "comment_intent", "is_scripted"})
+# 整组评论区题库 comment_thread_v0.4 不在 D-112 范围、没验收过：四道模型题同样只提示（不判不过、歧义或漏答不送复核）。
+# 仍然判定的只有代码算的点名条数（named_count）和每条评论自己的门槛题 / 背书复核。测试钉住整组题库的每道题都在这里。
+THREAD_ADVISORY = frozenset({"praise_share", "same_template", "has_friction", "thread_arranged"})
 
 
 class InputModel(BaseModel):
@@ -136,16 +140,24 @@ def attach(app, *, get_bank, get_client, policy, auth, parallel):
             raise HTTPException(502, f"Jev 调用失败：{exc}")
         views = [_view(cj, {"reader": reader, "ops": ops}, fill) for cj in judged]
         ambiguous = [qid for qid, item in tj.items.items() if item.get("ambiguous")]
-        thread_review = any(q.id in ambiguous and "进人工" in q.on_ambiguous for q in thread.questions)
-        needs_review = tj.needs_review or thread_review or any(v["needs_review"] for v in views)
-        hard_fails = tj.hard_fails or any(cj.hard_fails for cj in judged)
-        plan = []
+        gate = replace(tj, hard_fails=[f for f in tj.hard_fails if f[0] not in THREAD_ADVISORY],
+                       unjudged=[u for u in tj.unjudged if u[0] not in THREAD_ADVISORY])
+        hinted = [f for f in tj.hard_fails if f[0] in THREAD_ADVISORY]
+        thread_review = any(q.id in ambiguous and "进人工" in q.on_ambiguous and q.id not in THREAD_ADVISORY
+                            for q in thread.questions)
+        needs_review = gate.needs_review or thread_review or any(v["needs_review"] for v in views)
+        hard_fails = gate.hard_fails or any(cj.hard_fails for cj in judged)
+        plan, hints = [], []
         if all(slots):
-            plan = C.thread_repair_plan(tj, slots, judged)
-        elif tj.hard_fails:
-            plan = [{"slot": None, "why": "请提供每条评论的 slot 目标画像，再定位需要调整的评论位"}]
-        return {"passed": tj.passed() and not needs_review and not hard_fails,
-                "needs_review": needs_review, "hard_fails": tj.hard_fails, "unjudged": tj.unjudged,
+            plan = C.thread_repair_plan(gate, slots, judged)
+            hints = C.thread_repair_plan(replace(tj, hard_fails=hinted), slots, judged) if hinted else []
+        else:
+            if gate.hard_fails:
+                plan = [{"slot": None, "why": "请提供每条评论的 slot 目标画像，再定位需要调整的评论位"}]
+            if hinted:
+                hints = [{"slot": None, "why": "评论区参考题（未验收）不理想：" + "、".join(f[0] for f in hinted)}]
+        return {"passed": gate.passed() and not needs_review and not hard_fails,
+                "needs_review": needs_review, "hard_fails": gate.hard_fails, "unjudged": tj.unjudged,
                 "profile": {q: item.get("answer") for q, item in tj.items.items()}, "code": tj.code,
-                "plan": plan, "comments": views, "ambiguous": ambiguous,
+                "plan": plan, "hints": hints, "advisory": sorted(THREAD_ADVISORY), "comments": views, "ambiguous": ambiguous,
                 "calls": tj.calls + sum(cj.calls for cj in judged), "policy": decision.as_dict()}

@@ -4,10 +4,11 @@
 > - 读者侧题库换成 `comment_reader_v0.6`：C4 原样发布，规范化 digest `a0c04acf…` 与验收时一致，只加了 `status` / `frozen_sha256` 两行元数据。
 > - 通过与否只看四道门槛题（`speech_act` / `names_brand` / `echoes_post` / `detail_level`）和背书复核。
 > - `register` / `reader_value` / `arranged` 只作提示：不合评论位要求时进返回值的 `hints`，不进 `plan`，不影响 `passed`；漏答或标歧义也不送复核。
-> - 运营侧 `comment_intent` 没有验收过，同样只提示。
-> - 整组检查（`comment_thread_v0.4`）不在 D-112 范围内，照旧判定。
+> - 运营侧整套（`comment_intent`、`is_scripted`）没有验收过，同样只提示。
+> - 整组检查（`comment_thread_v0.4`）不在 D-112 范围内：四道模型题同样只提示，评论区不理想进 `hints`，歧义或漏答不送复核；仍判定的只有代码算的点名条数和每条评论自己的门槛题 / 背书复核。要让整组题判通过与否得另起一轮验收。
 > - 开关仍是 `JUDGE_COMMENT_TOOLS_ENABLED=1`（Railway 环境变量）。
-> - 内部 stdio 工具与历史回填仍用 v0.4，J-02 小批影子回填时再换。
+> - 10-16 07:15 UTC 生产开关已开，经写作台用真实写手 key 核过两个端点（单条通过、整组里的背书送复核）。出问题就把开关改回 0：两个端点立即 503，写作台如实回「没判成」。
+> - 历史回填（J-02）读者侧已换 v0.6；内部 stdio 工具仍用 v0.4。
 
 > **当前阶段更新（2026-10-15）见 [收尾结论](comment-line-closeout-2026-10-15.md)及[HANDOFF](../HANDOFF.md)**：人员40条已返回；C3和获此次许可的C4均完成验证，C4新40与AI参考225/280，未达预注册标准，暂不推广。工程及本地合成接口验证完成；生产评论关闭、无shadow/primary，下文早期阶段快照保留追溯。
 

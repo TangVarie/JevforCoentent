@@ -132,12 +132,42 @@ def test_single_ambiguity_routes_to_review(wired):
     assert "names_brand" in data["ambiguous"] and data["passed"] is False and data["needs_review"] is True
 
 
-def test_thread_ambiguity_routes_to_review(wired):
+def thread(client, comments, **changes):
+    return client.post("/judge_thread", headers={"X-Judge-Key": "writer"}, json={**POST, "comments": comments, **changes})
+
+
+@pytest.mark.parametrize("how", ["ambiguous", "missing"])
+def test_unaccepted_thread_questions_do_not_route_to_review(wired, how):
+    """整组题库 comment_thread_v0.4 不在 D-112 范围：模型题标歧义或漏答照样报告，但不送复核、不判不过。"""
     client, jev = wired
-    jev.ambiguous = {"has_friction"}
-    data = client.post("/judge_thread", headers={"X-Judge-Key": "writer"},
-                       json={**POST, "comments": [{"text": "怎么买呢"}]}).json()
-    assert "has_friction" in data["ambiguous"] and data["needs_review"] is True and data["passed"] is False
+    if how == "ambiguous":
+        jev.ambiguous = {"has_friction"}
+    else:
+        jev.omit.add("has_friction")
+    data = thread(client, [{"text": "怎么买呢"}]).json()
+    assert data["needs_review"] is False and data["passed"] is True, data
+    assert ("has_friction" in data["ambiguous"]) if how == "ambiguous" else data["unjudged"]
+
+
+def test_thread_model_failures_are_hints_not_plan(wired):
+    client, jev = wired
+    jev.overrides["same_template"] = True
+    data = thread(client, [{"text": "怎么买呢", "slot": {**SLOT, "id": "a"}}, {"text": "在哪买", "slot": {**SLOT, "id": "b"}}]).json()
+    assert data["passed"] is True and data["hard_fails"] == [] and data["plan"] == [], data
+    assert data["hints"] and "same_template" in data["advisory"]
+
+
+def test_named_count_code_check_still_gates(wired):
+    client, jev = wired
+    jev.overrides["names_brand"] = True
+    data = thread(client, [{"text": "这个牌子怎么买"}, {"text": "这个牌子在哪买"}], max_named=1).json()
+    assert data["passed"] is False and [f[0] for f in data["hard_fails"]] == ["named_count"], data
+    assert data["plan"] and data["plan"][0]["slot"] is None
+
+
+def test_every_thread_question_is_advisory():
+    from judge.comment_api import THREAD_ADVISORY
+    assert {q.id for q in A.get_bank("comment_thread_v0.4").questions} <= THREAD_ADVISORY
 
 
 def test_thread_uses_slot_author_role_in_both_judgments(wired):
