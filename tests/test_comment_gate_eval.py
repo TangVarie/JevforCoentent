@@ -54,7 +54,13 @@ def test_production_contract_matches_preregistration():
     assert c["thresholds"]["gating_ambiguous_fraction_max"] == .25
     assert c["thresholds"]["unambiguous_endorsement_false_negatives_max"] == 0
     assert c["sample"]["count"] == 40 and len(c["sample"]["ids"]) == 40
-    assert c["reference"]["frozen"] is False and c["release_accepted"] is False
+    ref = c["reference"]
+    if ref["frozen"]:   # 冻结之后: 合同里的 sha 必须就是仓里这份参考文件的 sha (D-112: 先冻结、后调用)
+        assert ref["sha256"] == hashlib.sha256((E.ROOT / ref["path"]).read_bytes()).hexdigest()
+        assert ref["source_kind"] == "single_human_reviewer"
+    else:
+        assert ref["sha256"] is None
+    assert c["release_accepted"] is False
     assert c["authorization"]["max_live_runs"] == 1
 
 

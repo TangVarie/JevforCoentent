@@ -1,0 +1,491 @@
+{
+  "decision": "D-112",
+  "source_kind": "single_human_reviewer",
+  "ai_suggestions_shown": false,
+  "candidate_version": "cb-v0.6-candidate4",
+  "sample_sha256": "f7b7ffc5e82f7732c17860c055d98e9409a3d87c376d8ec92d144c4dfb73d6f1",
+  "returned_workbook_sha256": "1fa39916c7bab0faec400b06111acb78aa761b54fb832d7cd5ca2b8c184330ec",
+  "unresolved_rule": "blank or out-of-vocabulary cells are null (unresolved); never filled in",
+  "cases": [
+    {
+      "id": "NRT_phase2_recuYXUhTuPP0p_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "随手口语",
+        "reader_value": "判断依据",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NRT_phase3_recv0rz7EHeapg_c1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "文案腔",
+        "reader_value": "只有评价",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "NRT_phase2_recuXkwGJK2Qvv_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "随手口语",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NRT_phase3_recv18huoy8ovf_c1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "NRT_phase2_recuXYBYBcNOOp_c1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "随手口语",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "NRT_phase3_recv0whF4cwFy4_c1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "无",
+        "register": "文案腔",
+        "reader_value": "只有评价",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "LNKT_phase1_recvsUIA0MInHr_hefb060293361_1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "随手口语",
+        "reader_value": "判断依据",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "LNKT_phase1_recvu2v3C8PWPh_h44bdee024342_1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "随手口语",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NRT_phase3_recv1vrL72s3K7_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "认真分享",
+        "reader_value": "判断依据",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "LNKT_phase1_recvs34tDOAJNo_h52c488e05bdf_1",
+      "expect": {
+        "speech_act": "闲聊表情",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "随手口语",
+        "reader_value": "无",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NRT_phase3_recv18huoyoJua_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "认真分享",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "LNKT_phase1_recvtbKH2RwDcz_h8fa34aa36fcd_1",
+      "expect": {
+        "speech_act": "闲聊表情",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "无",
+        "register": "随手口语",
+        "reader_value": "无",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "LNKT_phase1_recvs34tDORhG5_h847b2d91ce8d_1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "否",
+        "detail_level": "模糊",
+        "register": "随手口语",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NRT_phase2_recuYXUhTu8tjU_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "随手口语",
+        "reader_value": "判断依据",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv3K4xf0ALFN_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "SPX_phase1_recvqVAd4GWfST_hb031bce646c5_1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "随手口语",
+        "reader_value": "判断依据",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv2xd6lzMOEj_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "认真分享",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv3UT9F1yI58_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "认真分享",
+        "reader_value": "判断依据",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv46L7dYe6Ko_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "认真分享",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv1nDNcce4cC_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "认真分享",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv3WcbrVtjk1_c1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "随手口语",
+        "reader_value": "只有评价",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv2YL0GQg2Tz_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "认真分享",
+        "reader_value": "判断依据",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv4M1Vyak2lZ_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "认真分享",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv47G0uFLfgS_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "随手口语",
+        "reader_value": "判断依据",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv4ZeTmz1MP4_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv3G0QHWEPNT_c1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "文案腔",
+        "reader_value": "只有评价",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv3RoQTa17im_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "认真分享",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "NUC_phase1_recv59erAa3i0b_c1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "否",
+        "detail_level": "具体",
+        "register": "认真分享",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvmpA0N0Un6M_c1",
+      "expect": {
+        "speech_act": "补充经验",
+        "names_brand": "否",
+        "echoes_post": "否",
+        "detail_level": "模糊",
+        "register": "随手口语",
+        "reader_value": "无",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvmpA0N0SjFH_h53d06a6ac147_1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "模糊",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvmpA0N05o4A_h4317d06a0126_1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvoyQzJgouvM_c2",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "否",
+        "echoes_post": "否",
+        "detail_level": "具体",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvnBzfdUJKQP_h8a29aede9bfe_1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvnBzfdU4nzS_hac2074433509_1",
+      "expect": {
+        "speech_act": "说不清",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "无",
+        "register": "随手口语",
+        "reader_value": "无",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvnUQdR5IVrC_h8dead82ad91c_1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvqtis0iFQJ9_h2c70891c9c32_1",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "是",
+        "echoes_post": "否",
+        "detail_level": "模糊",
+        "register": "随手口语",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvrd83rmz4FY_c7",
+      "expect": {
+        "speech_act": "旁观推荐",
+        "names_brand": "否",
+        "echoes_post": "否",
+        "detail_level": "具体",
+        "register": "随手口语",
+        "reader_value": "判断依据",
+        "arranged": "是"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvsE8E0MPxfg_c1",
+      "expect": {
+        "speech_act": "回复答疑",
+        "names_brand": "否",
+        "echoes_post": "是",
+        "detail_level": "无",
+        "register": "随手口语",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvqtis0izcn1_hd09f614929bb_1",
+      "expect": {
+        "speech_act": "提问",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "无",
+        "register": "随手口语",
+        "reader_value": "可行动信息",
+        "arranged": "否"
+      }
+    },
+    {
+      "id": "OKMAN_phase1_recvoyQzJgWhCn_h66ba7dcb7e6d_1",
+      "expect": {
+        "speech_act": "亲历背书",
+        "names_brand": "是",
+        "echoes_post": "是",
+        "detail_level": "具体",
+        "register": "文案腔",
+        "reader_value": "可行动信息",
+        "arranged": "是"
+      }
+    }
+  ]
+}
