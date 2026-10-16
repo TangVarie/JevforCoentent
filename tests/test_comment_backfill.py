@@ -141,7 +141,7 @@ def test_resume_workflow_uses_whole_snapshot_and_original_tag(tmp_path):
                 ["jobs"]["backfill"]["steps"] if s.get("name") == "judge historical comments (shadow only)")
     (tmp_path / "resume").mkdir()
     (tmp_path / "artifacts").mkdir()
-    (tmp_path / "resume/inputs.json").write_text(json.dumps([{}] * 500))
+    (tmp_path / "resume/ids.json").write_text(json.dumps([{}] * 500))
     (tmp_path / "resume/run_tag.txt").write_text("shadow-comments-123\n")
     # Execute the actual workflow shell with a model-free CLI shim; -c still runs real Python.
     shim = 'python() { if [ "$1" = -c ]; then "$PYTHON_REAL" "$@"; else printf "%s\\n" "$@" > cli-args.txt; fi; }\n'
@@ -150,5 +150,5 @@ def test_resume_workflow_uses_whole_snapshot_and_original_tag(tmp_path):
                         "RESUME_RUN": "456", "GITHUB_RUN_ID": "789", "WRITE_SHADOW": "false"})
     args = (tmp_path / "cli-args.txt").read_text().splitlines()
     assert args[args.index("--limit") + 1] == "500"
-    assert args[args.index("--input") + 1] == "resume/inputs.json"
+    assert args[args.index("--resume-ids") + 1] == "resume/ids.json" and "--input" not in args
     assert args[args.index("--run-tag") + 1] == "shadow-comments-123"

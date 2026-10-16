@@ -3,10 +3,15 @@
 """评论回填：给 truth_vault.comments 跑两套题库，出账本 SQL 和每篇的「评论构成」。
 
   · 运营侧 banks/comment_ops_v0.2.yaml → comment_intent / is_scripted（表里现有六值闭集；state 不带蓝词清单，见题库头注释）
-  · 读者侧 banks/comment_reader_v0.4.yaml → 言语行为 / 点名品牌 / 接住帖子 / 细节 / 语域 / 读者用处 / 像不像安排的
+  · 读者侧 banks/comment_reader_v0.6.yaml（C4，D-112 门槛轮通过、owner 10-16 验收）→ 言语行为 / 点名品牌 / 接住帖子 / 细节
+    四道门槛题 + 语域 / 读者用处 / 像不像安排的三道参考题；账本照常每题一行，参考题只提示是写手工具的口径，回填不区分
 
   python3 scripts/backfill_comments.py --from-db --limit 500 --sql comments.sql --summary summary.csv [--bank both|ops|reader]
   python3 scripts/backfill_comments.py --input comments.json ...      # [{comment_id, note_id, comment_text, comment_role, title, raw_content}]
+  python3 scripts/backfill_comments.py --resume-ids ids.json --resume rows.json ...   # 续跑：按 id 快照回生产重取同一批
+
+续跑快照（--input-snapshot）只存 comment_id / note_id / 两个 md5，不存评论原文和帖子正文：快照会作为 Actions 产物
+上传，原文不进 GitHub（D-112「不做」）。续跑按 id 回生产重取，评论或帖子正文跟快照对不上就拒绝，不判变了的文本。
 
 账本：subject_type = 'comment'（要先跑 migrations/notes_v1_17_judge_subjects.sql），subject_id = comments.comment_id。
 两套题库分别落两批行（question_id 不同，不冲突）。默认 shadow；primary 写库需 --acceptance 指向人工验收记录。
@@ -19,6 +24,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import csv
+import hashlib
 import json
 import os
 import sys
@@ -35,7 +41,8 @@ from judge.comments import comment_state, fill_for  # noqa: E402
 from judge.spans import build_spans  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-READER = ROOT / "banks" / "comment_reader_v0.4.yaml"
+READER = ROOT / "banks" / "comment_reader_v0.6.yaml"
+READER_NAME = "comment_reader_v0.6"
 OPS = ROOT / "banks" / "comment_ops_v0.2.yaml"
 
 
@@ -65,14 +72,57 @@ def _pg_pages(url, key, base_query: str, limit: int, page: int = PAGE) -> list:
     return out
 
 
-def fetch(limit: int, project: str | None):
+COMMENT_COLS = "comment_id,note_id,content,comment_role,is_pinned"
+
+
+def _db():
     url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not (url and key):
-        sys.exit("--from-db 需要 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
-    q = "comments?select=comment_id,note_id,content,comment_role,is_pinned&order=note_id,comment_order,comment_id"
+        sys.exit("--from-db / --resume-ids 需要 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY")
+    return url, key
+
+
+def fetch(limit: int, project: str | None):
+    url, key = _db()
+    q = f"comments?select={COMMENT_COLS}&order=note_id,comment_order,comment_id"
     if project:
         q += f"&note_id=like.{urllib.parse.quote(project)}*"
-    comments = _pg_pages(url, key, q, limit)
+    return _with_notes(url, key, _pg_pages(url, key, q, limit))
+
+
+def _md5(text) -> str:
+    return hashlib.md5((text or "").encode("utf-8")).hexdigest()
+
+
+def snapshot_of(comments: list) -> list:
+    """续跑快照：只有 id 和 md5，没有原文（产物会上传到 Actions）。"""
+    return [{"comment_id": c["comment_id"], "note_id": c["note_id"], "role": c.get("comment_role"),
+             "md5": [_md5(c.get("comment_text")), _md5(c.get("raw_content"))]} for c in comments]
+
+
+def fetch_ids(snapshot: list) -> list:
+    """按快照的 id 回生产重取同一批评论（保持快照顺序）；缺行、换帖或文本变了都拒绝续跑。"""
+    url, key = _db()
+    ids = [s["comment_id"] for s in snapshot]
+    got = {}
+    for i in range(0, len(ids), 150):
+        part = ids[i:i + 150]
+        chunk = ",".join(urllib.parse.quote(x) for x in part)
+        for c in _pg_pages(url, key, f"comments?select={COMMENT_COLS}&comment_id=in.({chunk})&order=comment_id", len(part)):
+            got[c["comment_id"]] = c
+    missing = [x for x in ids if x not in got]
+    if missing:
+        raise ValueError(f"{len(missing)} 条快照里的评论生产里已经找不到，拒绝续跑")
+    comments = _with_notes(url, key, [got[x] for x in ids])
+    drift = [s["comment_id"] for s, c in zip(snapshot, comments)
+             if (s["note_id"], s.get("role")) != (c["note_id"], c.get("comment_role"))
+             or s["md5"] != [_md5(c["comment_text"]), _md5(c["raw_content"])]]
+    if drift:
+        raise ValueError(f"{len(drift)} 条评论或所属帖子正文跟快照对不上，拒绝续跑（续跑只判同一批文本）")
+    return comments
+
+
+def _with_notes(url: str, key: str, comments: list) -> list:
     ids = sorted({c["note_id"] for c in comments})
     notes = {}
     for i in range(0, len(ids), 150):
@@ -158,12 +208,13 @@ def main():
     ap.add_argument("--project"); ap.add_argument("--bank", choices=["both", "ops", "reader"], default="both")
     ap.add_argument("--run-tag", default="shadow-comments"); ap.add_argument("--sql"); ap.add_argument("--summary"); ap.add_argument("--raw")
     ap.add_argument("--rows-json"); ap.add_argument("--resume", help="完整有效的同题库/模型/run_tag 账本行才跳过")
-    ap.add_argument("--input-snapshot", help="保存本批文本输入，续跑应使用这个固定快照")
+    ap.add_argument("--input-snapshot", help="保存本批 id + md5 快照（不含原文），续跑用 --resume-ids 指向它")
+    ap.add_argument("--resume-ids", help="续跑：按上一轮的 id 快照回生产重取同一批评论，文本变了就拒绝")
     ap.add_argument("--acceptance", help="primary 写库前的 owner 人工验收记录 JSON")
     ap.add_argument("--write", action="store_true"); ap.add_argument("--workers", type=int, default=4); ap.add_argument("--mock", action="store_true")
     args = ap.parse_args()
-    if args.from_db == bool(args.input):
-        ap.error("必须且只能指定 --from-db 或 --input")
+    if sum(map(bool, (args.from_db, args.input, args.resume_ids))) != 1:
+        ap.error("必须且只能指定 --from-db、--input、--resume-ids 之一")
     if not 1 <= args.limit <= 30000 or not 1 <= args.workers <= 8:
         ap.error("limit 需为 1..30000，workers 需为 1..8")
     if args.mock and args.write:
@@ -172,17 +223,23 @@ def main():
     if args.bank in ("both", "ops"):
         banks.append((load_bank(OPS, name="comment_ops_v0.2"), state_ops))
     if args.bank in ("both", "reader"):
-        banks.append((load_bank(READER, name="comment_reader_v0.4"), state_reader))
+        banks.append((load_bank(READER, name=READER_NAME), state_reader))
     if args.write and not args.run_tag.startswith("shadow-"):
         try:
             validate_acceptance(args.acceptance, banks)
         except (ValueError, OSError) as exc:
             ap.error(str(exc))
-    comments = fetch(args.limit, args.project) if args.from_db else load_input(args.input)[:args.limit]
+    if args.resume_ids:
+        try:
+            comments = fetch_ids(json.loads(Path(args.resume_ids).read_text(encoding="utf-8")))[:args.limit]
+        except (ValueError, OSError) as exc:
+            sys.exit(str(exc))
+    else:
+        comments = fetch(args.limit, args.project) if args.from_db else load_input(args.input)[:args.limit]
     if len({c["comment_id"] for c in comments}) != len(comments):
         ap.error("输入包含重复 comment_id")
     if args.input_snapshot:
-        Path(args.input_snapshot).write_text(json.dumps(comments, ensure_ascii=False, indent=1), encoding="utf-8")
+        Path(args.input_snapshot).write_text(json.dumps(snapshot_of(comments), ensure_ascii=False, indent=1), encoding="utf-8")
     try:
         client = JevClient(mock=args.mock)
     except JevError as exc:
