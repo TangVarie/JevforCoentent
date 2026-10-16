@@ -54,12 +54,9 @@ def test_production_contract_matches_preregistration():
     assert c["thresholds"]["gating_ambiguous_fraction_max"] == .25
     assert c["thresholds"]["unambiguous_endorsement_false_negatives_max"] == 0
     assert c["sample"]["count"] == 40 and len(c["sample"]["ids"]) == 40
-    ref = c["reference"]
-    if ref["frozen"]:   # 冻结之后: 合同里的 sha 必须就是仓里这份参考文件的 sha (D-112: 先冻结、后调用)
-        assert ref["sha256"] == hashlib.sha256((E.ROOT / ref["path"]).read_bytes()).hexdigest()
-        assert ref["source_kind"] == "single_human_reviewer"
-    else:
-        assert ref["sha256"] is None
+    ref = c["reference"]   # 10-16 起参考已冻结: 必须保持冻结, 合同里的 sha 就是仓里这份参考文件的 sha
+    assert ref["frozen"] is True and ref["source_kind"] == "single_human_reviewer"
+    assert ref["sha256"] == hashlib.sha256((E.ROOT / ref["path"]).read_bytes()).hexdigest()
     assert c["release_accepted"] is False
     assert c["authorization"]["max_live_runs"] == 1
 
@@ -116,3 +113,35 @@ def test_unresolved_reference_cells_are_excluded_not_filled(contract, tmp_path):
     assert G.run(contract, rows(), doc, tmp_path / "out", client=Client()) == 0
     s = json.loads((tmp_path / "out/summary.json").read_text())
     assert s["per_question"]["detail_level"]["resolved"] == 19 and s["gating"]["unresolved_reference_cells"] == 1
+
+
+def test_run_marks_its_start_before_the_first_model_call(contract, tmp_path):
+    doc = G.load_reference(G.Path(contract["reference"]["path"]), contract, rows(), G.C.candidate())
+    out = tmp_path / "out"
+    seen = []
+
+    class Watching(Client):
+        def call(self, body):
+            seen.append((out / G.STARTED_MARKER).exists())
+            return super().call(body)
+    assert G.run(contract, rows(), doc, out, client=Watching()) == 0
+    assert seen and all(seen), "the single-use marker must exist before any request leaves"
+
+
+def test_missing_credentials_do_not_use_up_the_run(contract, tmp_path, monkeypatch):
+    def refuse():
+        raise G.JevError("no key")
+    monkeypatch.setattr(G, "JevClient", refuse)
+    doc = G.load_reference(G.Path(contract["reference"]["path"]), contract, rows(), G.C.candidate())
+    assert G.run(contract, rows(), doc, tmp_path / "out") == 4
+    assert not (tmp_path / "out" / G.STARTED_MARKER).exists()
+
+
+def test_workflow_refuses_a_second_run_before_the_result_is_committed():
+    wf = (E.ROOT / ".github/workflows/comment-gate-eval.yml").read_text(encoding="utf-8")
+    assert "actions: read" in wf
+    guard, _, rest = wf.partition("- name: Evaluate")
+    assert "comment-gate-d112-run-started" in guard and "exit 2" in guard and "inputs.mode == 'run'" in guard
+    upload = rest.split("- name: Record that the one run has been used", 1)[1].split("- name:", 1)[0]
+    assert "if: always()" in upload and "hashFiles('out/started.json')" in upload
+    assert "name: comment-gate-d112-run-started" in upload

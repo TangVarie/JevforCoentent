@@ -157,6 +157,9 @@ def score(bank, contract: dict, doc: dict, results: dict) -> dict:
             "gate": {"passed": not reasons, "reasons": reasons, "thresholds": th}}
 
 
+STARTED_MARKER = "started.json"
+
+
 def run(contract: dict, rows: list, doc: dict, output: Path, *, client=None, workers: int = 4) -> int:
     bank = C.candidate()
     output.mkdir(parents=True, exist_ok=True)
@@ -167,6 +170,11 @@ def run(contract: dict, rows: list, doc: dict, output: Path, *, client=None, wor
             E.save_json(output / "status.json", {"status": "blocked_missing_credentials", "model_calls": 0})
             return 4
     source = {r["comment_id"]: r for r in rows}
+    # 先落「开始调用」标记再发第一个请求: workflow 把它作为单独的 artifact 上传 (成功、失败、半途中断都传),
+    # 下一次 run 先查有没有这个 artifact —— 结论文件提交入库之前的空档里再点一次 run 也会被拒 (max_live_runs=1)。
+    E.save_json(output / STARTED_MARKER, {"decision": "D-112", "status": "model_calls_started",
+                                          "sample_sha256": contract["sample"]["sha256"],
+                                          "reference_sha256": contract["reference"]["sha256"]})
 
     def one(cid):
         row = source[cid]

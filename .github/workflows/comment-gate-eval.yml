@@ -16,6 +16,7 @@ on:
         required: true
 permissions:
   contents: read
+  actions: read   # the single-use guard lists this repo's artifacts
 concurrency:
   group: comment-gate-eval
   cancel-in-progress: false
@@ -38,6 +39,19 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -q -r requirements.txt requests
+      - name: Single use (max_live_runs=1)
+        if: inputs.mode == 'run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The committed summary only blocks runs after someone commits it. Any earlier run that reached the
+          # model (it uploads comment-gate-d112-run-started, whether it passed, failed or died half-way) has
+          # already used the one authorization, so a second dispatch in that window is refused here.
+          prior=$(gh api -X GET "repos/${{ github.repository }}/actions/artifacts" -f name=comment-gate-d112-run-started -f per_page=100 \
+                  --jq '[.artifacts[] | select(.workflow_run.id != ${{ github.run_id }})] | length')
+          if [ "$prior" != "0" ]; then
+            echo "::error::D-112 already ran against the model ($prior earlier run(s)); max_live_runs=1"; exit 2
+          fi
       - name: Evaluate
         run: |
           set +e
@@ -60,6 +74,13 @@ jobs:
           echo "evaluator exit code: $rc"
           # 0 = passed, 3 = completed but not passed (a valid outcome); 1/2/4 = incomplete or refused
           if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then exit "$rc"; fi
+      - name: Record that the one run has been used
+        if: always() && inputs.mode == 'run' && hashFiles('out/started.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: comment-gate-d112-run-started
+          path: out/started.json
+          retention-days: 90
       - name: Upload ids/labels/probabilities only
         if: always()
         uses: actions/upload-artifact@v4
