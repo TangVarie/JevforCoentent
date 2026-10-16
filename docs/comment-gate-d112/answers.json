@@ -1,0 +1,2005 @@
+{
+  "decision": "D-112",
+  "results": {
+    "NRT_phase2_recuYXUhTuPP0p_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.52,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.52
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.81,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.6,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.87,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.66,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.34
+        }
+      }
+    },
+    "NRT_phase3_recv0rz7EHeapg_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.92
+        },
+        "detail_level": {
+          "answer": "无",
+          "p": 0.53,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.6,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.82,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.6,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.6
+        }
+      }
+    },
+    "NRT_phase2_recuXkwGJK2Qvv_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.97,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.97
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.88,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.88
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.65,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.58,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.73,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.27
+        }
+      }
+    },
+    "NRT_phase3_recv18huoy8ovf_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 0.9,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.96
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.82,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.82
+        },
+        "detail_level": {
+          "answer": "无",
+          "p": 0.66,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.71,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.58,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.58
+        }
+      }
+    },
+    "NRT_phase2_recuXYBYBcNOOp_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 0.81,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.79,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.79
+        },
+        "echoes_post": {
+          "answer": "否",
+          "p": 0.59,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.41
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.74,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.71,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.5,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.8,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.8
+        }
+      }
+    },
+    "NRT_phase3_recv0whF4cwFy4_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 0.89,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.76,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.76
+        },
+        "detail_level": {
+          "answer": "无",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.66,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "只有评价",
+          "p": 0.7,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.56,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.44
+        }
+      }
+    },
+    "LNKT_phase1_recvsUIA0MInHr_hefb060293361_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.91
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.59,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.81,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.89,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.76,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.24
+        }
+      }
+    },
+    "LNKT_phase1_recvu2v3C8PWPh_h44bdee024342_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.59,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.59
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.66,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.66
+        },
+        "detail_level": {
+          "answer": "无",
+          "p": 0.71,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.5,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "只有评价",
+          "p": 0.78,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.64,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.36
+        }
+      }
+    },
+    "NRT_phase3_recv1vrL72s3K7_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.97,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.95,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.05
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.68,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.68
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.61,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.39
+        }
+      }
+    },
+    "LNKT_phase1_recvs34tDOAJNo_h52c488e05bdf_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "闲聊表情",
+          "p": 0.32,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.04
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.91
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.54,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.84,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "无",
+          "p": 0.9,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.88,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.12
+        }
+      }
+    },
+    "NRT_phase3_recv18huoyoJua_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.89,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.89
+        },
+        "echoes_post": {
+          "answer": "否",
+          "p": 0.5,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.5
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.79,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.51,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.51
+        }
+      }
+    },
+    "LNKT_phase1_recvtbKH2RwDcz_h8fa34aa36fcd_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 0.44,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.93,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.07
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.58,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.58
+        },
+        "detail_level": {
+          "answer": "无",
+          "p": 0.95,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.89,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "无",
+          "p": 0.66,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.62,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.38
+        }
+      }
+    },
+    "LNKT_phase1_recvs34tDORhG5_h847b2d91ce8d_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.84,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.75,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.75
+        },
+        "echoes_post": {
+          "answer": "否",
+          "p": 0.56,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.44
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.83,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.77,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.67,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.6,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.4
+        }
+      }
+    },
+    "NRT_phase2_recuYXUhTu8tjU_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.97,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.65,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.65
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.93,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.93,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.6,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.4
+        }
+      }
+    },
+    "NUC_phase1_recv3K4xf0ALFN_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.97,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.97
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.88,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.88
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.52,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.8,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.8
+        }
+      }
+    },
+    "SPX_phase1_recvqVAd4GWfST_hb031bce646c5_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.49,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.86,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.14
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.73,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.73
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.7,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.97,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.67,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.66,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.34
+        }
+      }
+    },
+    "NUC_phase1_recv2xd6lzMOEj_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.6,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.94
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.82,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.82
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.54,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.69,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.69
+        }
+      }
+    },
+    "NUC_phase1_recv3UT9F1yI58_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.84,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.84
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.95,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.85,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.59,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.41
+        }
+      }
+    },
+    "NUC_phase1_recv46L7dYe6Ko_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.89,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.89
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.86,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.86
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.93,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.61,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.61
+        }
+      }
+    },
+    "NUC_phase1_recv1nDNcce4cC_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.96
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.9,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.9
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.62,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.78,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.78
+        }
+      }
+    },
+    "NUC_phase1_recv3WcbrVtjk1_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 0.81,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.92
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.56,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.57,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.5,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.71,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.29
+        }
+      }
+    },
+    "NUC_phase1_recv2YL0GQg2Tz_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.08
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.88,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.88
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.64,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.56,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.44
+        }
+      }
+    },
+    "NUC_phase1_recv4M1Vyak2lZ_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.91
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.64,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.64
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.83,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.7,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.7
+        }
+      }
+    },
+    "NUC_phase1_recv47G0uFLfgS_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.58,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.58
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.72,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.67,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.9,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.8,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.8
+        }
+      }
+    },
+    "NUC_phase1_recv4ZeTmz1MP4_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.97,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.97
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.73,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.73
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.91
+        }
+      }
+    },
+    "NUC_phase1_recv3G0QHWEPNT_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.04
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.89,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.89
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.78,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.84,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.84
+        }
+      }
+    },
+    "NUC_phase1_recv3RoQTa17im_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.95,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.05
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.9,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.9
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.68,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.52,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.52
+        }
+      }
+    },
+    "NUC_phase1_recv59erAa3i0b_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.91
+        },
+        "echoes_post": {
+          "answer": "否",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.04
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.83,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.56,
+          "ambiguous": true,
+          "invalid": false,
+          "p_yes": 0.44
+        }
+      }
+    },
+    "OKMAN_phase1_recvmpA0N0Un6M_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "补充经验",
+          "p": 0.67,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.04
+        },
+        "echoes_post": {
+          "answer": "否",
+          "p": 0.85,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.15
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.57,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "无",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.85,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.15
+        }
+      }
+    },
+    "OKMAN_phase1_recvmpA0N0SjFH_h53d06a6ac147_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.94
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.73,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.73
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.52,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.53,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.95,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.87,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.87
+        }
+      }
+    },
+    "OKMAN_phase1_recvmpA0N05o4A_h4317d06a0126_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.9,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.9
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.86,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.86
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.48,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.86,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.84,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.84
+        }
+      }
+    },
+    "OKMAN_phase1_recvoyQzJgouvM_c2": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.06
+        },
+        "echoes_post": {
+          "answer": "否",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.09
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.75,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.94
+        }
+      }
+    },
+    "OKMAN_phase1_recvnBzfdUJKQP_h8a29aede9bfe_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.84,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.84
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.94
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.64,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.87,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.87
+        }
+      }
+    },
+    "OKMAN_phase1_recvnBzfdU4nzS_hac2074433509_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "补充经验",
+          "p": 0.6,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.97,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.03
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.86,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.86
+        },
+        "detail_level": {
+          "answer": "无",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.62,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "无",
+          "p": 0.82,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.82,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.18
+        }
+      }
+    },
+    "OKMAN_phase1_recvnUQdR5IVrC_h8dead82ad91c_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.08
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.86,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.86
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.87,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.59,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.92
+        }
+      }
+    },
+    "OKMAN_phase1_recvqtis0iFQJ9_h2c70891c9c32_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.94
+        },
+        "echoes_post": {
+          "answer": "否",
+          "p": 0.87,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.13
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.61,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "文案腔",
+          "p": 0.82,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.96,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.89,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.89
+        }
+      }
+    },
+    "OKMAN_phase1_recvrd83rmz4FY_c7": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "旁观推荐",
+          "p": 0.47,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.91,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.09
+        },
+        "echoes_post": {
+          "answer": "否",
+          "p": 0.88,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.12
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.58,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.48,
+          "ambiguous": true,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "判断依据",
+          "p": 0.92,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.66,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.66
+        }
+      }
+    },
+    "OKMAN_phase1_recvsE8E0MPxfg_c1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "回复答疑",
+          "p": 0.76,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "否",
+          "p": 0.93,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.07
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.77,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.77
+        },
+        "detail_level": {
+          "answer": "无",
+          "p": 0.63,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.87,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "无",
+          "p": 0.82,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.77,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.23
+        }
+      }
+    },
+    "OKMAN_phase1_recvqtis0izcn1_hd09f614929bb_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "提问",
+          "p": 0.98,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.97,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.97
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.7,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.7
+        },
+        "detail_level": {
+          "answer": "模糊",
+          "p": 0.63,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "随手口语",
+          "p": 0.88,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "无",
+          "p": 0.87,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "否",
+          "p": 0.74,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.26
+        }
+      }
+    },
+    "OKMAN_phase1_recvoyQzJgWhCn_h66ba7dcb7e6d_1": {
+      "status": "ok",
+      "items": {
+        "speech_act": {
+          "answer": "亲历背书",
+          "p": 1.0,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "names_brand": {
+          "answer": "是",
+          "p": 0.95,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.95
+        },
+        "echoes_post": {
+          "answer": "是",
+          "p": 0.94,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.94
+        },
+        "detail_level": {
+          "answer": "具体",
+          "p": 0.99,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "register": {
+          "answer": "认真分享",
+          "p": 0.68,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "reader_value": {
+          "answer": "可行动信息",
+          "p": 0.85,
+          "ambiguous": false,
+          "invalid": false
+        },
+        "arranged": {
+          "answer": "是",
+          "p": 0.71,
+          "ambiguous": false,
+          "invalid": false,
+          "p_yes": 0.71
+        }
+      }
+    }
+  }
+}
