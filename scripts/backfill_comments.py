@@ -10,8 +10,9 @@
   python3 scripts/backfill_comments.py --input comments.json ...      # [{comment_id, note_id, comment_text, comment_role, title, raw_content}]
   python3 scripts/backfill_comments.py --resume-ids ids.json --resume rows.json ...   # 续跑：按 id 快照回生产重取同一批
 
-续跑快照（--input-snapshot）只存 comment_id / note_id / 两个 md5，不存评论原文和帖子正文：快照会作为 Actions 产物
-上传，原文不进 GitHub（D-112「不做」）。续跑按 id 回生产重取，评论或帖子正文跟快照对不上就拒绝，不判变了的文本。
+续跑快照（--input-snapshot）只存 comment_id / note_id / 角色 / md5（评论、帖子正文、模型实际看到的整份输入），
+不存评论原文和帖子正文：快照会作为 Actions 产物上传，原文不进 GitHub（D-112「不做」）。续跑按 id 回生产重取，
+任何一项对不上就拒绝（含标题、品类变了），不判变了的输入。
 
 账本：subject_type = 'comment'（要先跑 migrations/notes_v1_17_judge_subjects.sql），subject_id = comments.comment_id。
 两套题库分别落两批行（question_id 不同，不冲突）。默认 shadow；primary 写库需 --acceptance 指向人工验收记录。
@@ -94,10 +95,19 @@ def _md5(text) -> str:
     return hashlib.md5((text or "").encode("utf-8")).hexdigest()
 
 
+def _input_md5(c: dict) -> str:
+    """模型实际看到的全部输入（state + 占位符取值）：标题、品类（决定 agency / product 占位符）变了也算变。"""
+    return _md5(json.dumps({"state": state_reader(c), "fill": fill_for(post_for(c))}, ensure_ascii=False, sort_keys=True))
+
+
+def _digests(c: dict) -> list:
+    return [_md5(c.get("comment_text")), _md5(c.get("raw_content")), _input_md5(c)]
+
+
 def snapshot_of(comments: list) -> list:
     """续跑快照：只有 id 和 md5，没有原文（产物会上传到 Actions）。"""
     return [{"comment_id": c["comment_id"], "note_id": c["note_id"], "role": c.get("comment_role"),
-             "md5": [_md5(c.get("comment_text")), _md5(c.get("raw_content"))]} for c in comments]
+             "md5": _digests(c)} for c in comments]
 
 
 def fetch_ids(snapshot: list) -> list:
@@ -116,9 +126,9 @@ def fetch_ids(snapshot: list) -> list:
     comments = _with_notes(url, key, [got[x] for x in ids])
     drift = [s["comment_id"] for s, c in zip(snapshot, comments)
              if (s["note_id"], s.get("role")) != (c["note_id"], c.get("comment_role"))
-             or s["md5"] != [_md5(c["comment_text"]), _md5(c["raw_content"])]]
+             or s["md5"] != _digests(c)]
     if drift:
-        raise ValueError(f"{len(drift)} 条评论或所属帖子正文跟快照对不上，拒绝续跑（续跑只判同一批文本）")
+        raise ValueError(f"{len(drift)} 条评论或所属帖子（正文 / 标题 / 品类）跟快照对不上，拒绝续跑（续跑只判同一批输入）")
     return comments
 
 

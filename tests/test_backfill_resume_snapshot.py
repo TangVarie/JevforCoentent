@@ -43,7 +43,7 @@ def test_snapshot_has_no_raw_text_and_resume_rebuilds_the_same_batch(monkeypatch
     assert {c["comment_id"]: c["comment_text"] for c in again} == {c["comment_id"]: c["comment_text"] for c in batch}
 
 
-@pytest.mark.parametrize("change", ["comment_text", "post_body", "missing", "role"])
+@pytest.mark.parametrize("change", ["comment_text", "post_body", "missing", "role", "title", "category"])
 def test_resume_refuses_when_production_changed(monkeypatch, change):
     wire(monkeypatch, COMMENTS, NOTES)
     snap = B.snapshot_of(B.fetch(limit=5, project=None))
@@ -54,8 +54,12 @@ def test_resume_refuses_when_production_changed(monkeypatch, change):
         notes[0]["raw_content"] += "改"
     elif change == "missing":
         comments.pop(3)
-    else:
+    elif change == "role":
         comments[2]["comment_role"] = "贴主"
+    elif change == "title":
+        notes[1]["title"] = "换了标题"                       # 正文没变，但模型看到的标题变了
+    else:
+        notes[1]["projects"] = {"category": "教育"}           # 品类决定 agency / product 占位符
     wire(monkeypatch, comments, notes)
     with pytest.raises(ValueError):
         B.fetch_ids(snap)
