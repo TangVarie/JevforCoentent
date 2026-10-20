@@ -96,7 +96,7 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
   - `verdict`：`code`（禁用词 / 词能不能出现在哪 / 必带话术 / 字数范围，形状同写作台 `deskcore/rulecheck.py`，写作台自己跑——Jev 不会数数、比大小）·
     `questions`（1–3 道只看一篇稿就能答的是非题；分得开时 `code` 也一起给）· `not_checkable`（流程、交付、写作方向菜单）。`where` ⊆ title / body / tags / comments；`max_len` 的 max、min 至少一个。
   - `code` 的执行语义按写作台 `rulecheck`：词表是不分大小写的「包含」（纯英文数字按词边界），所以 prompt 不让模型把单字、常见词放进禁用词（单个汉字直接打回）；
-    `forbidden_regex` 是 Python `re.search`、不加 flag（`.` 不跨换行），量词只套单个字符或定长的组（同写作台 `rulecheck._assert_regex_shape` + `validator` 的嵌套量词检查，查不过的打回重编，不会编出写作台存不进去的正则）。
+    `forbidden_regex` 是 Python `re.search`、不加 flag（`.` 不跨换行），量词只套单个字符或定长的组、能匹配同样字符的量词不挨着（同写作台 `rulecheck._assert_regex_shape` + `validator.assert_regex_is_safe`：嵌套量词，和 aw#115 加的 `a*a*b` / `.*.*x` 这类「挨在一起」检查，连同 codex review on aw#115 补的「组里的旗只管组里」（`(?i:a*)A*B`、`(?a)\W*é*x`），逻辑照搬在 `judge/rules.py`；照的是 aw#115 分支 1d65e5a 之上那一轮还没提交的 `validator.py`，aw#115 合进去以后要再对一遍；查不过的打回重编，不会编出写作台存不进去的正则。两边收不收由 `tests/test_regex_parity.py` 拿写作台测试里的清单和对拍探针抓到过的不一致对着，唯一比写作台严的是 pattern 最长 300 字）。
     数话题标签个数的正则假定 tags 串里没有重复：写作台 `rulecheck._parts` 把写手的 tags 和正文里的 #话题 直接拼在一起，两处都写了同一组话题会数成两倍，要在写作台那边先去重。
   - `coverage`（verdict 是 code / questions 时）：一条规则只能填一个 `code`、最多 3 道题；装不下的要求模型写进 `uncovered`、`coverage` 记 `partial`。
     **只有 `coverage: full` 的规则才能从写手简报里拿掉**；`partial` 的原文留在简报里（或请写手把规则拆成几条），`not_checkable` 的编译不替代它。

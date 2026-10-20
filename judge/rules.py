@@ -42,12 +42,20 @@ MAX_QUESTIONS = 3
 PASS_IF = ("是", "否")
 COVERAGE = ("full", "partial")
 QID_RE = re.compile(r"^[0-9a-z]{1,8}_[0-9a-f]{6}_[1-3]_[0-9a-f]{6}$")
-# 会灾难性回溯的正则：两道都查，哪道说危险都打回（比写作台严，不会比它松：写作台存规则前也查，查不过的存不进去）。
-#   · 解析树（同写作台 deskcore/rulecheck._assert_regex_shape，2026-10-20）：上限 > 1 的量词只能套在单个字符或定长、不带分支的组上。
+# 会灾难性回溯的正则（forbidden_regex）：写作台存规则前（deskcore/rulecheck.normalize_check）查的那几道，这里一道不少地照查，
+# 哪道不过都打回重编。为什么要和写作台一样宽（2026-10-20 改）：写作台拒收的 code 存不进去，这条规则的代码检查就静默没了，
+# 编译结果里却看不出来；在这里打回，模型带着原因重编一次，还不行这一条带 error，调用方看得见。
+#   · 形状（同写作台 rulecheck._assert_regex_shape）：上限 > 1 的量词只能套在单个字符或定长、不带分支的组上。
 #     它包含 autowriter validator 的「嵌套无上界量词」那道：((?:ab)+)+、(a{1,})+ 文字上看不出来，树上看得出；
 #     也挡 (哈|哈哈)+、(\s+\S+){5} 这类分支 / 变长组套量词的写法；
-#   · 文字形状：解析树拿不到（re._parser / sre_parse 是私有 API）时的兜底。
-_NESTED_QUANT = re.compile(r"\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)\s*(?:[+*]|\{\d*,\d*\})")
+#   · 挨在一起、能匹配同样字符的量词（同 autowriter validator.assert_regex_is_safe，aw#115 加的，见 _check_adjacent_repeats）：
+#     a*a*b、.*.*x、a.*a.*b 不嵌套也会卡死。以前这里写「比写作台严，不会比它松」，aw#115 之后就不成立了：这一道 Jev 原来没有，
+#     .*.*x 这里放行、写作台拒收；2026-10-20 照搬过来。同一天写作台在 codex review on aw#115 里又补了「组里的旗只管组里」
+#     （(?i:a*)A*B、(?a)\W*é*x、(?s:.*)\n*x 原来两边都放行），这里跟着补上（_scoped），照的是写作台那一轮还没提交的 validator.py；
+#   · 拿不到解析树（re._parser / sre_parse 是私有 API）就一条正则都不收：写作台这时也一条都存不进去（以前这里有个文字形状的兜底，
+#     会放行写作台拒收的正则，去掉了）。
+# 比写作台严的只剩 pattern 最长 MAX_PATTERN_CHARS 字（写作台不限）。两边对得上由 tests/test_regex_parity.py 钉住：
+# 写作台测试里拒收 / 放行的两张清单原样抄过来跑。
 _SINGLE_CHAR_OPS = frozenset({"LITERAL", "NOT_LITERAL", "IN", "ANY", "CATEGORY", "RANGE", "RANGE_UNI_IGNORE", "AT"})
 
 DEFAULT_COMPILE_MODEL = "claude-sonnet-5-5"             # 同 TV / 写作台的默认（ESSENCE_MODEL 等），JUDGE_COMPILE_MODEL 覆盖
@@ -232,18 +240,18 @@ def _where(raw) -> list:
     return [w for w in CODE_PARTS if w in raw]
 
 
-def _unsafe_regex_tree(pattern: str) -> Optional[bool]:
-    """解析树里有没有「上限 > 1 的量词套在不是『单个字符 / 定长不带分支的组』的东西上」（同写作台 rulecheck._assert_regex_shape）。
-    拿不到解析树回 None，调用方只靠文字形状那道。"""
-    tree = None
+def _regex_tree(pattern: str):
+    """re 的解析树（私有 API：3.11 起叫 re._parser，之前是 sre_parse，同 autowriter validator._parse_pattern）。拿不到回 None。"""
     for mod_name in ("re._parser", "sre_parse"):
         try:
-            tree = __import__(mod_name, fromlist=["parse"]).parse(pattern)
-            break
+            return __import__(mod_name, fromlist=["parse"]).parse(pattern)
         except Exception:  # noqa: BLE001 — 模块没有 / API 变了 / 解析不了都算拿不到
             continue
-    if tree is None:
-        return None
+    return None
+
+
+def _unsafe_regex_tree(tree) -> bool:
+    """解析树里有没有「上限 > 1 的量词套在不是『单个字符 / 定长不带分支的组』的东西上」（同写作台 rulecheck._assert_regex_shape）。"""
 
     def fixed_simple(seq) -> bool:
         for op, av in seq or ():
@@ -278,6 +286,262 @@ def _unsafe_regex_tree(pattern: str) -> Optional[bool]:
     return bad(tree)
 
 
+# ── 挨在一起、能匹配同样字符的量词（移植自 autowriter validator.py 的 _check_adjacent_repeats 及其帮手，2026-10-20）────────────
+#    照的是 aw#115 分支 1d65e5a 之上、codex review on aw#115 那一轮改过的 validator.py（组里的旗 _scoped、(?a) 下的 \d \w \s 按 ASCII 比）。
+#    这一轮写作台还没提交：aw#115 合进去以后对一遍 validator.py，有出入照它再同步一次（tests/test_regex_parity.py 的清单跟着换）。
+# 不嵌套也能回溯到卡死：a*a*a*a*a*a*a*a*b 配 30 个 a 要 1 秒、200 个 a 超过 3 秒；两个就够：.*.*x 配 2000 字的一行 1.5 秒。
+# k 个这样的量词挨着，后面的东西匹配失败时要把那一段在它们之间的 n^k 种切法全试一遍。
+# 判法和常数逐字照搬写作台，不在这里单独改（两边口径分开改迟早不一样：要改先改 autowriter，再同步过来，tests/test_regex_parity.py 跟着换清单）：
+#   · 顺着每一层往下走，记着「还开着」的量词（可变长、能回吐的：* + ? {m,n} 且 m≠n；占有量词不回吐，不算）。后面来一个量词，
+#     字集和某个开着的有交集，就算接在它后面，切法数相乘（无上界按 _OPEN_SPAN 算），乘过 _AMBIGUITY_BUDGET 就拒。
+#   · 隔断：一个必须吃掉、开着的量词又吃不了的字（\d+\.\d+ 的 \.）；或者连着两个以上的固定字（品牌[\s\S]*品牌：多字的词在正文里
+#     出现的次数少，切法数被它的出现次数封住 —— PROMPT_HEAD 就教模型这么写「最多出现 N 次」）。分支和组都往里走，
+#     分支后面开着的是各条分支开着的并集。
+#   · 整条正则最后一个量词（后面什么都没有，连 $ \b 都没有）只当 {下限}：吃够下限就匹配成功，不会再回头切。
+#     \d+\s*\d+、原价.*\d+、.*[!！]{2,} 放行；\w*\w*\d+ 照拒 —— 结尾的 \d+ 也得吃够一个。量词底下那一段还是照查。
+#   · 「X 最多 N 次」展开写、X 是单个字：X 后面一直到整条正则结尾都是 X 和同一个量词 R 一个隔一个（R 下限 ≤ 1、无上界、底下一个字、
+#     X 是 R 的一部分），并且以 X 结尾时，X 也算隔断（[!！][\s\S]*[!！][\s\S]*[!！]、\n\s*\n\s*\n）。这种只会因为 X 不够数而失败，
+#     回溯被 X 的个数封住 —— 但不是常数：正好 N 个 X 的稿子（守住了）要试 2^(N-1) 遍，写作台实测 2 万字 N=14 5.8 秒，
+#     所以最多认 _MAX_COUNT_CHAIN 份。结尾接了别的（哪怕一个 $）就不是只数个数了：!.*!.*!$ 照拒。
+#   · 外层量词的每一次之间也是挨着的：定次 {n} 展开 n 份（最多 _UNROLL 份）；次数可变、底下又有可变长量词的，也展开
+#     min(上限, _UNROLL) 份自己查。展开套几层就是几次方，闸自己走的步数也封顶（_WALK_STEPS），超了按太复杂拒。
+#   · 比字集用的是那一段自己生效的旗：开头的 (?i) (?s) (?a) 管整条，组里的 (?i:…) (?-i:…) (?s:…) (?a:…) (?u:…) 只管组里
+#     （_scoped）。一直拿整条的旗比会漏：(?i:a*)A*B 里 a 和 A 是同一个字，(?s:.*)\n*x 里 . 也吃换行，(?a)\W*é*x 里 \W 包括 é，
+#     2000 字就要 2 秒以上；反过来 (?i)(?-i:a*)(?-i:A*)B 组里关了 (?i)，两段不相交，照放行。
+# 这不是完备的代价分析（几个各自出现很多次的多字词夹着 .* 仍然能慢），挡的是实际会写出来、又必然慢的那一类 —— 同写作台。
+_MAXREPEAT = 4294967295          # 同 autowriter（getattr(re, "MAXREPEAT", …) 在 3.11–3.13 都取不到，落到这个数）；= _sre.MAXREPEAT
+_OPEN_SPAN = 1000
+_AMBIGUITY_BUDGET = 10_000
+_UNROLL = 16
+_MAX_COUNT_CHAIN = 11
+_WALK_STEPS = 20_000
+_PROBE_CHARS = ("".join(chr(c) for c in range(128))   # 同 autowriter；看不见的三个写成转义：不换行空格、全角空格、行分隔符
+                + "\u00a0\u3000\u2028é٣０Ａａ中一哈的。，！？、：；“”（）【】#\U0001F600")
+_CATEGORY_RX: dict = {}
+
+
+class _AmbiguousRepeats(Exception):
+    """挨在一起的切法数超预算。"""
+
+
+class _RegexTooComplex(Exception):
+    """闸自己走的步数超了（定次量词套了好几层）。"""
+
+
+class _Chars:
+    """一个字集：test(c) 判断某个字在不在里面，probes 是它自己的探针字。mask 是它在 _PROBE_CHARS 上的样子，第一次比的时候才算
+    —— 一长串互不相交的 ? 每来一个都要和前面开着的每个比一遍，每次都把两百多个探针字重跑一遍，闸自己就要一两秒。"""
+    __slots__ = ("test", "probes", "_mask")
+
+    def __init__(self, test, probes: str):
+        self.test, self.probes, self._mask = test, probes, None
+
+    @property
+    def mask(self) -> int:
+        if self._mask is None:
+            self._mask = sum(1 << k for k, c in enumerate(_PROBE_CHARS) if self.test(c))
+        return self._mask
+
+
+_ANY_CHAR = _Chars(lambda c: True, "")
+
+
+def _char_test(op_name: str, av, flags: int) -> _Chars:
+    """单个字符的节点 → 它的字集。拿不准的一律当「什么字都可能」。"""
+    # casefold 可能变成两个字（"ß" → "ss"），那种就照原字比 —— 下面 RANGE 要拿它 ord()
+    fold = (lambda c: c.casefold() if len(c.casefold()) == 1 else c) if flags & re.IGNORECASE else (lambda c: c)
+    if op_name == "LITERAL":
+        ch = chr(av)
+        return _Chars(lambda c: fold(c) == fold(ch), ch)
+    if op_name == "NOT_LITERAL":
+        ch = chr(av)
+        return _Chars(lambda c: fold(c) != fold(ch), ch)
+    if op_name == "ANY":
+        return _ANY_CHAR if flags & re.DOTALL else _Chars(lambda c: c != "\n", "\n")
+    if op_name == "RANGE":
+        lo, hi = av
+        return _Chars(lambda c: lo <= ord(c) <= hi or lo <= ord(fold(c)) <= hi, chr(lo) + chr(hi))
+    if op_name == "CATEGORY":
+        # (?a) 下 \W \D \S 反而更宽（é ٣ 都算进去），照 Unicode 比会漏掉交集：(?a)\W*é*x 配 3000 个 é 7 秒（同写作台，codex review on aw#115）
+        name, ascii_ = getattr(av, "name", str(av)), bool(flags & re.ASCII)
+        rx = _CATEGORY_RX.get((name, ascii_))
+        if rx is None:
+            esc = {"CATEGORY_DIGIT": r"\d", "CATEGORY_NOT_DIGIT": r"\D", "CATEGORY_SPACE": r"\s",
+                   "CATEGORY_NOT_SPACE": r"\S", "CATEGORY_WORD": r"\w", "CATEGORY_NOT_WORD": r"\W"}.get(name)
+            rx = _CATEGORY_RX[(name, ascii_)] = re.compile(esc, re.ASCII if ascii_ else 0) if esc else None
+        return _Chars(lambda c: rx.fullmatch(c) is not None, "") if rx else _ANY_CHAR
+    if op_name == "IN":
+        sets, negate = [], False
+        for sub_op, sub_av in av:
+            sub_name = getattr(sub_op, "name", str(sub_op))
+            if sub_name == "NEGATE":
+                negate = True
+                continue
+            sets.append(_char_test(sub_name, sub_av, flags))
+        union = _union(sets)
+        return _Chars(lambda c: not union.test(c), union.probes) if negate else union
+    return _ANY_CHAR
+
+
+def _overlap(a: _Chars, b: _Chars) -> bool:
+    return bool(a.mask & b.mask) or any(a.test(c) and b.test(c) for c in a.probes + b.probes)
+
+
+def _union(sets) -> _Chars:
+    tests = [s.test for s in sets]
+    return _Chars(lambda c: any(t(c) for t in tests), "".join(s.probes for s in sets))
+
+
+def _subset(a: _Chars, b: _Chars) -> bool:
+    return not a.mask & ~b.mask and all(b.test(c) for c in a.probes + b.probes if a.test(c))
+
+
+def _scoped(flags: int, av) -> int:
+    """进 SUBPATTERN 时换上它自己的旗：(?i:…) / (?-i:…) / (?s:…) / (?a:…) 只管组里那一段（同写作台，codex review on aw#115）。
+    一直拿整条的旗比，(?i:a*)A*B 就看成 {a} 和 {A} 不相交 —— 实测 2000 个 A 2 秒。开头的 (?i) 已经在 state.flags 里。"""
+    add, dele = (av[1] or 0, av[2] or 0) if isinstance(av, tuple) and len(av) == 4 else (0, 0)
+    if add & (re.ASCII | re.UNICODE):                    # (?a)…(?u:\w) 里 \w 回到 Unicode：字符类旗只留组里给的那个
+        flags &= ~(re.ASCII | re.UNICODE)
+    return (flags | add) & ~dele
+
+
+def _check_adjacent_repeats(tree) -> None:
+    """顺着解析树走一遍：挨在一起的切法数超预算抛 _AmbiguousRepeats，闸自己走的步数超了抛 _RegexTooComplex。"""
+    root_flags = getattr(getattr(tree, "state", None), "flags", 0) or 0
+    single = {"LITERAL", "NOT_LITERAL", "ANY", "IN"}
+    repeats = ("MAX_REPEAT", "MIN_REPEAT")
+    steps = [0]
+
+    def name_of(node):
+        return getattr(node[0], "name", str(node[0]))
+
+    def chars_of(seq, flags):
+        """一段（量词底下那一段）能吃的所有字的并集；认不出就当什么字都行。"""
+        sets = []
+        for op, av in seq or ():
+            name = getattr(op, "name", str(op))
+            if name in single:
+                sets.append(_char_test(name, av, flags))
+            elif name == "SUBPATTERN":
+                sets.append(chars_of(av[-1], _scoped(flags, av)))
+            elif name != "AT":
+                return _ANY_CHAR
+        return _union(sets)
+
+    def has_variable_repeat(seq) -> bool:
+        for op, av in seq or ():
+            name = getattr(op, "name", str(op))
+            if name in repeats + ("POSSESSIVE_REPEAT",):
+                if av[0] != av[1] or has_variable_repeat(av[2]):
+                    return True
+            elif name in ("SUBPATTERN", "ATOMIC_GROUP"):
+                if has_variable_repeat(av[-1] if isinstance(av, tuple) else av):
+                    return True
+            elif name == "BRANCH" and any(has_variable_repeat(alt) for alt in (av[1] or ())):
+                return True
+        return False
+
+    def counting_tail(items, flags) -> set:
+        """这一段结尾那串「X R X R … X」里 X 的下标（都算隔断）：单个字 X 和同一个量词 R 一个隔一个，X 结尾，X 不超过
+        _MAX_COUNT_CHAIN 份；R 下限 ≤ 1、无上界、底下一个字、X 是 R 的一部分。只对后面整条正则就结束了的那一段调。
+        一定得一个隔一个：结尾两个 X 挨着（[!！].*[!！][!！]）要的就是「连着两个」，不再只是个数，前面每种选法都会试。"""
+        if len(items) < 3 or name_of(items[-1]) not in single or name_of(items[-2]) not in repeats:
+            return set()
+        keys = [repr(n) for n in items]
+        x, r, xs, j = keys[-1], keys[-2], set(), len(items) - 1
+        while j >= 0 and keys[j] == x:
+            xs.add(j)
+            if j < 2 or keys[j - 1] != r:
+                break
+            j -= 2
+        if len(xs) < 2 or len(xs) > _MAX_COUNT_CHAIN:
+            return set()
+        lo, hi, sub = items[-2][1]
+        if lo > 1 or hi < _MAXREPEAT or len(sub) != 1 or name_of(sub[0]) not in single:
+            return set()
+        cx, cr = _char_test(name_of(items[-1]), items[-1][1], flags), _char_test(name_of(sub[0]), sub[0][1], flags)
+        return xs if _subset(cx, cr) else set()
+
+    def walk(seq, open_, flags, at_end=False):
+        """open_：[(字集, 到这里为止的切法数)]。返回走完这一段之后还开着的；超预算就抛 _AmbiguousRepeats。
+        flags：这一段生效的旗（组里的 (?i:…) 这类已经换上）。at_end：这一段之后整条正则就结束了（没有任何能失败的东西）。"""
+        items = list(seq or ())
+        counting = counting_tail(items, flags) if at_end else set()
+        for i, (op, av) in enumerate(items):
+            steps[0] += 1 + len(open_)
+            if steps[0] > _WALK_STEPS:
+                raise _RegexTooComplex()
+            name = getattr(op, "name", str(op))
+            last = at_end and i == len(items) - 1
+            if name in single:
+                nxt = getattr(items[i + 1][0], "name", "") if i + 1 < len(items) else ""
+                if (name == "LITERAL" and nxt == "LITERAL") or i in counting:
+                    open_ = []                                   # 两个字以上的固定词 / 数个数的那个字：隔断
+                else:
+                    cs = _char_test(name, av, flags)
+                    open_ = [e for e in open_ if _overlap(e[0], cs)]
+            elif name in repeats:
+                lo, hi, sub = av
+                if lo == hi or last:                             # 定长 {n}：当一串固定的字；结尾的量词：只当 {下限}
+                    if lo != hi:
+                        walk(sub, [], flags)                     # 多吃的那几次还是会试，底下那一段自己查
+                    open_ = walk(list(sub) * min(lo, _UNROLL), open_, flags, last and lo <= _UNROLL) if lo else open_
+                    continue
+                walk(sub, [], flags)                             # 量词底下那一段自己也查（(?:a*a*){1,3}）
+                if hi > 1 and has_variable_repeat(sub):          # 每一次之间也挨着：(?:.{0,20}){0,5}x / (?:\w{1,5})+x
+                    walk(list(sub) * min(hi, _UNROLL), [], flags)
+                cs = chars_of(sub, flags)
+                span = _OPEN_SPAN if hi >= _MAXREPEAT else hi - lo + 1
+                cost = span * max([c for e, c in open_ if _overlap(e, cs)] or [1])
+                if cost > _AMBIGUITY_BUDGET:
+                    raise _AmbiguousRepeats()
+                if lo:                                           # 至少吃一个：它吃不了的那些开着的就此断开
+                    open_ = [e for e in open_ if _overlap(e[0], cs)]
+                open_ = open_ + [(cs, cost)]
+            elif name in ("POSSESSIVE_REPEAT", "ATOMIC_GROUP"):
+                walk(av[-1] if name == "POSSESSIVE_REPEAT" else av, [], flags)   # 里面自己查；不回吐，前后接不上
+                open_ = []
+            elif name == "SUBPATTERN":
+                open_ = walk(av[-1], open_, _scoped(flags, av), last)
+            elif name == "BRANCH":
+                after = [walk(alt, list(open_), flags, last) for alt in (av[1] or ())]
+                open_ = [e for branch in after for e in branch]
+            elif name in ("ASSERT", "ASSERT_NOT"):
+                walk(av[1], [], flags)
+            elif name == "AT":
+                continue
+            else:                                                # 回引这类认不出的：不当隔断
+                continue
+        return open_
+
+    walk(tree, [], root_flags, True)
+
+
+def _regex_problem(pattern: str) -> Optional[str]:
+    """写作台存 forbidden_regex 前会拒收的 → 打回给模型的话（重试时原样带回）；收得下回 None。
+    三道和写作台 normalize_check 同一套（见上面 _SINGLE_CHAR_OPS 前的说明），顺序不同不影响收不收，只影响先报哪条。"""
+    tree = _regex_tree(pattern)
+    if tree is None:
+        return ("code.pattern 这里没法做安全分析（拿不到 re 的解析树），写作台这时也一条正则都存不进去："
+                "改用 forbidden_word，或者出题")
+    if _unsafe_regex_tree(tree):
+        return ("code.pattern 里有量词（+ * {n,m}）套在带量词、带分支或变长的组上（形如 (a+)+、(哈|哈哈)+、(\\s+\\S+){5}），"
+                "会灾难性回溯，写作台也存不进去；量词只套单个字符或定长的组，要数个数就把重复展开写")
+    try:
+        _check_adjacent_repeats(tree)
+    except _RegexTooComplex:
+        return "code.pattern 太复杂（定次量词套了好几层，展开后太长），没法确认它不会卡死，写作台也存不进去；换个更直接的写法"
+    except _AmbiguousRepeats:
+        return ("code.pattern 里有能匹配同样字符的量词挨在一起（形如 a*a*b、.*.*x、\\w+\\w+、a.*a.*b），中间没有隔开，"
+                "会灾难性回溯，写作台也存不进去（量词自己也能吃的单个字隔不开，a.*a.*b 里的 a 就是）。"
+                "删掉多余的量词（开头结尾的 .* 不用写，本来就在全文里找）；或者用两个字以上的固定词隔开，或者让量词吃不了那个字"
+                "（\\n[ \\t]*\\n、[^!]*）。数「X 最多 N 次」写成 X[\\s\\S]*X…X、最后一个 X 后面什么都别接（连 $ 也别加）；"
+                f"X 是单个字时最多展开 {_MAX_COUNT_CHAIN} 份")
+    except Exception as exc:  # noqa: BLE001 — 分析本身出错（递归太深等）：写作台那边同样存不进去，按不安全打回，不让整条 500
+        return f"code.pattern 没法做安全分析（{type(exc).__name__}），写作台也存不进去；换个更直接的写法"
+    return None
+
+
 def validate_code(code) -> dict:
     """code 是写作台要执行的东西：键一个不认识就整条不合格（不像题目那样宽松地忽略多余键）。"""
     if not isinstance(code, dict):
@@ -302,9 +566,9 @@ def validate_code(code) -> dict:
             re.compile(pattern)
         except (re.error, OverflowError, RecursionError, ValueError) as exc:   # a{99999999999} 是 OverflowError，不是 re.error
             raise RuleOutputError(f"code.pattern 编译不了：{type(exc).__name__}: {exc}") from exc
-        if _unsafe_regex_tree(pattern) or _NESTED_QUANT.search(pattern):
-            raise RuleOutputError("code.pattern 里有量词（+ * {n,m}）套在带量词、带分支或变长的组上（形如 (a+)+、(哈|哈哈)+、(\\s+\\S+){5}），"
-                                  "会灾难性回溯，写作台也存不进去；量词只套单个字符或定长的组，要数个数就把重复展开写")
+        problem = _regex_problem(pattern)
+        if problem:
+            raise RuleOutputError(problem)
         return {"kind": kind, "pattern": pattern, "where": _where(code.get("where"))}
     lo, hi = code.get("min"), code.get("max")            # max_len：max / min 至少一个（同写作台 rulecheck，「至少 300 字」只有 min）
     for name, v in (("min", lo), ("max", hi)):
