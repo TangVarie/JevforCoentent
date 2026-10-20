@@ -41,7 +41,7 @@ MAX_ASK_CHARS, MAX_NOTE_CHARS, MAX_WHY_CHARS, MAX_UNCOVERED_CHARS = 200, 120, 20
 MAX_QUESTIONS = 3
 PASS_IF = ("是", "否")
 COVERAGE = ("full", "partial")
-QID_RE = re.compile(r"^[0-9a-z]{1,8}_[0-9a-f]{6}_[1-3]$")
+QID_RE = re.compile(r"^[0-9a-z]{1,8}_[0-9a-f]{6}_[1-3]_[0-9a-f]{6}$")
 # 会灾难性回溯的正则：两道都查，哪道说危险都打回（比写作台严，不会比它松：写作台存规则前也查，查不过的存不进去）。
 #   · 解析树（同写作台 deskcore/rulecheck._assert_regex_shape，2026-10-20）：上限 > 1 的量词只能套在单个字符或定长、不带分支的组上。
 #     它包含 autowriter validator 的「嵌套无上界量词」那道：((?:ab)+)+、(a{1,})+ 文字上看不出来，树上看得出；
@@ -78,10 +78,21 @@ def rule_short(rule_id: str) -> str:
     return re.sub(r"[^0-9a-z]", "", str(rule_id).lower())[:8] or "r"
 
 
-def make_qid(rule_id: str, sha: str, n: int) -> str:
-    """<规则 id 缩写>_<sha 前 6 位>_<第 n 题>。为什么把 sha 放进题号：Jev 格式题的 question_version 永远是 1，
-    账本里也不记题库名（critic 9），规则改了还用老题号，新旧两版答案会落在同一个主键上互相覆盖。"""
-    return f"{rule_short(rule_id)}_{sha[:6]}_{n}"
+def question_hash(q: dict) -> str:
+    """编出来的一道题本身（问法、哪个答案算守住、看哪一处）的指纹，6 位。"""
+    raw = json.dumps({"ask": q.get("ask"), "pass_if": q.get("pass_if"), "scope": q.get("scope")},
+                     ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:6]
+
+
+def make_qid(rule_id: str, sha: str, n: int, q: dict) -> str:
+    """<规则 id 缩写>_<规则原文 sha 前 6 位>_<第 n 题>_<这道题本身的指纹 6 位>。
+
+    Jev 格式题的 question_version 永远是 1，账本里也不记题库名（critic 9），账本按题号覆盖：
+      · 带规则原文的 sha：规则改了还用老题号，新旧两版答案会落在同一个主键上互相覆盖；
+      · 带题目本身的指纹（codex review on Jev#23）：同一条规则再编一次，生成端可能换了问法、换了守住的方向、
+        换了看哪一处，题号不变的话新问法的答案会盖掉老问法的答案。问法一字不差时题号不变，答案照常续上。"""
+    return f"{rule_short(rule_id)}_{sha[:6]}_{n}_{question_hash(q)}"
 
 
 # ── 给模型的 prompt ──────────────────────────────────────────────────────
@@ -380,7 +391,7 @@ def _sha_of(rule: dict) -> str:
 
 def _finished(rule: dict, v: dict) -> dict:
     sha = _sha_of(rule)
-    qs = [{"qid": make_qid(rule["id"], sha, i), **q} for i, q in enumerate(v["questions"], 1)]
+    qs = [{"qid": make_qid(rule["id"], sha, i, q), **q} for i, q in enumerate(v["questions"], 1)]
     return {"id": rule["id"], "sha": sha, "verdict": v["verdict"], "code": v["code"], "questions": qs,
             "coverage": v["coverage"], "uncovered": v["uncovered"], "why": v["why"]}
 
@@ -463,7 +474,8 @@ def to_project_bank(compiled: list, taken: Iterable[str] = (), bank_version: Opt
       · 每题 noul、criteria 是 / 否、scope 原样；evidence 跟着 pass_if 走：pass_if「否」的题（答「是」= 违反）on_true，
         证据句就是要改的那句；pass_if「是」的题 never（答「是」是守住了，不该再花一次证据调用、找不到依据句还把守住的答案记成
         evidence_not_found；答「否」是缺了什么，本来就没有一句可指）；
-      · 题号带规则原文的 sha，规则改了题号就变，重编不会复用老题号；题号重复或撞上 taken（已加载题库的题号）直接 ValueError；
+      · 题号带规则原文的 sha 和这道题本身的指纹：规则改了、或者重编出来的问法变了，题号都会变，账本里不同问法的答案
+        不会互相覆盖；题号重复或撞上 taken（已加载题库的题号）直接 ValueError；
       · 不产出 hard_rules：这些题只作建议（owner 10-20），调用方不要把它们写进 /judge_draft 的 hard_rules 或 brief。"""
     taken = set(taken)
     seen: set = set()
@@ -474,7 +486,7 @@ def to_project_bank(compiled: list, taken: Iterable[str] = (), bank_version: Opt
         for q in r.get("questions") or []:
             qid = q["qid"]
             if not QID_RE.match(qid):
-                raise ValueError(f"题号 {qid!r} 不是 <规则缩写>_<sha6>_<n> 的形状")
+                raise ValueError(f"题号 {qid!r} 不是 <规则缩写>_<sha6>_<n>_<题目指纹6> 的形状")
             if qid in seen or qid in taken:
                 raise ValueError(f"题号 {qid!r} 重复或与已加载的题库撞车")
             seen.add(qid)

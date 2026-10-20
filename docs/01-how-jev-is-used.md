@@ -87,7 +87,7 @@ POST https://api.typesafe.ai/v1/systemone
 
 编出的题变成一份 Jev 格式题库（响应里的 `project_bank`），作为 `/judge_draft` 的内联 `project_bank` 送回：**单独一次请求**，存档返回之后异步发，
 `banks: []`、`project_bank_name: "desk_rules"`、自己的 `run_tag`（如 `shadow-rules`）、`judge_paras: "never"`——不进存档那条只剩约 1.8 秒的判定路径，行也不和 `primary` 混（TV docs/32 §E.3 / E.4）。
-是一次 Jev 调用（+ `pass_if: 否` 的题答「是」时一次证据调用）。题号 `<规则缩写>_<sha6>_<n>` 带原文 sha，规则一改题号就变；写作台按（规则 id, sha）缓存；这些题不进 `hard_rules`，不影响 `passed`。
+是一次 Jev 调用（+ `pass_if: 否` 的题答「是」时一次证据调用）。题号 `<规则缩写>_<sha6>_<n>_<题目指纹6>` 带原文 sha 和题目本身的指纹，规则一改、或重编出来问法变了，题号都会变；写作台按（规则 id, sha）缓存；这些题不进 `hard_rules`，不影响 `passed`。
 编译本身最坏要几分钟（README「规则编译」有公式），不能放在写手工具的调用里（MCP 工具预算封顶 20 秒）：写作台后台按（规则 id, sha）补编，写手工具只用已缓存的结果。
 一条规则只能填一个 `code`、最多 3 道题；装不下的要求模型写进 `uncovered`、`coverage: partial`，这种规则的原文要留在简报里，只有 `coverage: full` 的才能从简报里拿掉。
 `scope: title` 的题，证据只在标题里找（标题自成一句）；以前项目层的题证据只从正文句里选，管标题的规则答「是」也找不到依据句（账本里就是 NULL）。

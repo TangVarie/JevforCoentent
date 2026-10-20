@@ -100,7 +100,7 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
     数话题标签个数的正则假定 tags 串里没有重复：写作台 `rulecheck._parts` 把写手的 tags 和正文里的 #话题 直接拼在一起，两处都写了同一组话题会数成两倍，要在写作台那边先去重。
   - `coverage`（verdict 是 code / questions 时）：一条规则只能填一个 `code`、最多 3 道题；装不下的要求模型写进 `uncovered`、`coverage` 记 `partial`。
     **只有 `coverage: full` 的规则才能从写手简报里拿掉**；`partial` 的原文留在简报里（或请写手把规则拆成几条），`not_checkable` 的编译不替代它。
-  - `qid` = `<规则 id 只留小写字母数字的前 8 位>_<sha 前 6 位>_<n>`：带 sha，规则一改题号就变，重编不会复用老题号（账本里 Jev 格式题的 question_version 永远是 1）；与本服务所有题库的题号、同一请求里别的规则都不撞，撞了那条带 `error`。
+  - `qid` = `<规则 id 只留小写字母数字的前 8 位>_<sha 前 6 位>_<n>_<这道题本身的指纹 6 位>`：带 sha，规则一改题号就变；带题目指纹（问法 + pass_if + scope），重编出来问法变了题号也变，账本里不同问法的答案不会互相覆盖（Jev 格式题的 question_version 永远是 1）；与本服务所有题库的题号、同一请求里别的规则都不撞，撞了那条带 `error`。
   - 单条编不出（输出不是 JSON、形状不对、漏了这条）先带着「哪里不对」重试一次，仍不行只让那一条带 `error`；一条都没编出 → 502。生成端没配密钥 → 503。
     生成端回 4xx / 5xx 时 `error` 带返回体前 300 字（密钥打码，比如中转站不认 `output_config` 时设 `JUDGE_COMPILE_EFFORT=""`）；模型拒答 / 输出被截断报成「模型拒答」「输出被截断」，不重试。
 - **送回 `/judge_draft`**：**单独发一次**，不和存档那次评分合在一起（TV docs/32 §E.3 / E.4：存档的判定预算只剩约 1.8 秒，影子题的行不能和 `primary` 混）——

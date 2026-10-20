@@ -40,7 +40,7 @@
      "rules": [{"id": "<规则 id>", "text": "<规则原文，≤4000 字>", "severity": "hard" | "soft"}, …]}      # 1..60 条，id 不重复
     返回 {"rules": [{"id", "sha"（原文 sha256 前 12 位）, "verdict": "code" | "questions" | "not_checkable",
                      "code": null | {"kind": "forbidden_word" | "forbidden_regex" | "required_phrase" | "max_len", …},
-                     "questions": [{"qid": "<规则缩写>_<sha6>_<n>", "ask", "pass_if": "是" | "否", "scope": "title" | "body" | "full", "note"}],
+                     "questions": [{"qid": "<规则缩写>_<sha6>_<n>_<题目指纹6>", "ask", "pass_if": "是" | "否", "scope": "title" | "body" | "full", "note"}],
                      "why", ["error"]}],
           "project_bank": <Jev 格式题库，可原样作为 /judge_draft 的内联 project_bank> | null,
           "errors", "model", "calls", "usage", "latency_ms", "policy"}

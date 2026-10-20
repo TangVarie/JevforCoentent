@@ -242,7 +242,7 @@ def test_compile_rules_mock_verdict_shapes_and_qids(monkeypatch):
     for r, src in zip(d["rules"], SYNTH_RULES):
         assert r["sha"] == __import__("hashlib").sha256(src["text"].encode("utf-8")).hexdigest()[:12]
         for n, q in enumerate(r["questions"], 1):
-            assert R.QID_RE.match(q["qid"]) and q["qid"] == f"{re.sub('[^0-9a-z]', '', r['id'])}_{r['sha'][:6]}_{n}"
+            assert R.QID_RE.match(q["qid"]) and q["qid"] == f"{re.sub('[^0-9a-z]', '', r['id'])}_{r['sha'][:6]}_{n}_{R.question_hash(q)}"
             assert set(q) == {"qid", "ask", "pass_if", "scope", "note"} and q["pass_if"] in ("是", "否")
     qids = [q["qid"] for r in d["rules"] for q in r["questions"]]
     assert len(qids) == len(set(qids)) == len(d["project_bank"]["questions"])
@@ -284,7 +284,7 @@ def test_bad_json_retries_once_then_per_rule_error(monkeypatch):
     d = c.post("/compile_rules", json={"project": "ANY", "rules": [a, b]}, headers=H).json()
     by = {r["id"]: r for r in d["rules"]}
     assert gen.calls == 2 and d["calls"] == 2 and d["errors"] == 1                         # 只重试一次
-    assert "error" not in by["a"] and by["a"]["questions"][0]["qid"] == f"a_{R.rule_sha('规则甲')[:6]}_1"
+    assert "error" not in by["a"] and by["a"]["questions"][0]["qid"] == f"a_{R.rule_sha('规则甲')[:6]}_1_{R.question_hash(good_q)}"
     assert by["b"]["verdict"] is None and "已重试一次" in by["b"]["error"] and "pass_if" in by["b"]["error"]
     assert "上一次的输出有问题" in gen.prompts[1] and "不是合法 JSON" in gen.prompts[1]
     assert [q["id"] for q in d["project_bank"]["questions"]] == [by["a"]["questions"][0]["qid"]]
@@ -360,7 +360,7 @@ def test_qids_stable_change_with_text_and_never_clash():
     gen = R.MockRuleGenerator()
     rule = {"id": "3F2A9C1E-77aa-4d0e", "text": "人设前后不要矛盾", "severity": "soft"}
     one = R.compile_rules(gen, [rule])[0]
-    assert one["questions"][0]["qid"] == f"3f2a9c1e_{R.rule_sha(rule['text'])[:6]}_1"
+    assert one["questions"][0]["qid"] == f"3f2a9c1e_{R.rule_sha(rule['text'])[:6]}_1_{R.question_hash(one['questions'][0])}"
     assert R.compile_rules(gen, [rule])[0]["questions"] == one["questions"]                      # 同规则同原文：题号稳定
     edited = R.compile_rules(gen, [dict(rule, text=rule["text"] + "。")])[0]
     assert edited["sha"] != one["sha"] and edited["questions"][0]["qid"] != one["questions"][0]["qid"]   # 改了原文：新题号
@@ -501,20 +501,20 @@ def test_validate_result_coverage_and_single_char_words():
 
 def test_evidence_follows_pass_if_and_pass_if_yes_never_spends_an_evidence_call():
     from judge import loop as L
-    q_yes = {"qid": "a_aaaaaa_1", "ask": "标题有没有点明是讲通勤的？", "pass_if": "是", "scope": "title", "note": ""}
-    q_no = {"qid": "b_bbbbbb_1", "ask": "正文有没有提到价格却没注明是活动价？", "pass_if": "否", "scope": "body", "note": ""}
+    q_yes = {"qid": "a_aaaaaa_1_abcdef", "ask": "标题有没有点明是讲通勤的？", "pass_if": "是", "scope": "title", "note": ""}
+    q_no = {"qid": "b_bbbbbb_1_fedcba", "ask": "正文有没有提到价格却没注明是活动价？", "pass_if": "否", "scope": "body", "note": ""}
     compiled = [{"id": "a", "sha": "aaaaaa000000", "verdict": "questions", "code": None, "questions": [q_yes]},
                 {"id": "b", "sha": "bbbbbb000000", "verdict": "questions", "code": None, "questions": [q_no]}]
     pb = R.to_project_bank(compiled)
-    assert {q["id"]: q["evidence"] for q in pb["questions"]} == {"a_aaaaaa_1": "never", "b_bbbbbb_1": "on_true"}
+    assert {q["id"]: q["evidence"] for q in pb["questions"]} == {"a_aaaaaa_1_abcdef": "never", "b_bbbbbb_1_fedcba": "on_true"}
     bank = B.load_bank_data(pb, "desk_rules")
     jev = RecordingJev(pick="单程")                                                             # 两题都答「是」
     dj = L.judge_draft(jev, {"title": TITLE, "body": BODY}, project=bank)
     items = dj.detail["desk_rules"]
-    assert items["a_aaaaaa_1"]["answer"] == "是" and not items["a_aaaaaa_1"].get("invalid_reason")   # 守住的答案不会变成 evidence_not_found
-    assert items["b_bbbbbb_1"]["evidence"] and "单程" in items["b_bbbbbb_1"]["evidence"]               # 违反的那句
+    assert items["a_aaaaaa_1_abcdef"]["answer"] == "是" and not items["a_aaaaaa_1_abcdef"].get("invalid_reason")   # 守住的答案不会变成 evidence_not_found
+    assert items["b_bbbbbb_1_fedcba"]["evidence"] and "单程" in items["b_bbbbbb_1_fedcba"]["evidence"]               # 违反的那句
     ev_calls = [b for b in jev.bodies if "说明" in b["state"] and "编号" in b["state"]["说明"]]
-    assert len(ev_calls) == 1 and set(ev_calls[0]["questions"]) == {"b_bbbbbb_1"}
+    assert len(ev_calls) == 1 and set(ev_calls[0]["questions"]) == {"b_bbbbbb_1_fedcba"}
 
 
 def test_applicability_goes_into_prompt_sha_and_where(monkeypatch):
@@ -566,3 +566,21 @@ def test_generator_http_error_body_and_refusal_are_reported(monkeypatch):
     plain = L.AnthropicCompatGenerator("m", api_key="k")                                      # 别的用法不传 fail_on_stop：照旧返回文本
     monkeypatch.setattr(plain, "_post", lambda b: {"content": [{"type": "text", "text": "半截"}], "stop_reason": "max_tokens"})
     assert plain("p") == ["半截"]
+
+
+def test_a_recompile_that_rewords_a_question_gets_a_new_qid():
+    """同一条规则再编一次, 生成端换了问法 / 守住的方向 / 看哪一处(codex review on Jev#23): 题号要跟着变, 不然新问法的答案
+    在账本里盖掉老问法的(Jev 格式题 question_version 恒为 1, 按题号覆盖)。问法一字不差时题号不变。"""
+    rule = {"id": "r-9", "text": "规则丙", "severity": "soft"}
+    base = {"ask": "稿子里有没有甲？", "pass_if": "否", "scope": "body", "note": ""}
+
+    def compiled(q):
+        gen = ScriptedGen([json.dumps({"results": [_ok("r-9", "questions", questions=[q])]}, ensure_ascii=False)])
+        return R.compile_rules(gen, [rule])[0]["questions"][0]["qid"]
+
+    first = compiled(base)
+    assert compiled(dict(base)) == first, "问法不变: 同一个题号"
+    assert compiled(dict(base, note="换了备注")) == first, "备注不算题目本身"
+    for change in ({"ask": "稿子里写到甲了吗？"}, {"pass_if": "是"}, {"scope": "full"}):
+        other = compiled(dict(base, **change))
+        assert other != first and other.rsplit("_", 1)[0] == first.rsplit("_", 1)[0], change
