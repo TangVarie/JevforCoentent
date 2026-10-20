@@ -47,6 +47,7 @@ QID_RE = re.compile(r"^[0-9a-z]{1,8}_[0-9a-f]{6}_[1-3]_[0-9a-f]{6}$")
 # 哪道不过都打回重编。为什么要和写作台一样宽（2026-10-20 改）：写作台拒收的 code 存不进去，这条规则的代码检查就静默没了，
 # 编译结果里却看不出来；在这里打回，模型带着原因重编一次，还不行这一条带 error，调用方看得见。
 #   · 形状（同写作台 rulecheck._assert_regex_shape）：上限 > 1 的量词只能套在单个字符或定长、不带分支的组上。
+#     _fixed_simple、_regex_shape_ok 里的 walk 和这两组 op 名逐字照搬 rulecheck（2eef1a6），AST 除文档串以外一样。
 #     它包含 autowriter validator 的「嵌套无上界量词」那道：((?:ab)+)+、(a{1,})+ 文字上看不出来，树上看得出；
 #     也挡 (哈|哈哈)+、(\s+\S+){5} 这类分支 / 变长组套量词的写法；
 #   · 挨在一起、能匹配同样字符的量词（同 autowriter validator.assert_regex_is_safe，aw#115 加的，见 _check_adjacent_repeats）：
@@ -59,7 +60,8 @@ QID_RE = re.compile(r"^[0-9a-z]{1,8}_[0-9a-f]{6}_[1-3]_[0-9a-f]{6}$")
 #     会放行写作台拒收的正则，去掉了）。
 # 比写作台严的只剩 pattern 最长 MAX_PATTERN_CHARS 字（写作台不限）。两边对得上由 tests/test_regex_parity.py 钉住：
 # 写作台测试里拒收 / 放行的两张清单原样抄过来跑。
-_SINGLE_CHAR_OPS = frozenset({"LITERAL", "NOT_LITERAL", "IN", "ANY", "CATEGORY", "RANGE", "RANGE_UNI_IGNORE", "AT"})
+_SINGLE_CHAR_OPS = frozenset({"LITERAL", "NOT_LITERAL", "IN", "ANY", "CATEGORY", "RANGE", "RANGE_UNI_IGNORE"})
+_ZERO_WIDTH_OPS = frozenset({"AT"})                    # 同写作台 rulecheck：锚点单列一组，_fixed_simple 两组都认
 
 DEFAULT_COMPILE_MODEL = "claude-sonnet-5-5"             # 同 TV / 写作台的默认（ESSENCE_MODEL 等），JUDGE_COMPILE_MODEL 覆盖
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -253,40 +255,47 @@ def _regex_tree(pattern: str):
     return None
 
 
-def _unsafe_regex_tree(tree) -> bool:
-    """解析树里有没有「上限 > 1 的量词套在不是『单个字符 / 定长不带分支的组』的东西上」（同写作台 rulecheck._assert_regex_shape）。"""
+def _fixed_simple(seq) -> bool:
+    """这一段每次只能用一种方式匹配一段定长的文本：只有单个字符、锚点，和由它们组成的组；没有分支、量词、回引（同写作台 rulecheck._fixed_simple）。"""
+    for op, av in seq or ():
+        name = getattr(op, "name", str(op))
+        if name in _SINGLE_CHAR_OPS or name in _ZERO_WIDTH_OPS:
+            continue
+        if name == "SUBPATTERN":
+            if not _fixed_simple(av[-1]):
+                return False
+            continue
+        return False
+    return True
 
-    def fixed_simple(seq) -> bool:
-        for op, av in seq or ():
-            name = getattr(op, "name", str(op))
-            if name in _SINGLE_CHAR_OPS:
-                continue
-            if name == "SUBPATTERN" and fixed_simple(av[-1]):
-                continue
-            return False
-        return True
 
-    def bad(seq) -> bool:
+def _regex_shape_ok(tree) -> bool:
+    """上限 > 1 的量词是不是都只套在单个字符或定长、不带分支的组上；条件组一律不行（同写作台 rulecheck._assert_regex_shape，
+    walk 逐字照搬，那边不过就抛 CheckError，这里回 False）。"""
+
+    def walk(seq) -> bool:
         for op, av in seq or ():
             name = getattr(op, "name", str(op))
             if name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
                 _lo, hi, sub = av
-                if (hi > 1 and not fixed_simple(sub)) or bad(sub):
-                    return True
+                if hi > 1 and not _fixed_simple(sub):
+                    return False
+                if not walk(sub):
+                    return False
             elif name in ("SUBPATTERN", "ATOMIC_GROUP"):
-                if bad(av[-1] if isinstance(av, tuple) else av):
-                    return True
+                if not walk(av[-1] if isinstance(av, tuple) else av):
+                    return False
             elif name == "BRANCH":
-                if any(bad(alt) for alt in (av[1] or ())):
-                    return True
+                if not all(walk(alt) for alt in (av[1] or ())):
+                    return False
             elif name in ("ASSERT", "ASSERT_NOT"):
-                if bad(av[1]):
-                    return True
+                if not walk(av[1]):
+                    return False
             elif name == "GROUPREF_EXISTS":
-                return True
-        return False
+                return False
+        return True
 
-    return bad(tree)
+    return walk(tree)
 
 
 # ── 挨在一起、能匹配同样字符的量词（移植自 autowriter validator.py 的 _check_adjacent_repeats 及其帮手，2026-10-20）────────────
@@ -594,7 +603,7 @@ def _regex_problem(pattern: str) -> Optional[str]:
     if tree is None:
         return ("code.pattern 这里没法做安全分析（拿不到 re 的解析树），写作台这时也一条正则都存不进去："
                 "改用 forbidden_word，或者出题")
-    if _unsafe_regex_tree(tree):
+    if not _regex_shape_ok(tree):
         return ("code.pattern 里有量词（+ * {n,m}）套在带量词、带分支或变长的组上（形如 (a+)+、(哈|哈哈)+、(\\s+\\S+){5}），"
                 "会灾难性回溯，写作台也存不进去；量词只套单个字符或定长的组，要数个数就把重复展开写")
     try:

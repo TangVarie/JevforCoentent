@@ -6,10 +6,10 @@ aw#115 加的「挨在一起、能匹配同样字符的量词」）和 rulecheck
 Jev 编出来的 code 写作台拒收的话，这条规则的代码检查就静默没了；所以 judge/rules.validate_code 得把写作台拒收的全部打回
 （模型带着原因重编，还不行这一条带 error），写作台收的、PROMPT_HEAD 教的写法又一个都不能误伤。
 
-下面的清单原样抄自 autowriter 的 tests/test_regex_safety.py 和 tests/test_rulecheck.py（aw#115 分支 1d65e5a，加上同一天
-codex review on aw#115 那一轮还没提交的两组「组里的旗」用例，2026-10-20），放行 / 拒收按写作台 normalize_check 整体的结论分
-（两道都过才算放行）。写作台改了闸，这里跟着换清单；aw#115 合进去以后对一遍。另有两张对拍探针（拿写作台和 Jev 跑同一批随机正则）
-抓到过两边不一致的清单，钉住别再回来。全部是合成的正则和正文，不含任何客户原文。
+下面的清单原样抄自 autowriter 的 tests/test_regex_safety.py 和 tests/test_rulecheck.py（aw#115 的 commit 2eef1a6，2026-10-20：
+含 codex review on aw#115 那一轮加的「组里的旗」「(?i) 下的字集交给 re 判」「条件组」几组用例），放行 / 拒收按写作台 normalize_check
+整体的结论分（两道都过才算放行）。写作台改了闸，这里跟着换清单。另有两张对拍探针（拿写作台和 Jev 跑同一批随机正则）
+抓到过两边不一致的清单，钉住别再回来（在 2eef1a6 上重新核过结论没变）。全部是合成的正则和正文，不含任何客户原文。
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ DESK_ADJACENT = [
     "a.*?[!！].*[!！][!！]",
 ]
 
-# test_regex_safety.test_scoped_flags_are_honored：组里的旗只管组里，比字集要按组里的旗（codex review on aw#115，写作台还没提交）
+# test_regex_safety.test_scoped_flags_are_honored：组里的旗只管组里，比字集要按组里的旗（codex review on aw#115，2eef1a6）
 DESK_SCOPED_FLAGS = [
     "(?i:a*)A*B",
     "a*(?i:A)*b",
@@ -68,6 +68,22 @@ DESK_SCOPED_FLAGS = [
     "(?a)\\W*é*x",
     "(?s:.*)\\n*x",
 ]
+
+# test_regex_safety.test_case_insensitive_sets_are_compared_the_way_re_matches：哪些字算在字集里交给 re 自己判（codex review on
+# aw#115，2eef1a6）。手写的折叠只往小写折，(?i)[A-Z] 不认 a；ẞ/ß、İ/i casefold 对不上；× 夹在 À-Þ 中间，只看两头会漏
+DESK_CASE_SETS = [
+    "(?i)[A-Z]*(?-i:a*)x",
+    "(?i)[A-Z]+(?-i:[a-z]+)\\d",
+    "(?i:[A-Z]+)\\s*[a-z]+\\d",
+    "[a-z]*(?i:[A-Z]*)x",
+    "(?i)[À-Þ]*é*x",
+    "(?i)ß*ẞ*x",
+    "(?i)İ*i*x",
+    "\\W*[À-Þ]*x",
+]
+
+# test_regex_safety.test_conditional_groups_are_rejected：条件组 (?(1)是|否) 闸看不进它里面（codex review on aw#115，2eef1a6）
+DESK_CONDITIONAL = ["()(?(1)(a+)+b)", "()(?(1)a*a*a*a*a*b)", "(a)?(?(1)x|.*.*y)"]
 
 # test_regex_safety 其余拒收的：定次量词套五层（闸自己不能被拖住）、编译不了
 DESK_OTHER_REJECTED = [
@@ -94,8 +110,8 @@ DESK_VALIDATOR_ONLY = [
     "(?:\\d{1,3},)+\\d{3}",
 ]
 
-DESK_MUST_REJECT = list(dict.fromkeys(DESK_CATASTROPHIC + DESK_ADJACENT + DESK_SCOPED_FLAGS + DESK_OTHER_REJECTED
-                                      + DESK_RULECHECK_REJECTED + DESK_VALIDATOR_ONLY))
+DESK_MUST_REJECT = list(dict.fromkeys(DESK_CATASTROPHIC + DESK_ADJACENT + DESK_SCOPED_FLAGS + DESK_CASE_SETS + DESK_CONDITIONAL
+                                      + DESK_OTHER_REJECTED + DESK_RULECHECK_REJECTED + DESK_VALIDATOR_ONLY))
 
 # ── 写作台放行的（validator 和 rulecheck 两道都过）──────────────────────────────────────────────────────────────
 
@@ -137,13 +153,14 @@ DESK_MUST_PASS = list(dict.fromkeys([
     r"[!！][\s\S]*[!！][\s\S]*[!！][\s\S]*[!！]", r"最[\s\S]*最[\s\S]*最", r"\n\s*\n\s*\n", r"\d+\s*\d+", r"原价.*\d+",
     # test_rulecheck.test_validator_and_rulecheck_agree_on_title_and_body 等处的锚点写法
     "^禁止", "标题$", "禁止$", "^Alpha", "私信",
-    # test_regex_safety.test_scoped_flags_that_narrow_the_set_still_pass（codex review on aw#115，写作台还没提交）：
+    # test_regex_safety.test_scoped_flags_that_narrow_the_set_still_pass（codex review on aw#115，2eef1a6）：
     # 组里关掉 (?i)、组里换回 Unicode、没有 (?s) —— 字集不相交，照放行
     "(?i)(?-i:a*)(?-i:A*)B", "(?a)(?u:\\W*)é*x", ".*\\n*x",
 ]))
 
 # 对拍探针（写作台 normalize_check 对 Jev validate_code，跑上万条随机正则）2026-10-20 抓到的、两边结论不一样的：
-# 都带旗（组里的 (?i:…) (?s:…) (?a:…)，或者开头的 (?a)），是 Jev 补 _scoped / ASCII 字集之前漏掉的。写作台全部拒收 / 全部放行。
+# 都带旗（组里的 (?i:…) (?s:…) (?a:…)，或者开头的 (?a)），是 Jev 补 _scoped / ASCII 字集之前漏掉的。写作台全部拒收 / 全部放行
+# （2eef1a6 上重新核过：字集改成交给 re 判以后，这几条写作台的结论一条没变）。
 PROBE_DESK_REJECTS = [
     "(?a)é哈*\\W{2,}(?=！(?a:\\d{1,}\\Sé|[a-z]?#) ??(?=\\d{2,})a)?$",
     "(?a)\\W{0,20}é{2,}[a-z]\\.é++",
@@ -174,7 +191,7 @@ def _code(p: str) -> dict:
 
 def test_the_two_lists_do_not_overlap():
     assert not set(DESK_MUST_REJECT) & set(DESK_MUST_PASS)
-    assert (len(DESK_MUST_REJECT), len(DESK_MUST_PASS)) == (42, 43), "清单是抄来的，条数变了说明抄漏或抄多了"
+    assert (len(DESK_MUST_REJECT), len(DESK_MUST_PASS)) == (53, 43), "清单是抄来的，条数变了说明抄漏或抄多了"
     assert not set(PROBE_DESK_REJECTS) & set(PROBE_DESK_ACCEPTS + DESK_MUST_PASS)
     assert not set(PROBE_DESK_ACCEPTS) & set(DESK_MUST_REJECT)
 
@@ -218,6 +235,44 @@ def test_scoped_flags_are_honored_with_a_reason_the_model_can_act_on(pattern, ch
     assert "挨在一起" in str(ei.value)
 
 
+@pytest.mark.parametrize("pattern, ch", [                  # 写作台 test_case_insensitive_sets_are_compared_the_way_re_matches 原样
+    ("(?i)[A-Z]*(?-i:a*)x", "a"),
+    ("(?i)[A-Z]+(?-i:[a-z]+)\\d", "a"),
+    ("(?i:[A-Z]+)\\s*[a-z]+\\d", "a"),
+    ("[a-z]*(?i:[A-Z]*)x", "a"),
+    ("(?i)[À-Þ]*é*x", "é"),
+    ("(?i)ß*ẞ*x", "ß"),
+    ("(?i)İ*i*x", "i"),
+    ("\\W*[À-Þ]*x", "×"),
+])
+def test_case_insensitive_sets_are_compared_the_way_re_matches(pattern, ch):
+    """哪些字算在字集里交给 re 自己判（_char_src + _one_char_rx），不手写折叠：(?i)[A-Z] 也吃 a、ẞ 和 ß 互认、× 在 [À-Þ] 中间。
+    配 700 个字（同写作台），例子本身得是慢的；打回的话和别的「挨在一起」一样。"""
+    t0 = time.perf_counter()
+    re.search(pattern, ch * 700)
+    assert time.perf_counter() - t0 > 0.05, "这条的例子本身得是慢的，否则测不出东西"
+    with pytest.raises(R.RuleOutputError) as ei:
+        R.validate_code(_code(pattern))
+    assert "挨在一起" in str(ei.value)
+
+
+@pytest.mark.parametrize("pattern", DESK_CONDITIONAL)
+def test_conditional_groups_are_refused_with_their_own_reason(pattern):
+    """条件组 (?(1)是|否) 几道闸都看不进它里面（同写作台 validator._has_conditional）：先查、单独说是条件组的事。"""
+    with pytest.raises(R.RuleOutputError) as ei:
+        R.validate_code(_code(pattern))
+    assert "条件组" in str(ei.value)
+
+
+def test_conditional_groups_are_named_even_without_the_parse_tree(monkeypatch):
+    """拿不到解析树时照写作台按原文里的「(?(」认条件组，打回的话说条件组；别的照旧说拿不到解析树。"""
+    monkeypatch.setattr(R, "_regex_tree", lambda p: None)
+    with pytest.raises(R.RuleOutputError) as ei:
+        R.validate_code(_code("()(?(1)a|b)"))
+    assert "条件组" in str(ei.value)
+    assert R._regex_problem("最") is not None and "解析树" in R._regex_problem("最")
+
+
 def test_scoped_flags_follow_the_group_not_the_whole_pattern():
     """_scoped：组里加的旗只在组里生效、组里去掉的只在组里去掉；(?a:…) / (?u:…) 换掉外面的字符类旗，不叠加。"""
     u, a, i, s = re.UNICODE, re.ASCII, re.IGNORECASE, re.DOTALL
@@ -233,6 +288,23 @@ def test_scoped_flags_follow_the_group_not_the_whole_pattern():
     assert R._scoped(u, group_av("(?a:a)")) == a
     assert R._scoped(a | i, group_av("(?u:a)")) == u | i
     assert R._scoped(u | i, group_av("(a)")) == u | i                   # 不带旗的组：照外面的（(?:a) 解析时就摊平了，没有组）
+
+
+# 锚点（\b \B ^ $）零宽、只有一种匹配法：写作台 rulecheck 把它们单列在 _ZERO_WIDTH_OPS 里，_fixed_simple 和单个字符一样认，
+# 量词套的组里带锚点照放行；组里另有量词或分支的照拒。合成的例子，2026-10-20 在写作台 2eef1a6 上逐条核过结论。
+ANCHOR_IN_REPEATED_GROUP_PASS = ["(?:\\b品牌)+", "(?:^a)+x", "(?:a$){2}", "(?:\\bab\\b){3,}", "(?:\\Ba)+"]
+ANCHOR_IN_REPEATED_GROUP_REJECT = ["(?:\\b(?:ab)+)+", "(?:a\\b|b)+"]
+
+
+def test_anchors_in_a_repeated_group_count_as_fixed_width_like_the_desk():
+    """op 名分组同写作台 rulecheck（_SINGLE_CHAR_OPS 不含 AT，AT 在 _ZERO_WIDTH_OPS），_fixed_simple 两组都认。"""
+    assert R._ZERO_WIDTH_OPS == {"AT"} and R._SINGLE_CHAR_OPS.isdisjoint(R._ZERO_WIDTH_OPS)
+    for p in ANCHOR_IN_REPEATED_GROUP_PASS:
+        assert R.validate_code(_code(p))["pattern"] == p
+    for p in ANCHOR_IN_REPEATED_GROUP_REJECT:
+        with pytest.raises(R.RuleOutputError) as ei:
+            R.validate_code(_code(p))
+        assert "套在" in str(ei.value), p
 
 
 def test_every_regex_the_prompt_teaches_is_one_the_desk_records():
@@ -334,7 +406,7 @@ _ALL_WORST = [t[:MAX_TARGET_CHARS] for texts in _WORST_TEXTS.values() for t in t
 # 2026-10-20 在 Python 3.13 上实测 .*[!！]{2,} 配「原价」+ 2 万个 x 3.6–4.6 秒，a*b*c 配 2 万个 a 3 秒，.*私信.* 配 2 万个「私」2.1 秒，
 # [a-z]+@[a-z]+\.com 1.3 秒，\d+% / \d+\.\d+ 配 2 万个 1 0.6–0.9 秒，a*+a*b 0.2–0.25 秒。
 # 这一类写作台的闸（挨在一起那道）不管，不是两边不一样；要挡得先改写作台，所以这里不单独加严，只是不拿它们掐表。
-# 写作台 codex review on aw#115 那一轮新放行的三条也是这一类（不是教的写法）：(?i)(?-i:a*)(?-i:A*)B 配 "!!!" + 2 万个 a 4.4 秒，
+# 写作台 codex review on aw#115 那一轮（2eef1a6）新放行的三条也是这一类（不是教的写法）：(?i)(?-i:a*)(?-i:A*)B 配 "!!!" + 2 万个 a 4.4 秒，
 # (?a)(?u:\W*)é*x 配换行 + 2 万个空格 4.9 秒，.*\n*x 配 2 万个 ! 3.3 秒（2026-10-20，Python 3.13）。
 KNOWN_QUADRATIC = [".*[!！]{2,}", "a*b*c", ".*私信.*", "[a-z]+@[a-z]+\\.com", "\\d+%", "\\d+\\.\\d+", "a*+a*b",
                    "(?i)(?-i:a*)(?-i:A*)B", "(?a)(?u:\\W*)é*x", ".*\\n*x"]
