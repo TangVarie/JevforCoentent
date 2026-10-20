@@ -47,15 +47,17 @@ QID_RE = re.compile(r"^[0-9a-z]{1,8}_[0-9a-f]{6}_[1-3]_[0-9a-f]{6}$")
 # 哪道不过都打回重编。为什么要和写作台一样宽（2026-10-20 改）：写作台拒收的 code 存不进去，这条规则的代码检查就静默没了，
 # 编译结果里却看不出来；在这里打回，模型带着原因重编一次，还不行这一条带 error，调用方看得见。
 #   · 形状（同写作台 rulecheck._assert_regex_shape）：上限 > 1 的量词只能套在单个字符或定长、不带分支的组上。
-#     _fixed_simple、_regex_shape_ok 里的 walk 和这两组 op 名逐字照搬 rulecheck（2eef1a6），AST 除文档串以外一样。
+#     _fixed_simple、_regex_shape_ok 里的 walk 和这两组 op 名逐字照搬 rulecheck（2eef1a6；aw#115 892769b
+#     这一道没改，重新核过），AST 除文档串以外一样。
 #     它包含 autowriter validator 的「嵌套无上界量词」那道：((?:ab)+)+、(a{1,})+ 文字上看不出来，树上看得出；
 #     也挡 (哈|哈哈)+、(\s+\S+){5} 这类分支 / 变长组套量词的写法；
 #   · 挨在一起、能匹配同样字符的量词（同 autowriter validator.assert_regex_is_safe，aw#115 加的，见 _check_adjacent_repeats）：
 #     a*a*b、.*.*x、a.*a.*b 不嵌套也会卡死。以前这里写「比写作台严，不会比它松」，aw#115 之后就不成立了：这一道 Jev 原来没有，
 #     .*.*x 这里放行、写作台拒收；2026-10-20 照搬过来。同一天写作台在 codex review on aw#115 里又补了「组里的旗只管组里」
 #     （(?i:a*)A*B、(?a)\W*é*x、(?s:.*)\n*x 原来两边都放行）、字集交给 re 自己判（(?i)[A-Z]*(?-i:a*)x、(?i)ß*ẞ*x、\W*[À-Þ]*x），
-#     这里照 aw#115 的 commit 2eef1a6（validator.py）逐字同步；
-#   · 条件组 (?(1)…|…)（同 validator._has_conditional，2eef1a6；rulecheck._assert_regex_shape 也不收）：上面几道都看不进它里面；
+#     之后又补了前瞻 / 占有量词 / 原子组不是隔断（\d+(?=\d*元)、.*a*+.*x、\d+(?>x?)\d+y）、可选组里的量词和组外的照样挨着
+#     （\d+(?:[,，]?\d+)?元）；这里照 aw#115 892769b（validator.py）逐字同步；
+#   · 条件组 (?(1)…|…)（同 validator._has_conditional，2eef1a6 起；rulecheck._assert_regex_shape 也不收）：上面几道都看不进它里面；
 #   · 拿不到解析树（re._parser / sre_parse 是私有 API）就一条正则都不收：写作台这时也一条都存不进去（以前这里有个文字形状的兜底，
 #     会放行写作台拒收的正则，去掉了）。
 # 比写作台严的只剩 pattern 最长 MAX_PATTERN_CHARS 字（写作台不限）。两边对得上由 tests/test_regex_parity.py 钉住：
@@ -299,15 +301,19 @@ def _regex_shape_ok(tree) -> bool:
 
 
 # ── 挨在一起、能匹配同样字符的量词（移植自 autowriter validator.py 的 _check_adjacent_repeats 及其帮手，2026-10-20）────────────
-#    照的是 aw#115 的 commit 2eef1a6（validator.py）。下面的函数和常数逐字照搬：AST 除注释、文档串和两个异常的名字
-#    （_Ambiguous → _AmbiguousRepeats、_TooComplex → _RegexTooComplex）以外一样。写作台再改闸，照它再同步一次（tests/test_regex_parity.py 的清单跟着换）。
-#    2eef1a6 比上一次照搬（1d65e5a 之上没提交的那一轮）多了：单个字符的节点在不在字集里交给 re 自己判（_char_src + _one_char_rx：
+#    照的是 aw#115 892769b（validator.py）。
+#    下面的函数和常数逐字照搬：AST 除注释、文档串和两个异常的名字（_Ambiguous → _AmbiguousRepeats、_TooComplex → _RegexTooComplex）
+#    以外一样。写作台再改闸，照它再同步一次（tests/test_regex_parity.py 的清单跟着换）。
+#    2eef1a6 比再上一次照搬（1d65e5a 之上没提交的那一轮）多了：单个字符的节点在不在字集里交给 re 自己判（_char_src + _one_char_rx：
 #    带上这一段生效的 i / s / a 旗单独编译、fullmatch），(?i) 下探针加上大小写变体（_case_variants），探针换成 Latin-1 全部加几个
 #    大小写怪字（ı İ ſ K ẞ），条件组 (?(1)…|…) 不收（_has_conditional）。
+#    lookahead/possessive 这一轮比 2eef1a6 多了（只改 _check_adjacent_repeats）：前瞻、后顾、占有量词、原子组不再是隔断，
+#    可选 / 次数可变的组里的量词接着组前面开着的查（见下面最后两条），字集按节点记一次（char_test），组的字集照实算（chars_of），
+#    能吃空的组不断开前面开着的（may_be_empty）。
 # 不嵌套也能回溯到卡死：a*a*a*a*a*a*a*a*b 配 30 个 a 要 1 秒、200 个 a 超过 3 秒；两个就够：.*.*x 配 2000 字的一行 1.5 秒。
 # k 个这样的量词挨着，后面的东西匹配失败时要把那一段在它们之间的 n^k 种切法全试一遍。
 # 判法和常数逐字照搬写作台，不在这里单独改（两边口径分开改迟早不一样：要改先改 autowriter，再同步过来）：
-#   · 顺着每一层往下走，记着「还开着」的量词（可变长、能回吐的：* + ? {m,n} 且 m≠n；占有量词不回吐，不算）。后面来一个量词，
+#   · 顺着每一层往下走，记着「还开着」的量词（可变长、能回吐的：* + ? {m,n} 且 m≠n；占有量词不回吐，不算 —— 但也不是隔断，见下）。后面来一个量词，
 #     字集和某个开着的有交集，就算接在它后面，切法数相乘（无上界按 _OPEN_SPAN 算），乘过 _AMBIGUITY_BUDGET 就拒。
 #   · 隔断：一个必须吃掉、开着的量词又吃不了的字（\d+\.\d+ 的 \.）；或者连着两个以上的固定字（品牌[\s\S]*品牌：多字的词在正文里
 #     出现的次数少，切法数被它的出现次数封住 —— PROMPT_HEAD 就教模型这么写「最多出现 N 次」）。分支和组都往里走，
@@ -328,6 +334,19 @@ def _regex_shape_ok(tree) -> bool:
 #     公共字只在范围中间的照样看不见，已知不完备（同写作台）。
 #   · 条件组 (?(1)是|否) 解析出来是（组号, 是, 否），上面几道都不往里走，里面放什么都看不见：()(?(1)(a+)+b) 22 个 a 0.4 秒、
 #     每多 2 个翻一倍。写作台两道都不收（validator._has_conditional、rulecheck._assert_regex_shape），这里也不收。
+#   · 前瞻 (?=…) (?!…)、占有量词、原子组 (?>…) 都不是隔断（同写作台，codex review on aw#115）。前瞻不吃字，可前面开着的量词每换
+#     一种切法它就在那个位置重查一遍，里面的量词和前面的照样挨着（\d+(?=\d*元) 2000 位 4~6 秒）；查完的结果丢掉，后面接的还是
+#     前瞻之前开着的那些。正向前瞻是整条最后一项时它成了整条就成了，里面结尾的量词照样只当下限；负向的里面成了反倒是失败、要回头，
+#     不算（\w*(?!\w*) 2000 字 6 秒）。后顾只能定长，可它里面还能套前瞻（\d+(?<=\d(?=\d*x)) 2000 位 4 秒），所以也接着开着的查、
+#     查完丢掉。占有量词 / 原子组不回吐，自己不算开着的；可能吃空的话前后两个照样挨着（.*a*+.*x 2000 字 1.7 秒、\d+(?>x?)\d+y
+#     2000 位 4~5 秒），吃的是前面开着的那个也能吃的字，前面每换一种切法它就从头吃一遍（.*a++.*x 2000 个 a 1 秒）—— 所以照普通
+#     量词算切法数、照普通量词断开它吃不了的那些开着的，只是不加进开着的里面。
+#   · 次数可变的组 (?:…)? / (?:…){m,n} 不是一整块（同写作台，codex review on aw#115）。原来组里那一段只自己查，整组的字集当
+#     「什么字都能吃」：组里的量词和组前面开着的从来不比，组里结尾还开着的也不往后传 —— \d+(?:[,，]?\d+)?元 2000 位 19 秒、
+#     (?:\d+\s*)?\d+元 5 秒。现在组里有可变长量词的，底下那一段（展开 min(下限, _UNROLL) 份，至少一份）接着前面开着的查，
+#     组里新开的、走完还开着的接在整组后面往后传。整组的字集照实算（组、分支、量词底下都往里看；前瞻后顾不吃字，不算），
+#     不然 \d+(?:\.\d+)?(?=\s*元) 这种快的也拒。下限 ≥ 1 的组能吃空的话（(?:a?b?){1,3}）也不断开前面开着的：吃空也算一次，
+#     组前后的两个照样挨着（\d*(?:a?b?){1,3}\d*x 2000 位 10 秒）。以上秒数都是写作台的实测。
 # 这不是完备的代价分析（几个各自出现很多次的多字词夹着 .* 仍然能慢），挡的是实际会写出来、又必然慢的那一类 —— 同写作台。
 _MAXREPEAT = getattr(re, "MAXREPEAT", 4294967295)     # 同写作台；3.11–3.13 的 re 上都没有这个名字，落到这个数（= _sre.MAXREPEAT）
 _OPEN_SPAN = 1000
@@ -486,22 +505,58 @@ def _check_adjacent_repeats(tree) -> None:
     single = {"LITERAL", "NOT_LITERAL", "ANY", "IN"}
     repeats = ("MAX_REPEAT", "MIN_REPEAT")
     steps = [0]
+    tests: dict = {}
 
     def name_of(node):
         return getattr(node[0], "name", str(node[0]))
 
+    def char_test(name, av, flags) -> _Chars:
+        """_char_test 按（节点, 旗）记下来，这一次检查里同一个节点只算一次字集（同写作台，codex review on aw#115）：前瞻 / 原子组 /
+        占有量词里那一段要接着前面开着的查，走到的每个单字都和开着的比；每次新建一个，两百多个探针字就各跑一遍 fullmatch，
+        .*(?=(?:(?:(?:a\\d){16}){16}){10}) 这么短一条闸自己就要 0.4~0.6 秒。记在这一次调用里，不跨正则攒。"""
+        key = (name, repr(av), flags)
+        if key not in tests:
+            tests[key] = _char_test(name, av, flags)
+        return tests[key]
+
     def chars_of(seq, flags):
-        """一段（量词底下那一段）能吃的所有字的并集；认不出就当什么字都行。"""
+        """一段（量词底下那一段）能吃的所有字的并集：组、分支、量词底下都往里看，前瞻后顾和 ^ $ \\b 不吃字、不算；只有认不出的
+        （回引这类）才当什么字都行。组里有量词原来也一律当什么字都行，\\d+(?:\\.\\d+)?(?=\\s*元) 里的 \\s* 就被看成能接着组吃，
+        快的也拒（同写作台，codex review on aw#115）。"""
         sets = []
         for op, av in seq or ():
             name = getattr(op, "name", str(op))
             if name in single:
-                sets.append(_char_test(name, av, flags))
+                sets.append(char_test(name, av, flags))
             elif name == "SUBPATTERN":
                 sets.append(chars_of(av[-1], _scoped(flags, av)))
-            elif name != "AT":
+            elif name in repeats + ("POSSESSIVE_REPEAT",):
+                sets.append(chars_of(av[2], flags))
+            elif name == "ATOMIC_GROUP":
+                sets.append(chars_of(av, flags))
+            elif name == "BRANCH":
+                sets.extend(chars_of(alt, flags) for alt in (av[1] or ()))
+            elif name not in ("AT", "ASSERT", "ASSERT_NOT"):
                 return _ANY_CHAR
         return _union(sets)
+
+    def may_be_empty(seq) -> bool:
+        """这一段能不能一个字都不吃（拿不准算能）。量词下限 ≥ 1 时「至少吃一个字、它吃不了的那些开着的就此断开」只对吃不空的
+        那一段成立：(?:a?b?){1,3} 吃空也算一次，\\d*(?:a?b?){1,3}\\d*x 前后两个 \\d* 还是挨着（写作台实测 2000 位 10 秒）。"""
+        for op, av in seq or ():
+            name = getattr(op, "name", str(op))
+            if name in single:
+                return False
+            if name in repeats + ("POSSESSIVE_REPEAT",):
+                if av[0] and not may_be_empty(av[2]):
+                    return False
+            elif name in ("SUBPATTERN", "ATOMIC_GROUP"):
+                if not may_be_empty(av[-1] if isinstance(av, tuple) else av):
+                    return False
+            elif name == "BRANCH":
+                if not any(may_be_empty(alt) for alt in (av[1] or ())):
+                    return False
+        return True
 
     def has_variable_repeat(seq) -> bool:
         for op, av in seq or ():
@@ -513,6 +568,8 @@ def _check_adjacent_repeats(tree) -> None:
                 if has_variable_repeat(av[-1] if isinstance(av, tuple) else av):
                     return True
             elif name == "BRANCH" and any(has_variable_repeat(alt) for alt in (av[1] or ())):
+                return True
+            elif name in ("ASSERT", "ASSERT_NOT") and has_variable_repeat(av[1]):
                 return True
         return False
 
@@ -534,7 +591,7 @@ def _check_adjacent_repeats(tree) -> None:
         lo, hi, sub = items[-2][1]
         if lo > 1 or hi < _MAXREPEAT or len(sub) != 1 or name_of(sub[0]) not in single:
             return set()
-        cx, cr = _char_test(name_of(items[-1]), items[-1][1], flags), _char_test(name_of(sub[0]), sub[0][1], flags)
+        cx, cr = char_test(name_of(items[-1]), items[-1][1], flags), char_test(name_of(sub[0]), sub[0][1], flags)
         return xs if _subset(cx, cr) else set()
 
     def walk(seq, open_, flags, at_end=False):
@@ -553,9 +610,9 @@ def _check_adjacent_repeats(tree) -> None:
                 if (name == "LITERAL" and nxt == "LITERAL") or i in counting:
                     open_ = []                                   # 两个字以上的固定词 / 数个数的那个字：隔断
                 else:
-                    cs = _char_test(name, av, flags)
+                    cs = char_test(name, av, flags)
                     open_ = [e for e in open_ if _overlap(e[0], cs)]
-            elif name in repeats:
+            elif name in repeats or (name == "POSSESSIVE_REPEAT" and last):   # 结尾的占有量词：成了整条就成了，同普通的
                 lo, hi, sub = av
                 if lo == hi or last:                             # 定长 {n}：当一串固定的字；结尾的量词：只当 {下限}
                     if lo != hi:
@@ -570,19 +627,37 @@ def _check_adjacent_repeats(tree) -> None:
                 cost = span * max([c for e, c in open_ if _overlap(e, cs)] or [1])
                 if cost > _AMBIGUITY_BUDGET:
                     raise _AmbiguousRepeats()
-                if lo:                                           # 至少吃一个：它吃不了的那些开着的就此断开
+                inner = []
+                if has_variable_repeat(sub):                     # 组里的量词接着组前面开着的查，组里新开的往后传（见上）
+                    before = {id(e) for e in open_}
+                    inner = [e for e in walk(list(sub) * max(1, min(lo, _UNROLL)), list(open_), flags)
+                             if id(e) not in before]
+                if lo and not may_be_empty(sub):                 # 至少吃一个：它吃不了的那些开着的就此断开
                     open_ = [e for e in open_ if _overlap(e[0], cs)]
-                open_ = open_ + [(cs, cost)]
-            elif name in ("POSSESSIVE_REPEAT", "ATOMIC_GROUP"):
-                walk(av[-1] if name == "POSSESSIVE_REPEAT" else av, [], flags)   # 里面自己查；不回吐，前后接不上
-                open_ = []
+                open_ = open_ + [(cs, cost)] + inner
+            elif name == "POSSESSIVE_REPEAT":                    # 不回吐，自己不算开着的；可也不是隔断（见上）
+                lo, hi, sub = av
+                walk(sub, list(open_), flags)                    # 每次从头吃：底下那一段接着前面开着的查
+                cs = chars_of(sub, flags)
+                if lo != hi:                                     # 前面每换一种切法它就吃一遍：和开着的照样相乘（.*a++.*x）
+                    span = _OPEN_SPAN if hi >= _MAXREPEAT else hi - lo + 1
+                    if span * max([c for e, c in open_ if _overlap(e, cs)] or [1]) > _AMBIGUITY_BUDGET:
+                        raise _AmbiguousRepeats()
+                if lo and not may_be_empty(sub):                 # 至少吃一个：它吃不了的那些开着的就此断开；能吃空就都还开着
+                    open_ = [e for e in open_ if _overlap(e[0], cs)]
+            elif name == "ATOMIC_GROUP":                         # 组里照常回溯到第一次成功，接着前面开着的查；出了组，
+                before = {id(e) for e in open_}                  # 组里新开的不回吐、不再开着，前面开着的照常往后传
+                open_ = [e for e in walk(av, list(open_), flags, last) if id(e) in before]
             elif name == "SUBPATTERN":
                 open_ = walk(av[-1], open_, _scoped(flags, av), last)
             elif name == "BRANCH":
                 after = [walk(alt, list(open_), flags, last) for alt in (av[1] or ())]
                 open_ = [e for branch in after for e in branch]
             elif name in ("ASSERT", "ASSERT_NOT"):
-                walk(av[1], [], flags)
+                if av[0] == 1:                                   # 前瞻：接着前面开着的查，查完丢掉（不吃字，后面接的还是之前开着的）
+                    walk(av[1], list(open_), flags, last and name == "ASSERT")
+                else:                                            # 后顾只能定长，可它里面的前瞻照样往后扫：也接着开着的查、
+                    walk(av[1], list(open_), flags)              # 查完丢掉（\d+(?<=\d(?=\d*x)) 写作台实测 2000 位 4 秒）
             elif name == "AT":
                 continue
             else:                                                # 回引这类认不出的：不当隔断
@@ -612,9 +687,11 @@ def _regex_problem(pattern: str) -> Optional[str]:
         return "code.pattern 太复杂（定次量词套了好几层，展开后太长），没法确认它不会卡死，写作台也存不进去；换个更直接的写法"
     except _AmbiguousRepeats:
         return ("code.pattern 里有能匹配同样字符的量词挨在一起（形如 a*a*b、.*.*x、\\w+\\w+、a.*a.*b），中间没有隔开，"
-                "会灾难性回溯，写作台也存不进去（量词自己也能吃的单个字隔不开，a.*a.*b 里的 a 就是）。"
+                "会灾难性回溯，写作台也存不进去（量词自己也能吃的单个字隔不开，a.*a.*b 里的 a 就是；前瞻 (?=…)(?!…) 里的量词和它前面的"
+                "也算挨着，如 \\d+(?=\\d*元)；占有量词 a++、原子组 (?>…) 也隔不开；可选的组 (?:…)? 里的量词和组前后的也算挨着，"
+                "如 \\d+(?:[,，]?\\d+)?元）。"
                 "删掉多余的量词（开头结尾的 .* 不用写，本来就在全文里找）；或者用两个字以上的固定词隔开，或者让量词吃不了那个字"
-                "（\\n[ \\t]*\\n、[^!]*）。数「X 最多 N 次」写成 X[\\s\\S]*X…X、最后一个 X 后面什么都别接（连 $ 也别加）；"
+                "（\\n[ \\t]*\\n、[^!]*、\\d+(?:[,，]\\d+)?元）。数「X 最多 N 次」写成 X[\\s\\S]*X…X、最后一个 X 后面什么都别接（连 $ 也别加）；"
                 f"X 是单个字时最多展开 {_MAX_COUNT_CHAIN} 份")
     except Exception as exc:  # noqa: BLE001 — 分析本身出错（递归太深等）：写作台那边同样存不进去，按不安全打回，不让整条 500
         return f"code.pattern 没法做安全分析（{type(exc).__name__}），写作台也存不进去；换个更直接的写法"

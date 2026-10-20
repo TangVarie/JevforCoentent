@@ -6,10 +6,12 @@ aw#115 加的「挨在一起、能匹配同样字符的量词」）和 rulecheck
 Jev 编出来的 code 写作台拒收的话，这条规则的代码检查就静默没了；所以 judge/rules.validate_code 得把写作台拒收的全部打回
 （模型带着原因重编，还不行这一条带 error），写作台收的、PROMPT_HEAD 教的写法又一个都不能误伤。
 
-下面的清单原样抄自 autowriter 的 tests/test_regex_safety.py 和 tests/test_rulecheck.py（aw#115 的 commit 2eef1a6，2026-10-20：
-含 codex review on aw#115 那一轮加的「组里的旗」「(?i) 下的字集交给 re 判」「条件组」几组用例），放行 / 拒收按写作台 normalize_check
-整体的结论分（两道都过才算放行）。写作台改了闸，这里跟着换清单。另有两张对拍探针（拿写作台和 Jev 跑同一批随机正则）
-抓到过两边不一致的清单，钉住别再回来（在 2eef1a6 上重新核过结论没变）。全部是合成的正则和正文，不含任何客户原文。
+下面的清单原样抄自 autowriter 的 tests/test_regex_safety.py 和 tests/test_rulecheck.py（aw#115 892769b，2026-10-20：含 codex review on aw#115 那几轮加的「组里的旗」「(?i) 下的字集交给 re 判」
+「条件组」，和最新一轮的「前瞻 / 占有量词 /
+原子组不是隔断」「可选组里的量词和组外的照样挨着」几组用例），放行 / 拒收按写作台 normalize_check 整体的结论分（两道都过才算放行）。
+写作台改了闸，这里跟着换清单。另有两张对拍探针（拿写作台和 Jev 跑同一批随机正则）抓到过两边不一致的清单，钉住别再回来
+（在 lookahead/possessive 这一轮上重新核过：两条原来写作台放行的现在写作台拒收，挪进 PROBE_NOW_REJECTED）。
+全部是合成的正则和正文，不含任何客户原文。
 """
 from __future__ import annotations
 
@@ -85,6 +87,45 @@ DESK_CASE_SETS = [
 # test_regex_safety.test_conditional_groups_are_rejected：条件组 (?(1)是|否) 闸看不进它里面（codex review on aw#115，2eef1a6）
 DESK_CONDITIONAL = ["()(?(1)(a+)+b)", "()(?(1)a*a*a*a*a*b)", "(a)?(?(1)x|.*.*y)"]
 
+# test_regex_safety.test_lookaheads_possessives_and_atomic_groups_do_not_separate：前瞻 (?=…) (?!…)、占有量词、原子组 (?>…)
+# 都不是隔断（codex review on aw#115，lookahead/possessive 那一轮）。(pattern, 配多少个什么字才慢)，例子原样
+DESK_LOOKAHEAD_POSSESSIVE_SLOW = [
+    ("\\d+(?=\\d*元)", "1"),
+    (".*(?=.*x)", "a"),
+    ("\\w*(?=\\w*x)", "a"),
+    ("\\w*(?!\\w*x)y", "a"),
+    ("\\d+(?=\\d*)x", "1"),
+    ("\\w*(?!\\w*)", "a"),
+    (".*a*+.*x", "b"),
+    (".*(?>a*).*x", "b"),
+    (".*a++.*x", "a"),
+    ("\\d+(?>x?)\\d+y", "1"),
+    ("\\w*(?>a?)\\w*!", "b"),
+    ("\\d+\\d++x", "1"),
+    ("\\d+(?<=\\d(?=\\d*x))", "1"),
+    ("\\d+(?<=(?=\\d*x)\\d)", "1"),
+]
+DESK_LOOKAHEAD_POSSESSIVE = [p for p, _ in DESK_LOOKAHEAD_POSSESSIVE_SLOW]
+
+# test_regex_safety.test_repeats_inside_optional_or_counted_groups_still_meet_their_neighbours：可选 / 次数可变的组里的量词
+# 和组外面的照样挨着（同一轮）。(pattern, 字, 个数)，例子原样；最后三条写作台的形状那道也拒（量词套了带量词 / 分支的组）
+DESK_OPTIONAL_GROUP_SLOW = [
+    ("\\d+(?:[,，]?\\d+)?元", "1", 500),
+    ("\\S+(?:\\s*\\S+)?！", "中", 500),
+    ("\\d+(?:\\s*\\d+)?元", "1", 500),
+    ("(?:\\d+\\s*)?\\d+元", "1", 1000),
+    ("(?:\\w+\\s*)?\\w+！", "中", 1000),
+    ("\\d+(?=\\s*(?:\\d+)?元)", "1", 500),
+    ("\\d+(?=(?:\\s*\\d+)?元)", "1", 500),
+    ("\\d+(?:\\d++)?x", "1", 1000),
+    ("\\d+(?:(?>\\d*))?x", "1", 1000),
+    ("\\d+(?:(?=\\d*x))?y", "1", 1000),
+    ("\\d*(?:a?b?){1,3}\\d*x", "1", 1000),
+    ("\\d*(?:a|)+\\d*x", "1", 1000),
+    ("\\d*(?:a?b?)++\\d*x", "1", 1000),
+]
+DESK_OPTIONAL_GROUP = [p for p, _, _ in DESK_OPTIONAL_GROUP_SLOW]
+
 # test_regex_safety 其余拒收的：定次量词套五层（闸自己不能被拖住）、编译不了
 DESK_OTHER_REJECTED = [
     "(?:(?:(?:(?:(?:a{16}){16}){16}){16}){16})",
@@ -108,9 +149,16 @@ DESK_RULECHECK_REJECTED = [
 DESK_VALIDATOR_ONLY = [
     "(?:\\S+\\s+){5}\\S+",
     "(?:\\d{1,3},)+\\d{3}",
+    # lookahead/possessive 那一轮：test_lookaheads_possessives_and_atomic_groups_that_stay_allowed_are_fast 里的这一条、
+    # test_the_check_computes_each_char_set_once 的三条（定次量词套三层）
+    "^\\S+(?:\\s+\\S+){3}",
+    ".*(?=(?:(?:(?:a\\d){16}){16}){10})",
+    ".*(?!(?:(?:(?:a\\d){16}){16}){10})x",
+    ".*(?>(?:(?:(?:a\\d){16}){16}){10})x",
 ]
 
 DESK_MUST_REJECT = list(dict.fromkeys(DESK_CATASTROPHIC + DESK_ADJACENT + DESK_SCOPED_FLAGS + DESK_CASE_SETS + DESK_CONDITIONAL
+                                      + DESK_LOOKAHEAD_POSSESSIVE + DESK_OPTIONAL_GROUP
                                       + DESK_OTHER_REJECTED + DESK_RULECHECK_REJECTED + DESK_VALIDATOR_ONLY))
 
 # ── 写作台放行的（validator 和 rulecheck 两道都过）──────────────────────────────────────────────────────────────
@@ -158,6 +206,36 @@ DESK_MUST_PASS = list(dict.fromkeys([
     "(?i)(?-i:a*)(?-i:A*)B", "(?a)(?u:\\W*)é*x", ".*\\n*x",
 ]))
 
+# test_regex_safety.test_lookaheads_possessives_and_atomic_groups_that_stay_allowed_are_fast（lookahead/possessive 那一轮；
+# ^\S+(?:\s+\S+){3} 写作台的形状那道拒，在 DESK_VALIDATOR_ONLY；a*+a*b 上面已经有了）。(pattern, 写作台掐表用的正文)
+DESK_LOOKAHEAD_POSSESSIVE_FAST = [
+    ("\\d+(?=元)", ["1" * 2000]),
+    ("\\d+(?=\\s*元)", ["1" * 2000, "1" + " " * 2000]),
+    ("(?=.*品牌).*折扣", ["a" * 2000, "品牌" * 1000]),
+    ("(?=.*A)(?=.*B).*C", ["A" * 2000, "AB" * 1000]),
+    ("\\d+(?!\\d)", ["1" * 2000]),
+    ("\\w+(?=\\s)", ["a" * 2000]),
+    ("(?<!\\d)\\d{11}(?!\\d)", ["1" * 2000]),
+    ("[^\\n]*(?=\\n)", ["a" * 2000]),
+    ("\\d+(?<=\\d)x", ["1" * 2000]),
+    ("\\d+(?=\\d*)", ["1" * 2000]),
+    ("^\\S+(?:\\s+\\S+){3}", ["a" * 2000, "a " * 1000]),
+    ("\\d++\\.\\d+", ["1" * 2000]),
+    ("(?>\\w+)\\s+\\w+", ["a" * 2000]),
+    ("a*+a*b", ["a" * 2000]),
+    (".*\\d++", ["a" * 2000, "1" * 2000]),
+]
+# test_regex_safety.test_optional_groups_that_stay_allowed_are_fast（同一轮）
+DESK_OPTIONAL_GROUP_FAST = [
+    ("\\d+(?:\\.\\d+)?(?=\\s*元)", ["1" * 1000, "1." * 1000, "1" + " " * 2000, "1.1" * 700]),
+    ("\\d+(?:\\.\\d+)?(?=\\s*[元块])", ["1" * 1000, "1." * 1000, "1" + " " * 2000]),
+    ("\\d+(?:\\.\\d+)?\\s*[元块]", ["1" * 1000, "1." * 1000, "1" + " " * 2000, "1.1" * 700]),
+    ("\\d+(?:\\.\\d+)?元", ["1" * 1000, "1." * 1000]),
+    ("[\\u4e00-\\u9fff]+(?:[a-z]+)?！", ["中" * 1000, "中a" * 500]),
+]
+DESK_MUST_PASS = list(dict.fromkeys(DESK_MUST_PASS + [p for p, _ in DESK_LOOKAHEAD_POSSESSIVE_FAST + DESK_OPTIONAL_GROUP_FAST
+                                                      if p not in DESK_VALIDATOR_ONLY]))
+
 # 对拍探针（写作台 normalize_check 对 Jev validate_code，跑上万条随机正则）2026-10-20 抓到的、两边结论不一样的：
 # 都带旗（组里的 (?i:…) (?s:…) (?a:…)，或者开头的 (?a)），是 Jev 补 _scoped / ASCII 字集之前漏掉的。写作台全部拒收 / 全部放行
 # （2eef1a6 上重新核过：字集改成交给 re 判以后，这几条写作台的结论一条没变）。
@@ -178,10 +256,14 @@ PROBE_DESK_REJECTS = [
     "(?ia)^品牌*?\\.{0,3}\\W{0,3}[^!]{1,5} *?",
 ]
 PROBE_DESK_ACCEPTS = [
-    "(?ia) *\\D.++\\d|品牌\\w*é+A+ ",
-    "(?a)品牌{1,}\\w{1,}.[a-z]|!??[A-Z]*A++\\W{1,5}A{3}",
     "(?a)(?a:[\\s\\S]??！\\S{0,3}é+?\\w?)\\sx",
     "(?a)\\D{0,3}|(?>\\n*+哈{2,}\\w+? )#",
+]
+# 上面那张原来还有这两条（2eef1a6 上写作台放行）。lookahead/possessive 那一轮占有量词不再是隔断，写作台改成拒收：
+# 开着的 " *" 后面接 .++、开着的 [A-Z]* 后面接 A++，前面每换一种切法它就从头吃一遍。Jev 跟着拒收。
+PROBE_NOW_REJECTED = [
+    "(?ia) *\\D.++\\d|品牌\\w*é+A+ ",
+    "(?a)品牌{1,}\\w{1,}.[a-z]|!??[A-Z]*A++\\W{1,5}A{3}",
 ]
 
 
@@ -191,8 +273,10 @@ def _code(p: str) -> dict:
 
 def test_the_two_lists_do_not_overlap():
     assert not set(DESK_MUST_REJECT) & set(DESK_MUST_PASS)
-    assert (len(DESK_MUST_REJECT), len(DESK_MUST_PASS)) == (53, 43), "清单是抄来的，条数变了说明抄漏或抄多了"
-    assert not set(PROBE_DESK_REJECTS) & set(PROBE_DESK_ACCEPTS + DESK_MUST_PASS)
+    assert (len(DESK_MUST_REJECT), len(DESK_MUST_PASS)) == (84, 61), "清单是抄来的，条数变了说明抄漏或抄多了"
+    assert (len(DESK_LOOKAHEAD_POSSESSIVE), len(DESK_OPTIONAL_GROUP)) == (14, 13)
+    assert (len(DESK_LOOKAHEAD_POSSESSIVE_FAST), len(DESK_OPTIONAL_GROUP_FAST)) == (15, 5)
+    assert not set(PROBE_DESK_REJECTS + PROBE_NOW_REJECTED) & set(PROBE_DESK_ACCEPTS + DESK_MUST_PASS)
     assert not set(PROBE_DESK_ACCEPTS) & set(DESK_MUST_REJECT)
 
 
@@ -207,7 +291,7 @@ def test_whatever_the_desk_records_still_compiles(pattern):
     assert R.validate_code(_code(pattern))["pattern"] == pattern
 
 
-@pytest.mark.parametrize("pattern", PROBE_DESK_REJECTS)
+@pytest.mark.parametrize("pattern", PROBE_DESK_REJECTS + PROBE_NOW_REJECTED)
 def test_what_the_probe_caught_jev_letting_through_is_sent_back(pattern):
     with pytest.raises(R.RuleOutputError):
         R.validate_code(_code(pattern))
@@ -254,6 +338,77 @@ def test_case_insensitive_sets_are_compared_the_way_re_matches(pattern, ch):
     with pytest.raises(R.RuleOutputError) as ei:
         R.validate_code(_code(pattern))
     assert "挨在一起" in str(ei.value)
+
+
+def _adjacent_gate_refuses(pattern: str) -> bool:
+    """只跑「挨在一起」那一道（写作台 validator.assert_regex_is_safe 里 _check_adjacent_repeats 那一步）：写作台的这几张用例表
+    直接调 validator，不过形状那道；这里对的是同一道。"""
+    try:
+        R._check_adjacent_repeats(R._regex_tree(pattern))
+    except R._AmbiguousRepeats:
+        return True
+    return False
+
+
+def _refusal(pattern: str) -> str:
+    with pytest.raises(R.RuleOutputError) as ei:
+        R.validate_code(_code(pattern))
+    return str(ei.value)
+
+
+@pytest.mark.parametrize("pattern, ch", DESK_LOOKAHEAD_POSSESSIVE_SLOW)
+def test_lookaheads_possessives_and_atomic_groups_do_not_separate(pattern, ch):
+    """前瞻里的量词和前面开着的照样挨着；占有量词 / 原子组能吃空、或者吃的是前面开着的也能吃的字，前后照样挨着（同写作台）。
+    配 1000 个字（同写作台），例子本身得是慢的；形状那道都过，打回的话说「挨在一起」。"""
+    t0 = time.perf_counter()
+    re.search(pattern, ch * 1000)
+    assert time.perf_counter() - t0 > 0.05, "这条的例子本身得是慢的，否则测不出东西"
+    assert _adjacent_gate_refuses(pattern)
+    assert "挨在一起" in _refusal(pattern)
+
+
+@pytest.mark.parametrize("pattern, ch, n", DESK_OPTIONAL_GROUP_SLOW)
+def test_repeats_inside_optional_or_counted_groups_still_meet_their_neighbours(pattern, ch, n):
+    """(?:…)? / (?:…){m,n} 不是一整块：组里的量词接着组前面开着的查，组里走完还开着的往后传（同写作台）。
+    形状那道也拒的（量词套了带量词 / 分支的组）先说形状；其余说「挨在一起」。"""
+    t0 = time.perf_counter()
+    re.search(pattern, ch * n)
+    assert time.perf_counter() - t0 > 0.05, "这条的例子本身得是慢的，否则测不出东西"
+    assert _adjacent_gate_refuses(pattern)
+    msg = _refusal(pattern)
+    assert ("挨在一起" if R._regex_shape_ok(R._regex_tree(pattern)) else "套在") in msg, (pattern, msg)
+
+
+@pytest.mark.parametrize("pattern, texts", DESK_LOOKAHEAD_POSSESSIVE_FAST + DESK_OPTIONAL_GROUP_FAST,
+                         ids=lambda v: v if isinstance(v, str) else None)
+def test_lookaheads_possessives_and_optional_groups_that_stay_allowed_are_fast(pattern, texts):
+    """「挨在一起」那道放行的（\\d+(?=\\s*元)、a*+a*b、\\d+(?:\\.\\d+)?元 …），在写作台掐表用的正文上真的快（2000 字以内）。
+    形状那道拒的（^\\S+(?:\\s+\\S+){3}）整体还是打回，同写作台 normalize_check。"""
+    assert not _adjacent_gate_refuses(pattern)
+    if pattern in DESK_VALIDATOR_ONLY:
+        assert "套在" in _refusal(pattern)
+    else:
+        assert R.validate_code(_code(pattern))["pattern"] == pattern
+    for text in texts:
+        t0 = time.perf_counter()
+        re.search(pattern, text)
+        assert time.perf_counter() - t0 < 0.2, (pattern, text[:20])
+
+
+def test_the_check_computes_each_char_set_once(monkeypatch):
+    """前瞻 / 原子组 / 占有量词里那一段接着前面开着的查，同一个单字节点（连同生效的旗）一次检查里只算一次字集（同写作台
+    test_the_check_computes_each_char_set_once）：不然 .*(?=(?:(?:(?:a\\d){16}){16}){10}) 闸自己就要 0.4~0.6 秒。
+    这三条形状那道先拒（定次量词套了三层），所以直接调 _check_adjacent_repeats。"""
+    calls, real = [], R._char_test
+    monkeypatch.setattr(R, "_char_test", lambda *a: calls.append(repr(a)) or real(*a))
+    for pattern in (".*(?=(?:(?:(?:a\\d){16}){16}){10})", ".*(?!(?:(?:(?:a\\d){16}){16}){10})x",
+                    ".*(?>(?:(?:(?:a\\d){16}){16}){10})x"):
+        calls.clear()
+        t0 = time.perf_counter()
+        R._check_adjacent_repeats(R._regex_tree(pattern))
+        assert time.perf_counter() - t0 < 0.2, pattern
+        assert len(calls) == len(set(calls)), (pattern, len(calls), len(set(calls)))
+        assert "套在" in _refusal(pattern)
 
 
 @pytest.mark.parametrize("pattern", DESK_CONDITIONAL)
@@ -408,8 +563,21 @@ _ALL_WORST = [t[:MAX_TARGET_CHARS] for texts in _WORST_TEXTS.values() for t in t
 # 这一类写作台的闸（挨在一起那道）不管，不是两边不一样；要挡得先改写作台，所以这里不单独加严，只是不拿它们掐表。
 # 写作台 codex review on aw#115 那一轮（2eef1a6）新放行的三条也是这一类（不是教的写法）：(?i)(?-i:a*)(?-i:A*)B 配 "!!!" + 2 万个 a 4.4 秒，
 # (?a)(?u:\W*)é*x 配换行 + 2 万个空格 4.9 秒，.*\n*x 配 2 万个 ! 3.3 秒（2026-10-20，Python 3.13）。
+# a*+a*b 在 3.13 上 0.2–0.25 秒、3.11 上 0.07 秒，压线，按慢的那边留在这里。
+# lookahead/possessive 那一轮写作台新放行的 18 条里 15 条也是这一类（写作台只拿 2000 字以内的正文掐表，见上面
+# DESK_LOOKAHEAD_POSSESSIVE_FAST / DESK_OPTIONAL_GROUP_FAST）。2026-10-20 在这里的 2 万字最坏正文上实测（3.13 / 3.11，取最慢的一条正文）：
+# \d+(?=元) 2.6 / 3.1 秒，\d+(?=\s*元) 4.3 / 6.0，(?=.*品牌).*折扣 0.7 / 0.8，(?=.*A)(?=.*B).*C 0.7 / 0.6，\w+(?=\s) 6.0 / 5.7，
+# [^\n]*(?=\n) 3.0 / 3.2，\d+(?<=\d)x 3.7 / 4.4，\d++\.\d+ 0.56 / 0.56，(?>\w+)\s+\w+ 1.4 / 1.2，.*\d++ 3.7 / 4.3，
+# \d+(?:\.\d+)?(?=\s*元) 8.4 / 10.2，\d+(?:\.\d+)?(?=\s*[元块]) 10.5 / 12.9，\d+(?:\.\d+)?\s*[元块] 10.4 / 10.5，
+# \d+(?:\.\d+)?元 6.3 / 7.1，[\u4e00-\u9fff]+(?:[a-z]+)?！ 9.6 / 10.1。快的三条 \d+(?!\d)、(?<!\d)\d{11}(?!\d)、\d+(?=\d*) 都在
+# 1 毫秒以内，照常掐表。打回的话（同写作台 UnsafeRegex 那句）教的 \d+(?:[,，]\d+)?元 也是这一类（3.13 上 2 万个 1 6.7 秒），
+# 不在写作台的用例表里，所以不在这张单子上；两边都放行，对拍探针里有它。
 KNOWN_QUADRATIC = [".*[!！]{2,}", "a*b*c", ".*私信.*", "[a-z]+@[a-z]+\\.com", "\\d+%", "\\d+\\.\\d+", "a*+a*b",
-                   "(?i)(?-i:a*)(?-i:A*)B", "(?a)(?u:\\W*)é*x", ".*\\n*x"]
+                   "(?i)(?-i:a*)(?-i:A*)B", "(?a)(?u:\\W*)é*x", ".*\\n*x",
+                   "\\d+(?=元)", "\\d+(?=\\s*元)", "(?=.*品牌).*折扣", "(?=.*A)(?=.*B).*C", "\\w+(?=\\s)", "[^\\n]*(?=\\n)",
+                   "\\d+(?<=\\d)x", "\\d++\\.\\d+", "(?>\\w+)\\s+\\w+", ".*\\d++", "\\d+(?:\\.\\d+)?(?=\\s*元)",
+                   "\\d+(?:\\.\\d+)?(?=\\s*[元块])", "\\d+(?:\\.\\d+)?\\s*[元块]", "\\d+(?:\\.\\d+)?元",
+                   "[\\u4e00-\\u9fff]+(?:[a-z]+)?！"]
 
 
 def test_the_known_quadratic_ones_are_still_on_the_pass_list():
