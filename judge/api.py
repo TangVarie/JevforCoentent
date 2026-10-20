@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""HTTP 服务：/judge · /judge_draft · /comment_repair_plan_for · /judge_thread · /banks · /health。
+"""HTTP 服务：/judge · /judge_draft · /compile_rules · /comment_repair_plan_for · /judge_thread · /banks · /health。
 
   POST /judge   （一个题库、一批 subject；特征层 / 评论 / 外部语料都走这里）
     {
@@ -35,9 +35,22 @@
     subject_type 只能是 aw_version / ssll_sample（一篇稿子一定按未发布稿过数据出境）。judge_paras = on_fail 时篇级没有硬伤也会判暗题；
     段级结果（subject_id = <稿 id>:p<N>）与篇级一起落账本。
 
+  POST /compile_rules   （写作台的自由文本规则 → 写后检查；只认管理 key；2026-10-20，逻辑在 judge/rules.py）
+    {"project": "<项目代号，必填>", "category": "<可选>",
+     "rules": [{"id": "<规则 id>", "text": "<规则原文，≤4000 字>", "severity": "hard" | "soft"}, …]}      # 1..60 条，id 不重复
+    返回 {"rules": [{"id", "sha"（原文 sha256 前 12 位）, "verdict": "code" | "questions" | "not_checkable",
+                     "code": null | {"kind": "forbidden_word" | "forbidden_regex" | "required_phrase" | "max_len", …},
+                     "questions": [{"qid": "<规则缩写>_<sha6>_<n>_<题目指纹6>", "ask", "pass_if": "是" | "否", "scope": "title" | "body" | "full", "note"}],
+                     "why", ["error"]}],
+          "project_bank": <Jev 格式题库，可原样作为 /judge_draft 的内联 project_bank> | null,
+          "errors", "model", "calls", "usage", "latency_ms", "policy"}
+    规则原文是项目层内容：处方药没清出境 / 项目层没放行 → 403（调生成端之前）。单条编不出只让那一条带 error；一条都没编出 → 502。
+    编出的题只作建议：发 /judge_draft 时别写进 hard_rules / brief（那样会进 passed）。JUDGE_MOCK=1 用不联网的 MockRuleGenerator。
+
   数据出境（judge/policy.py，config/data_policy.yaml，docs/00 #7）
     未发布稿（aw_version / ssll_sample）必须带 project；处方药项目没清出境 → 403，detail 以 "policy:" 开头（调用方记 policy_blocked、不重试）；
     项目层没放行 → 整层去掉，回显在 policy.dropped_banks / dropped_hard_rules。公开内容（note / external_note / comment）不受限。
+    2026-10-20 起 project_layer_cleared = ["*"]（owner 拍板所有项目放行项目层）；处方药闸不变、照旧先执行。
   JUDGE_MOCK=1 时判出来的行 extractor 是 mock:<模型>，任何 write=true 一律 422：假答案绝不进真账本。
 
 鉴权：X-Judge-Key 必须等于 JUDGE_API_KEY（管理 key）或 JUDGE_WRITER_API_KEYS 里的一把（写手 key，逗号分隔，可多把以便轮换）；
@@ -59,6 +72,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from . import policy as P
+from . import rules as _rules
 from . import spans as sp
 from .banks import Bank, check_bank, discover, load_bank, unfilled
 from .core import LedgerWriteError, judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
@@ -130,7 +144,7 @@ def require_key(x_judge_key: Optional[str] = Header(default=None)) -> str:
     """只有管理 key 过：/judge 收任意 subject、能 write=true、回带全部题（含暗题）的账本行，写手 key 不该够得着（审计 A-09）。"""
     role = require_any_key(x_judge_key)
     if role != "admin":
-        raise HTTPException(403, "这把是写手 key（JUDGE_WRITER_API_KEYS），只够 /banks 和 /judge_draft（不写）；/judge 要服务端的 JUDGE_API_KEY")
+        raise HTTPException(403, "这把是写手 key（JUDGE_WRITER_API_KEYS），只够 /banks 和 /judge_draft（不写）；/judge 和 /compile_rules 要服务端的 JUDGE_API_KEY")
     return role
 
 
@@ -263,7 +277,10 @@ def health():
             "auth": {"mode": mode, "required": mode == "key", "writer_keys": len(writer_keys())}, "workers": workers(),
             "jev_key": bool(os.environ.get("TYPESAFE_API_KEY")), "mock": os.environ.get("JUDGE_MOCK") == "1",
             "write_enabled": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
-            "comment_tools_enabled": os.environ.get("JUDGE_COMMENT_TOOLS_ENABLED") == "1"}
+            "comment_tools_enabled": os.environ.get("JUDGE_COMMENT_TOOLS_ENABLED") == "1",
+            # /compile_rules 的生成端：只回模型名和「有没有密钥」，不回密钥
+            "compile": {"model": "mock" if os.environ.get("JUDGE_MOCK") == "1" else _rules.model_name(),
+                        "key": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MOONSHOT_API_KEY"))}}
 
 
 _BANK_VERSION = re.compile(r"^(?P<family>.+?)_v(?P<major>\d+)[._](?P<minor>\d+)$")
@@ -409,3 +426,21 @@ from .comment_api import attach as _attach_comments
 
 _attach_comments(app, get_bank=get_bank, get_client=_client, policy=_policy,
                  auth=require_any_key, parallel=_parallel)
+
+
+def _repo_qids() -> set:
+    """本服务所有题库（banks/ 与 banks/vendor/）已有的题号：/compile_rules 编出的题号不许撞上任何一个（critic 9）——
+    profile 按题号合并，撞车会把两层的答案混在一起；/judge_draft 的 project_from_request 也会 422。"""
+    out: set = set()
+    for name in discover(BANKS_DIR):
+        try:
+            out.update(get_bank(name).ids())
+        except HTTPException:
+            continue
+    return out
+
+
+# Free-text desk rules → post-draft checks (admin key only; rule text is project-layer content).
+from .rules_api import attach as _attach_rules
+
+_attach_rules(app, auth=require_key, policy=_policy, taken_qids=_repo_qids)

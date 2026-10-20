@@ -97,5 +97,19 @@ def split_sentences(text: str, cap: int = EVIDENCE_SENT_CAP) -> list:
     return out[:cap]
 
 
+def evidence_sentences(spans: dict, scope: Optional[str], *, title_own: bool = False) -> list:
+    """证据选句的候选句。默认（TV 格式题、没写 scope 的 Jev 格式题）= 按 scope 取那一段再切句，行为不变。
+    title_own=True（Jev 格式题，2026-10-20）：scope = title 只有标题这一句；full = 标题自成一句 + 正文切句。
+    标题单独成句而不是和正文拼起来再切：正文第一句不足 6 字时 split_sentences 会把它并进前一句，证据就不是标题原文了；
+    写作台按证据句做子串定位（critic 20），标题必须原样。"""
+    if title_own and scope in ("title", "full"):
+        title = (spans.get("title") or "").strip()
+        out = [title] if title else []
+        if scope == "full":
+            out += split_sentences(spans.get("body") or "")
+        return out[:EVIDENCE_SENT_CAP]
+    return split_sentences(scope_text(spans, scope))
+
+
 def norm(s: str) -> str:
     return _WS.sub("", s or "").replace("“", '"').replace("”", '"')

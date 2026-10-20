@@ -66,7 +66,7 @@ def build_evidence_call(bank: Bank, spans_: dict, items: dict) -> Optional[tuple
         q = byid.get(qid)
         if not q or not q.needs_evidence(it.get("raw")):
             continue
-        sents = sp.split_sentences(sp.scope_text(spans_, q.scope))
+        sents = sp.evidence_sentences(spans_, q.scope, title_own=bank.fmt == "jev")
         if not sents:
             continue
         sent_map[qid] = sents
