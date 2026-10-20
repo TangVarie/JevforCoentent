@@ -82,13 +82,13 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
       "coverage": "full", "uncovered": "", "why": "标题禁用词，代码能查"},
      {"id": "r-006", "sha": "e9c631367736", "verdict": "questions",
       "code": {"kind": "forbidden_word", "words": ["闭眼入"], "where": ["title", "body"]},
-      "questions": [{"qid": "r006_e9c631_1", "ask": "这篇稿子读起来像不像在推销？", "pass_if": "否", "scope": "full", "note": "语气部分"}],
+      "questions": [{"qid": "r006_e9c631_1_f292b1", "ask": "这篇稿子读起来像不像在推销？", "pass_if": "否", "scope": "full", "note": "语气部分"}],
       "coverage": "full", "uncovered": "", "why": "词表走代码，语气要读懂"},
      {"id": "r-007", "sha": "…", "verdict": "code", "code": {"kind": "max_len", "max": 20, "where": "title"}, "questions": [],
       "coverage": "partial", "uncovered": "正文要带 #品牌话题 没查（一条只能填一个 code）", "why": "…"},
      {"id": "r-003", "sha": "09426db7df02", "verdict": "not_checkable", "code": null, "questions": [], "coverage": null, "uncovered": "", "why": "交付命名，稿子里查不到"},
      {"id": "r-009", "sha": "…", "verdict": null, "code": null, "questions": [], "coverage": null, "uncovered": "", "why": "", "error": "模型输出不合格（已重试一次）：…"}],
-   "project_bank": {"bank_version": "rules-9c83b9eca62a", "ambiguity": {…}, "questions": [{"id": "r006_e9c631_1", "type": "noul", "scope": "full", …}]},
+   "project_bank": {"bank_version": "rules-51b93572efee", "ambiguity": {…}, "questions": [{"id": "r006_e9c631_1_f292b1", "type": "noul", "scope": "full", …}]},
    "errors": 1, "model": "claude-sonnet-5-5", "calls": 1, "usage": {"input_tokens": …, "output_tokens": …}, "latency_ms": …, "policy": {…}}
   ```
   - `sha` = 规则原文（UTF-8 原样）sha256 前 12 位；带 `applicability` 时是「原文 + `\x00` + applicability（去首尾空白）」的。
