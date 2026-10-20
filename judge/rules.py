@@ -23,6 +23,7 @@ coverage：一条规则只能填一个 code、最多 3 道题，装不下的要�
 from __future__ import annotations
 
 import concurrent.futures as cf
+import functools
 import hashlib
 import json
 import os
@@ -51,7 +52,9 @@ QID_RE = re.compile(r"^[0-9a-z]{1,8}_[0-9a-f]{6}_[1-3]_[0-9a-f]{6}$")
 #   · 挨在一起、能匹配同样字符的量词（同 autowriter validator.assert_regex_is_safe，aw#115 加的，见 _check_adjacent_repeats）：
 #     a*a*b、.*.*x、a.*a.*b 不嵌套也会卡死。以前这里写「比写作台严，不会比它松」，aw#115 之后就不成立了：这一道 Jev 原来没有，
 #     .*.*x 这里放行、写作台拒收；2026-10-20 照搬过来。同一天写作台在 codex review on aw#115 里又补了「组里的旗只管组里」
-#     （(?i:a*)A*B、(?a)\W*é*x、(?s:.*)\n*x 原来两边都放行），这里跟着补上（_scoped），照的是写作台那一轮还没提交的 validator.py；
+#     （(?i:a*)A*B、(?a)\W*é*x、(?s:.*)\n*x 原来两边都放行）、字集交给 re 自己判（(?i)[A-Z]*(?-i:a*)x、(?i)ß*ẞ*x、\W*[À-Þ]*x），
+#     这里照 aw#115 的 commit 2eef1a6（validator.py）逐字同步；
+#   · 条件组 (?(1)…|…)（同 validator._has_conditional，2eef1a6；rulecheck._assert_regex_shape 也不收）：上面几道都看不进它里面；
 #   · 拿不到解析树（re._parser / sre_parse 是私有 API）就一条正则都不收：写作台这时也一条都存不进去（以前这里有个文字形状的兜底，
 #     会放行写作台拒收的正则，去掉了）。
 # 比写作台严的只剩 pattern 最长 MAX_PATTERN_CHARS 字（写作台不限）。两边对得上由 tests/test_regex_parity.py 钉住：
@@ -287,11 +290,14 @@ def _unsafe_regex_tree(tree) -> bool:
 
 
 # ── 挨在一起、能匹配同样字符的量词（移植自 autowriter validator.py 的 _check_adjacent_repeats 及其帮手，2026-10-20）────────────
-#    照的是 aw#115 分支 1d65e5a 之上、codex review on aw#115 那一轮改过的 validator.py（组里的旗 _scoped、(?a) 下的 \d \w \s 按 ASCII 比）。
-#    这一轮写作台还没提交：aw#115 合进去以后对一遍 validator.py，有出入照它再同步一次（tests/test_regex_parity.py 的清单跟着换）。
+#    照的是 aw#115 的 commit 2eef1a6（validator.py）。下面的函数和常数逐字照搬：AST 除注释、文档串和两个异常的名字
+#    （_Ambiguous → _AmbiguousRepeats、_TooComplex → _RegexTooComplex）以外一样。写作台再改闸，照它再同步一次（tests/test_regex_parity.py 的清单跟着换）。
+#    2eef1a6 比上一次照搬（1d65e5a 之上没提交的那一轮）多了：单个字符的节点在不在字集里交给 re 自己判（_char_src + _one_char_rx：
+#    带上这一段生效的 i / s / a 旗单独编译、fullmatch），(?i) 下探针加上大小写变体（_case_variants），探针换成 Latin-1 全部加几个
+#    大小写怪字（ı İ ſ K ẞ），条件组 (?(1)…|…) 不收（_has_conditional）。
 # 不嵌套也能回溯到卡死：a*a*a*a*a*a*a*a*b 配 30 个 a 要 1 秒、200 个 a 超过 3 秒；两个就够：.*.*x 配 2000 字的一行 1.5 秒。
 # k 个这样的量词挨着，后面的东西匹配失败时要把那一段在它们之间的 n^k 种切法全试一遍。
-# 判法和常数逐字照搬写作台，不在这里单独改（两边口径分开改迟早不一样：要改先改 autowriter，再同步过来，tests/test_regex_parity.py 跟着换清单）：
+# 判法和常数逐字照搬写作台，不在这里单独改（两边口径分开改迟早不一样：要改先改 autowriter，再同步过来）：
 #   · 顺着每一层往下走，记着「还开着」的量词（可变长、能回吐的：* + ? {m,n} 且 m≠n；占有量词不回吐，不算）。后面来一个量词，
 #     字集和某个开着的有交集，就算接在它后面，切法数相乘（无上界按 _OPEN_SPAN 算），乘过 _AMBIGUITY_BUDGET 就拒。
 #   · 隔断：一个必须吃掉、开着的量词又吃不了的字（\d+\.\d+ 的 \.）；或者连着两个以上的固定字（品牌[\s\S]*品牌：多字的词在正文里
@@ -308,24 +314,50 @@ def _unsafe_regex_tree(tree) -> bool:
 #   · 比字集用的是那一段自己生效的旗：开头的 (?i) (?s) (?a) 管整条，组里的 (?i:…) (?-i:…) (?s:…) (?a:…) (?u:…) 只管组里
 #     （_scoped）。一直拿整条的旗比会漏：(?i:a*)A*B 里 a 和 A 是同一个字，(?s:.*)\n*x 里 . 也吃换行，(?a)\W*é*x 里 \W 包括 é，
 #     2000 字就要 2 秒以上；反过来 (?i)(?-i:a*)(?-i:A*)B 组里关了 (?i)，两段不相交，照放行。
+#   · 哪些字算在字集里不手写折叠：手写的只往小写折，(?i)[A-Z] 就不认 a，ẞ/ß、İ/i、K（开尔文）/k 这几对 casefold 也对不上；
+#     \W*[À-Þ]*x 里 × 夹在 À-Þ 中间，只看两头会漏（1000 个 × 0.6 秒）。别的非 ASCII 范围只探两头和 _PROBE_CHARS 里有的字 ——
+#     公共字只在范围中间的照样看不见，已知不完备（同写作台）。
+#   · 条件组 (?(1)是|否) 解析出来是（组号, 是, 否），上面几道都不往里走，里面放什么都看不见：()(?(1)(a+)+b) 22 个 a 0.4 秒、
+#     每多 2 个翻一倍。写作台两道都不收（validator._has_conditional、rulecheck._assert_regex_shape），这里也不收。
 # 这不是完备的代价分析（几个各自出现很多次的多字词夹着 .* 仍然能慢），挡的是实际会写出来、又必然慢的那一类 —— 同写作台。
-_MAXREPEAT = 4294967295          # 同 autowriter（getattr(re, "MAXREPEAT", …) 在 3.11–3.13 都取不到，落到这个数）；= _sre.MAXREPEAT
+_MAXREPEAT = getattr(re, "MAXREPEAT", 4294967295)     # 同写作台；3.11–3.13 的 re 上都没有这个名字，落到这个数（= _sre.MAXREPEAT）
 _OPEN_SPAN = 1000
 _AMBIGUITY_BUDGET = 10_000
 _UNROLL = 16
 _MAX_COUNT_CHAIN = 11
 _WALK_STEPS = 20_000
-_PROBE_CHARS = ("".join(chr(c) for c in range(128))   # 同 autowriter；看不见的三个写成转义：不换行空格、全角空格、行分隔符
-                + "\u00a0\u3000\u2028é٣０Ａａ中一哈的。，！？、：；“”（）【】#\U0001F600")
-_CATEGORY_RX: dict = {}
+# 探针：ASCII 和 Latin-1 补充全部 + 几个常见字和大小写怪字（同写作台；看不见的写成转义：全角空格、行分隔符、开尔文符号）
+_PROBE_CHARS = ("".join(chr(c) for c in range(256))
+                + "\u3000\u2028٣０Ａａ中一哈的ıİſ\u212aẞ。，！？、：；“”（）【】\U0001F600")
+_CATEGORY_SRC = {"CATEGORY_DIGIT": r"\d", "CATEGORY_NOT_DIGIT": r"\D", "CATEGORY_SPACE": r"\s",
+                 "CATEGORY_NOT_SPACE": r"\S", "CATEGORY_WORD": r"\w", "CATEGORY_NOT_WORD": r"\W"}
 
 
 class _AmbiguousRepeats(Exception):
-    """挨在一起的切法数超预算。"""
+    """挨在一起的切法数超预算（写作台叫 _Ambiguous）。"""
 
 
 class _RegexTooComplex(Exception):
-    """闸自己走的步数超了（定次量词套了好几层）。"""
+    """闸自己走的步数超了，定次量词套了好几层（写作台叫 _TooComplex）。"""
+
+
+def _has_conditional(seq) -> bool:
+    """树里有没有条件组 (?(1)是|否)（同写作台 validator._has_conditional，codex review on aw#115）。"""
+    for op, av in seq or ():
+        name = getattr(op, "name", str(op))
+        if name == "GROUPREF_EXISTS":
+            return True
+        if name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT", "SUBPATTERN", "ASSERT", "ASSERT_NOT"):
+            subs = [av[-1]]
+        elif name == "ATOMIC_GROUP":
+            subs = [av]
+        elif name == "BRANCH":
+            subs = list(av[1] or ())
+        else:
+            continue
+        if any(_has_conditional(sub) for sub in subs):
+            return True
+    return False
 
 
 class _Chars:
@@ -346,41 +378,75 @@ class _Chars:
 _ANY_CHAR = _Chars(lambda c: True, "")
 
 
-def _char_test(op_name: str, av, flags: int) -> _Chars:
-    """单个字符的节点 → 它的字集。拿不准的一律当「什么字都可能」。"""
-    # casefold 可能变成两个字（"ß" → "ss"），那种就照原字比 —— 下面 RANGE 要拿它 ord()
-    fold = (lambda c: c.casefold() if len(c.casefold()) == 1 else c) if flags & re.IGNORECASE else (lambda c: c)
-    if op_name == "LITERAL":
-        ch = chr(av)
-        return _Chars(lambda c: fold(c) == fold(ch), ch)
-    if op_name == "NOT_LITERAL":
-        ch = chr(av)
-        return _Chars(lambda c: fold(c) != fold(ch), ch)
+@functools.lru_cache(maxsize=1024)
+def _case_variants(c: str) -> str:
+    """(?i) 下可能和 c 互认的字，只拿来当探针（多几个无妨）：lower/upper/casefold（单个字的）、re._casefix 那几组（ı/i、ſ/s、
+    K（开尔文）/k…），再折一轮（K → k → K）。"""
+    vs = {c} | {v for v in (c.lower(), c.upper(), c.casefold()) if len(v) == 1}
+    try:
+        from re import _casefix
+        vs |= {chr(k) for v in list(vs) for k in _casefix._EXTRA_CASES.get(ord(v), ())}
+    except Exception:                                    # noqa: BLE001 — 私有表拿不到就少几个探针
+        pass
+    vs |= {v for x in list(vs) for v in (x.lower(), x.upper()) if len(v) == 1}
+    return "".join(sorted(vs))
+
+
+@functools.lru_cache(maxsize=4096)
+def _one_char_rx(src: str, flags: int):
+    return re.compile(src, flags)
+
+
+def _char_src(op_name: str, av):
+    """单个字符的节点 →（能单独编译的正则原文, 节点里写出来的字（范围取两头））；认不出回 None。
+    RANGE / CATEGORY 只会出现在 [...] 里，给的是方括号里那一截。"""
+    if op_name in ("LITERAL", "NOT_LITERAL"):
+        return ("[^%s]" if op_name == "NOT_LITERAL" else "%s") % re.escape(chr(av)), chr(av)
     if op_name == "ANY":
-        return _ANY_CHAR if flags & re.DOTALL else _Chars(lambda c: c != "\n", "\n")
+        return ".", "\n"
     if op_name == "RANGE":
-        lo, hi = av
-        return _Chars(lambda c: lo <= ord(c) <= hi or lo <= ord(fold(c)) <= hi, chr(lo) + chr(hi))
+        return re.escape(chr(av[0])) + "-" + re.escape(chr(av[1])), chr(av[0]) + chr(av[1])
     if op_name == "CATEGORY":
-        # (?a) 下 \W \D \S 反而更宽（é ٣ 都算进去），照 Unicode 比会漏掉交集：(?a)\W*é*x 配 3000 个 é 7 秒（同写作台，codex review on aw#115）
-        name, ascii_ = getattr(av, "name", str(av)), bool(flags & re.ASCII)
-        rx = _CATEGORY_RX.get((name, ascii_))
-        if rx is None:
-            esc = {"CATEGORY_DIGIT": r"\d", "CATEGORY_NOT_DIGIT": r"\D", "CATEGORY_SPACE": r"\s",
-                   "CATEGORY_NOT_SPACE": r"\S", "CATEGORY_WORD": r"\w", "CATEGORY_NOT_WORD": r"\W"}.get(name)
-            rx = _CATEGORY_RX[(name, ascii_)] = re.compile(esc, re.ASCII if ascii_ else 0) if esc else None
-        return _Chars(lambda c: rx.fullmatch(c) is not None, "") if rx else _ANY_CHAR
+        src = _CATEGORY_SRC.get(getattr(av, "name", str(av)))
+        return (src, "") if src else None
     if op_name == "IN":
-        sets, negate = [], False
-        for sub_op, sub_av in av:
+        srcs, chars = [], ""
+        for k, (sub_op, sub_av) in enumerate(av):
             sub_name = getattr(sub_op, "name", str(sub_op))
-            if sub_name == "NEGATE":
-                negate = True
+            if sub_name == "NEGATE" and k == 0:
+                srcs.append("^")
                 continue
-            sets.append(_char_test(sub_name, sub_av, flags))
-        union = _union(sets)
-        return _Chars(lambda c: not union.test(c), union.probes) if negate else union
-    return _ANY_CHAR
+            got = _char_src(sub_name, sub_av) if sub_name in ("LITERAL", "RANGE", "CATEGORY") else None
+            if got is None:
+                return None
+            srcs.append(got[0])
+            chars += got[1]
+        return "[" + "".join(srcs) + "]", chars
+    return None
+
+
+def _char_test(op_name: str, av, flags: int) -> _Chars:
+    """单个字符的节点 → 它的字集。拿不准的一律当「什么字都可能」。
+
+    哪些字算在里面交给 re 自己判：把这个节点单独编译（带上这一段生效的 i / s / a 旗）再 fullmatch（同写作台，codex review on aw#115）。
+    探针是节点里写出来的字，(?i) 下再加它们的大小写变体 —— 交集只在大小写另一边的（é 对 [À-Þ] 里的 É）也探得到。"""
+    if op_name == "ANY" and flags & re.DOTALL:
+        return _ANY_CHAR
+    got = _char_src(op_name, av)
+    if got is None:
+        return _ANY_CHAR
+    src, chars = got
+    if op_name in ("RANGE", "CATEGORY"):                 # 方括号里那一截，单独编译得套上 []
+        src = "[" + src + "]"
+    rx_flags = flags & (re.IGNORECASE | re.DOTALL | re.ASCII | re.UNICODE)
+    if rx_flags & re.ASCII:
+        rx_flags &= ~re.UNICODE
+    try:
+        rx = _one_char_rx(src, rx_flags)
+    except re.error:                                     # 拼出来的原文编译不了：当什么字都行
+        return _ANY_CHAR
+    probes = "".join(_case_variants(c) for c in chars) if flags & re.IGNORECASE else chars
+    return _Chars(lambda c: rx.fullmatch(c) is not None, probes)
 
 
 def _overlap(a: _Chars, b: _Chars) -> bool:
@@ -519,8 +585,12 @@ def _check_adjacent_repeats(tree) -> None:
 
 def _regex_problem(pattern: str) -> Optional[str]:
     """写作台存 forbidden_regex 前会拒收的 → 打回给模型的话（重试时原样带回）；收得下回 None。
-    三道和写作台 normalize_check 同一套（见上面 _SINGLE_CHAR_OPS 前的说明），顺序不同不影响收不收，只影响先报哪条。"""
+    几道和写作台 normalize_check 同一套（见上面 _SINGLE_CHAR_OPS 前的说明），顺序不同不影响收不收，只影响先报哪条。
+    条件组先查、拿不到解析树时按原文里有没有「(?(」判，同写作台 validator.assert_regex_is_safe。"""
     tree = _regex_tree(pattern)
+    if (_has_conditional(tree) if tree is not None else "(?(" in pattern):
+        return ("code.pattern 里有条件组 (?(1)…|…)：闸看不进它里面，没法确认不会卡死，写作台也存不进去；"
+                "拆成几条规则，或者换成不带条件组的写法")
     if tree is None:
         return ("code.pattern 这里没法做安全分析（拿不到 re 的解析树），写作台这时也一条正则都存不进去："
                 "改用 forbidden_word，或者出题")
