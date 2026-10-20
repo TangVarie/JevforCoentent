@@ -20,12 +20,13 @@ import hashlib
 import json
 import os
 import re
+import threading
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .banks import Bank, Question
-from .core import add_usage, apply_evidence, build_evidence_call, enforce_evidence, judge_note, judge_state
+from .core import JudgeResult, add_usage, apply_evidence, build_evidence_call, enforce_evidence, judge_note, judge_state
 from .jev_client import JevClient
 from . import spans as sp
 
@@ -62,20 +63,44 @@ def compile_project_bank(brief: dict, name: str = "project", model: str = "jev-1
 
 # ── 生成端适配 ───────────────────────────────────────────────────────
 
+class GeneratorHTTPError(RuntimeError):
+    """生成端回了 4xx / 5xx（重试用完）：消息里带返回体的前 300 字（密钥打码），中转站说「不认 output_config」这类原因才看得见。"""
+
+    def __init__(self, code: int, reason: str, snippet: str):
+        self.code = code
+        super().__init__(f"HTTP {code} {reason}" + (f"：{snippet}" if snippet else ""))
+
+
+class GeneratorStopped(RuntimeError):
+    """生成端正常返回了，但 stop_reason 说这段输出不能用（模型拒答 / 输出被截断）；只在 fail_on_stop 列出的时候抛。"""
+
+
+_STOP_CN = {"refusal": "模型拒答", "max_tokens": "输出被截断（到了 max_tokens）"}
+
+
 class AnthropicCompatGenerator:
     """Anthropic Messages 兼容端点（三省六部走的中转站 / Kimi / DeepSeek 都这么接）。
     base_url 末尾带不带 /v1 都行（同三省六部 agents/__init__.py 的剥法）；密钥按 ANTHROPIC_API_KEY → MOONSHOT_API_KEY 找；
-    429 / 5xx / 529 与连不上按退避重试。"""
+    429 / 5xx / 529 与连不上按退避重试；重试用完或不该重试的 HTTP 错误抛 GeneratorHTTPError（带返回体前 300 字，密钥打码）。
+    temperature=None 不发这个字段（2026-10-20：Sonnet 5.5 一类模型对非默认采样参数回 400，/compile_rules 用它）；
+    extra 原样并进请求体（例如 output_config.effort）；usage / calls 累计这个实例发过的调用，多线程共用时加锁。
+    fail_on_stop：stop_reason 在里面就抛 GeneratorStopped（/compile_rules 传 refusal / max_tokens，免得拒答被报成「不是合法 JSON」）。"""
 
     RETRY_STATUSES = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}
 
     def __init__(self, model: str, base_url: Optional[str] = None, api_key: Optional[str] = None,
-                 max_tokens: int = 2000, temperature: float = 1.0, system: str = "", retries: int = 3, timeout: float = 180.0):
+                 max_tokens: int = 2000, temperature: Optional[float] = 1.0, system: str = "", retries: int = 3, timeout: float = 180.0,
+                 extra: Optional[dict] = None, fail_on_stop: tuple = ()):
         self.model, self.max_tokens, self.temperature, self.system = model, max_tokens, temperature, system
         base = (base_url or os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")).rstrip("/")
         self.base_url = base[:-3] if base.endswith("/v1") else base
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "") or os.environ.get("MOONSHOT_API_KEY", "")
         self.retries, self.timeout = retries, timeout
+        self.extra = dict(extra or {})
+        self.fail_on_stop = tuple(fail_on_stop or ())
+        self.usage: dict = {}
+        self.calls = 0
+        self._lock = threading.Lock()
 
     def _post(self, body: dict) -> dict:
         import time
@@ -91,7 +116,7 @@ class AnthropicCompatGenerator:
             except urllib.error.HTTPError as exc:
                 last = exc
                 if exc.code not in self.RETRY_STATUSES or attempt >= self.retries:
-                    raise
+                    raise GeneratorHTTPError(exc.code, str(exc.reason or ""), self._error_snippet(exc)) from exc
             except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
                 last = exc
                 if attempt >= self.retries:
@@ -99,14 +124,35 @@ class AnthropicCompatGenerator:
             time.sleep(min(0.5 * (2 ** attempt), 8.0))
         raise last
 
+    def _error_snippet(self, exc) -> str:
+        try:
+            raw = exc.read(2000).decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 — 读不到返回体就不带
+            return ""
+        if self.api_key:
+            raw = raw.replace(self.api_key, "***")
+        raw = re.sub(r"(sk-[A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]{8,}", r"\1***", raw)
+        return " ".join(raw.split())[:300]
+
     def __call__(self, prompt: str, n: int = 1) -> list:
         out = []
         for _ in range(n):
-            body = {"model": self.model, "max_tokens": self.max_tokens, "temperature": self.temperature,
-                    "messages": [{"role": "user", "content": prompt}]}
+            body = {"model": self.model, "max_tokens": self.max_tokens, "messages": [{"role": "user", "content": prompt}]}
+            if self.temperature is not None:
+                body["temperature"] = self.temperature
             if self.system:
                 body["system"] = self.system
+            body.update(self.extra)
             data = self._post(body)
+            with self._lock:
+                self.calls += 1
+                u = data.get("usage") or {}
+                for k in ("input_tokens", "output_tokens"):
+                    if isinstance(u.get(k), int):
+                        self.usage[k] = self.usage.get(k, 0) + u[k]
+            stop = data.get("stop_reason")
+            if stop and stop in self.fail_on_stop:                     # 先记完用量再抛：花了的钱照算
+                raise GeneratorStopped(f"{_STOP_CN.get(stop, stop)}（stop_reason={stop}）")
             out.append("".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"))
         return out
 
@@ -198,8 +244,19 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
     for bank in (platform, project):
         if bank is None:
             continue
-        post_qids = [q.id for q in bank.questions if q.id != "intent_of_para"]
+        # scope = title 的 Jev 格式题（2026-10-20 起可声明）遇到没标题的稿：不问，记 no_title —— 同 TV askable 的口径，
+        # 也不算 unjudged（下面那段把 no_title 排除在外）。问了 Jev 只能对着「（无标题）」答，答案没有意义。
+        no_title = {q.id: sp._tv.INVALID_NO_TITLE for q in bank.questions
+                    if q.scope == "title" and q.id != "intent_of_para" and not title.strip()}
+        post_qids = [q.id for q in bank.questions if q.id != "intent_of_para" and q.id not in no_title]
         if not post_qids:
+            if no_title:                                  # 整份题库都是标题题、稿子没标题：零调用，只落 NULL 行（同 judge_note 全跳）
+                items = {qid: {"answer": None, "p": None, "ambiguous": False, "invalid_reason": why} for qid, why in no_title.items()}
+                dj.detail[bank.name] = items
+                dj.results[bank.name] = JudgeResult(bank=bank.name, bank_version=bank.version, bank_sha256=bank.sha256,
+                                                    model=bank.model, subject_type=subject_type, subject_id=subject_id,
+                                                    items=items, skipped=dict(no_title),
+                                                    meta={"mock": bool(getattr(client, "mock", False))})
             continue
         st = {"说明": "下面是一篇待发的小红书稿子。只根据文字判断。", "标题": title or "（无标题）", "正文": body}
         r = judge_state(client, bank, subject_id, st, subject_type=subject_type, qids=post_qids)
@@ -210,6 +267,9 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
             apply_evidence(r.items, ev_resp, sent_map); r.calls += 1
             r.usage = add_usage(r.usage, ev_resp.get("usage"))        # 证据调用的用量也算进去，成本估算不再偏低
         enforce_evidence(bank, r.items)
+        for qid, why in no_title.items():                 # 跳过的题照落 NULL 行（invalid_reason = no_title），同 judge_note
+            r.items[qid] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": why}
+        r.skipped.update(no_title)
         dj.detail[bank.name] = r.items; dj.results[bank.name] = r; _acc(r)
     for (bname, qid), want in hard_rules.items():
         it = dj.detail.get(bname, {}).get(qid)

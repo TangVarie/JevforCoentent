@@ -32,6 +32,7 @@
 - `POST /comment_repair_plan_for`、`POST /judge_thread`已经实现并部署，默认关闭返回503。管理key或受限writer key可调用只读接口；额外write/published参数拒绝。deskcore已转发，HTTP和MCP工具存在不等于可对用户宣布评论通过。
 - 单条与整组沿用同一slot角色；正文与自动要点限同一600字片段。缺答、歧义、亲历背书/旁观推荐、运营“其他”等仍进复核。模型不验证亲历真假。
 - **纠正旧待办**：`config/data_policy.yaml`在10-08既有 [PR5](https://github.com/TangVarie/JevforCoentent/pull/5)已将OKMAN与OKMAN_phase1加入`rx_cleared`；本轮没新增该许可。未清出的Rx项目仍403；`project_layer_cleared`为空，项目层权限另算。本次只读健康检查没有重新实测鉴权后的policy回显。
+  - **勘误（2026-10-20）**：上一条「`project_layer_cleared`为空」是10-15的快照。10-20 owner拍板项目层对所有项目放行（原话「全部放行，一次到位」），`config/data_policy.yaml`现在是`project_layer_cleared: ["*"]`，见[docs/00 #7](docs/00-decisions.md)；处方药闸不变，没进`rx_cleared`的Rx项目照样403。本节其余10-15快照不动。
 
 ## 参考数据与来源：不要合并成一个“已验收”状态
 

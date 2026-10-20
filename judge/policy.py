@@ -7,6 +7,9 @@ HTTP（/judge、/judge_draft）和写手侧 MCP 共用这一处判断，配置�
   · category 在 rx_categories 里、或 project 在 rx_projects 里，且 project 不在 rx_cleared → 403（PolicyBlocked），一次 Jev 调用都不发。
   · 项目层（brief 现编 / 内联 / 名字不属于通用层和平台层的题库）只有 project 在 project_layer_cleared 里才跑；
     否则整层去掉，连同指向它的硬约束，在响应的 policy.dropped_banks / dropped_hard_rules 里回显。
+    project_layer_cleared 里写 "*" = 所有项目（2026-10-20 owner 拍板「全部放行，一次到位」）；显式列项目代号照旧有效。
+    "*" 只认在 project_layer_cleared 里：处方药闸（rx_projects / rx_cleared）不认通配、照旧先执行，没清出境的处方药项目照样 403。
+  · POST /compile_rules（写作台的自由文本规则编成写后检查）：规则原文就是项目层内容，按未发布稿过同一套判断，项目层没放行 → 403。
 """
 from __future__ import annotations
 
@@ -76,4 +79,16 @@ def decide(subject_types: Iterable[str], project: Optional[str] = None, category
     if rx and project not in set(cfg.get("rx_cleared") or []):
         raise PolicyBlocked(f"policy: 处方药项目 {project} 的未发布稿不出境，合同确认后把它加进 config/data_policy.yaml 的 rx_cleared（docs/00 #7）")
     return Decision(published=False, project=project, category=category,
-                    project_layer=project in set(cfg.get("project_layer_cleared") or []))
+                    project_layer=project_layer_cleared(project, cfg))
+
+
+PROJECT_LAYER_ALL = "*"
+
+
+def project_layer_cleared(project: Optional[str], cfg: Optional[dict] = None) -> bool:
+    """这个项目的未发布稿能不能跑项目层。"*" = 所有项目（10-20 owner 拍板全部放行）；否则看显式名单。
+    为什么做成通配而不是把现有项目代号逐个列上：新项目上线（如 10-19 的 XIWU_phase2）不该再等一次改配置才有项目层，
+    owner 的原话是「全部放行，一次到位」。处方药闸在 decide 里先执行，这里不管。"""
+    cfg = load() if cfg is None else cfg
+    cleared = {str(x).strip() for x in (cfg.get("project_layer_cleared") or [])}
+    return PROJECT_LAYER_ALL in cleared or (project or "") in cleared

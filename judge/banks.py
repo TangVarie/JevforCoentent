@@ -3,6 +3,8 @@
 
   · Jev 格式（本仓 banks/*.yaml）：questions[].type = choice / noul，instructions.zh，options[].label/zh，
     criteria."true"/"false"，unclear_labels，feeds，on_ambiguous。评论题库就是这种。
+    可选 scope：title / body / full（2026-10-20 起，内联 project_bank 也认）。只在 /judge_draft 的平台层 / 项目层起作用：
+    题干前加「只看【标题】」之类的提示，答「是」的证据从标题（title / full）或正文里选；不写 scope 的题行为不变（只从正文选句）。
   · TV 格式（banks/vendor/feature_questions_v0_1.yaml，原样 vendor，记校验和）：questions[].type = bool / choice，
     ask / yes_if / no_if / yes_examples / no_examples / options[].value/means/example / scope / evidence。
     代码特征（code:v1）和占位题不在这里处理，那是 TV 自己的事。
@@ -31,6 +33,12 @@ _EXEMPT_RE = re.compile(r"选「(.+?)」以外")            # 与 TV feature_ban
 SCOPE_LABEL = {"title": "标题", "first_sentence": "正文第一句", "last_para": "正文最后一段",
                "body": "正文", "full": "标题和正文"}
 DEFAULT_AMBIGUITY = {"choice_top_min": 0.60, "choice_margin_min": 0.20, "noul_band": [0.35, 0.65]}
+# Jev 格式题的 scope（2026-10-20）。为什么加：写作台把自由文本规则编成项目层是非题后，管标题的规则（「标题要带…」）
+# 答「是」时证据只会从正文里找（loop.judge_draft 的 pseudo_spans 没有标题句），回来就是 evidence_not_found：账本那一行 answer 为 NULL、
+# detail 里也标着无效（critic 18；它说「算 unjudged」不准——/judge_draft 的 profile 照收这个「是」，只有账本和 detail 是无效）。
+# 不开放 first_sentence / last_para：/judge_draft 给 Jev 格式题的 state 只有标题和正文两段，切不出那两段。
+JEV_SCOPES = ("title", "body", "full")
+JEV_SCOPE_LOOK = {"title": "只看【标题】。", "body": "只看【正文】。", "full": "看【标题】和【正文】。"}
 LANG_DEFAULT = "zh"
 
 
@@ -40,7 +48,7 @@ class Question:
     jtype: str                      # "choice" | "noul"
     instructions: str
     criteria: dict                  # choice: {label: 定义}; noul: {"true": 定义, "false": 定义}
-    scope: Optional[str] = None     # TV 格式才有：title / first_sentence / last_para / body / full
+    scope: Optional[str] = None     # TV 格式：title / first_sentence / last_para / body / full；Jev 格式可选 title / body / full（JEV_SCOPES）
     evidence: str = "never"         # never | on_true | on_choice_except:<值,...>
     unclear_labels: list = field(default_factory=list)
     feeds: str = ""
@@ -129,14 +137,17 @@ def _load_jev(raw: dict, path: Optional[Path], name: str, lang: str = LANG_DEFAU
     qs = []
     for q in raw.get("questions", []):
         text = q["instructions"].get(lang) or q["instructions"]["zh"]
+        scope = q.get("scope") or None
+        # 题干前加看哪段的提示（同 TV 格式的 look + ask）；ask 留原题干，证据选句和修改单引用它。没写 scope 的题一字不变。
+        shown = (JEV_SCOPE_LOOK.get(scope, "") + text) if isinstance(scope, str) else text
         if q["type"] == "choice":
             crit = {o["label"]: (o.get(lang) or o["zh"]) for o in q["options"]}
-            qs.append(Question(q["id"], "choice", text, crit, unclear_labels=list(q.get("unclear_labels") or []),
+            qs.append(Question(q["id"], "choice", shown, crit, scope=scope, unclear_labels=list(q.get("unclear_labels") or []),
                                feeds=q.get("feeds", ""), on_ambiguous=q.get("on_ambiguous", ""), ask=text))
         else:
             c = q["criteria"]
             crit = {"true": c["true"].get(lang) or c["true"]["zh"], "false": c["false"].get(lang) or c["false"]["zh"]}
-            qs.append(Question(q["id"], "noul", text, crit, feeds=q.get("feeds", ""), evidence=str(q.get("evidence") or "never"),
+            qs.append(Question(q["id"], "noul", shown, crit, scope=scope, feeds=q.get("feeds", ""), evidence=str(q.get("evidence") or "never"),
                                on_ambiguous=q.get("on_ambiguous", ""), ask=text))
     return Bank(name=name, version=raw.get("bank_version", "?"), model=raw.get("model") or "jev-1.13.0",
                 fmt="jev", questions=qs, ambiguity=raw.get("ambiguity") or dict(DEFAULT_AMBIGUITY), path=path,
@@ -169,6 +180,8 @@ def check_bank(bank: Bank) -> list:
     for q in bank.questions:
         if not q.instructions:
             problems.append(f"{q.id}: 缺题干")
+        if bank.fmt == "jev" and q.scope is not None and q.scope not in JEV_SCOPES:
+            problems.append(f"{q.id}: scope 只能是 {' / '.join(JEV_SCOPES)}（收到 {q.scope!r}）")
         if q.jtype == "choice" and len(q.criteria) < 2:
             problems.append(f"{q.id}: 选项少于两个")
         if q.jtype == "noul" and not (q.criteria.get("true") and q.criteria.get("false")):

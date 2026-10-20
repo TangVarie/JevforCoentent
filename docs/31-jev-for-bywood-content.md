@@ -196,6 +196,8 @@ docs/30 §3 已写借卡（§3.1）、发牌（§3.2）、查稿（§3.3）、�
 
 两个入口：写手在 Claude Code / WorkBuddy 里用**写作台 deskcore** 的 `judge_draft` / `repair_plan_for` / `list_banks`（2026-10-09 并进 deskcore：deskcore 用服务端的管理 key 转发到 `/judge_draft`，`write` / `return_rows` 钉死 false，写手只有 deskcore 那一个 MCP、不持任何 judge 密钥；`judge.mcp_server` 这个 stdio 薄客户端只剩内部 / 运维机器用，judge_comments / comment_repair_plan_for / judge_thread 要 `JUDGE_ALLOW_LOCAL_JEV=1`），现在就能用；deskcore 的 `commit_drafts` 挂 HTTP `/judge`，答案进账本。两篇真实笔记实跑：每篇 10–12 次调用、4.5 秒；「效果是真的绝…立马就压住了」被平台题库判疗效暗示 0.68，「省下的烟钱都够给老婆买个包」被项目题库判省钱 0.77，都带依据句；段级分布给出无产品意图段 83%、产品第一次出现在第 4 段、有摩擦、无总结式收尾。生成端是可插拔适配器（Anthropic 兼容端点，接三省六部那个中转站即可），本轮没有接真实生成端。目标画像等 ⑧ 的参考分布和闸二。
 
+**补记（2026-10-20）**：写前多了一个入口 `POST /compile_rules`：写作台把存下的自由文本规则编成写后检查（代码检查 / 是非题 / 查不了），是非题作为内联 `project_bank` 送回 `/judge_draft` 的项目层，只作建议、不进 `hard_rules`。前提是 owner 当天拍板项目层对所有项目放行（`project_layer_cleared: ["*"]`，docs/00 #7）。Jev 格式题可以声明 `scope`（标题 / 正文 / 全文），标题题的证据从标题里选。这一节「项目层题库由写作台按 brief 编」仍然成立，规则编译是第二个来源；两者都走同一个 `project_bank` 槽位，一次只能给一份。字段见 README「规则编译」。
+
 ### 5.5 句级判只在需要修补时做
 
 「每句都判」的成本和意义都不成立（每句都精准传达营销意图的稿子就是广告）。做法是分层：先判篇（一次调用），篇不过再判段，段不过才把句子切开判，修补指令落到具体句子。写作台的写手在 MCP 客户端里，修补由写手模型按题号改；三省六部里修补由 `vibe_rewriter` / `structural_rewriter` 做，它们现在就接受「命中了什么、在哪」这种输入（`format_hard_hits_for_rewriter`）。
