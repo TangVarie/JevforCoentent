@@ -15,7 +15,7 @@
 
 ### Jev 这边没有做到一半的
 
-- 10-21 核过：aw#115 从 `892769b` 到 head `3dc1efc`，写作台静态正则闸（`validator.assert_regex_is_safe`、`deskcore/rulecheck._assert_regex_shape` 和它们调的函数）只改了说明文字，放行 / 拒绝没变。之后加的是执行期限时（`validator.search_user_regex`），Jev 不跑用户正则，用不着。**Jev 不用跟进。**
+- 10-21 核过：aw#115 从 `892769b` 到 `df76d1a`（10-21 03:10 的 head），写作台静态正则闸（`validator.assert_regex_is_safe`、`deskcore/rulecheck._assert_regex_shape` 和它们调的函数）只改了说明文字，放行 / 拒绝没变。之后加的是执行期限时（`validator.search_user_regex`），Jev 不跑用户正则，用不着。**Jev 不用跟进。** aw#115 之后的提交要是动了这两处静态闸，合并前再核一次。
 - 以后写作台再改静态闸，照 Jev#24 的做法同步，并在 `judge/rules.py` 顶部注释写明对齐到 aw 的哪个提交。
 
 ### 依赖 Jev 的在路上的东西
