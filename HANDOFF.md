@@ -1,6 +1,6 @@
 # Jev 交接 · 2026-10-21（最新，先看这一节）
 
-快照 **2026-10-21 03:00 UTC**。三库总交接看 [truth-vault HANDOFF.md 最上面一节](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)，未完成清单看 [OPEN-ITEMS.md](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)。下面 10-15 那一版里**评论线的状态已过时**：D-112 10-16 owner 验收，C4 原样发布成 `comment_reader_v0.6`，写手评论工具和评论回填默认用它（`comment_reader_v0.4` 只剩内部 stdio 工具在用）；10-16 07:15 UTC 生产开关已开（J-01 已关）。所以下面写「C4 不推广」「生产评论关闭」「`comment_reader_v0.4` 生产默认」「待 owner 验收」的几处都以这里为准，现行口径看 [docs/comment-tools-rollout-2026-10-12.md](docs/comment-tools-rollout-2026-10-12.md) 开头。其余照旧有效。
+快照 **2026-10-21 03:30 UTC**。三库总交接看 [truth-vault HANDOFF.md 最上面一节](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)，未完成清单看 [OPEN-ITEMS.md](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)。下面 10-15 那一版里**评论线的状态已过时**：D-112 10-16 owner 验收，C4 原样发布成 `comment_reader_v0.6`，写手评论工具和评论回填默认用它（`comment_reader_v0.4` 只剩内部 stdio 工具在用）；10-16 07:15 UTC 生产开关已开（J-01 已关）。所以下面写「C4 不推广」「生产评论关闭」「`comment_reader_v0.4` 生产默认」「待 owner 验收」的几处都以这里为准，现行口径看 [docs/comment-tools-rollout-2026-10-12.md](docs/comment-tools-rollout-2026-10-12.md) 开头。其余照旧有效。
 
 ### 线上
 
@@ -15,8 +15,9 @@
 
 ### Jev 这边没有做到一半的
 
-- 10-21 核过：aw#115 从 `892769b` 到 `df76d1a`（10-21 03:10 的 head），写作台静态正则闸（`validator.assert_regex_is_safe`、`deskcore/rulecheck._assert_regex_shape` 和它们调的函数）只改了说明文字，放行 / 拒绝没变（Jev 多出的 300 字上限照旧）。之后加的是执行期限时（`validator.search_user_regex`），Jev 不跑用户正则，用不着。**Jev 不用跟进。** aw#115 之后的提交要是动了这两处静态闸，合并前再核一次。
+- 10-21 核过：aw#115 从 `892769b` 到 `c709793`（10-21 03:25 的 head），写作台静态正则闸（`validator.assert_regex_is_safe`、`deskcore/rulecheck._assert_regex_shape` 和它们调的函数）只改了说明文字，放行 / 拒绝没变（Jev 多出的 300 字上限照旧）。之后加的是执行期限时（`validator.search_user_regex`），Jev 不跑用户正则，用不着。**Jev 不用跟进。** aw#115 之后的提交要是动了这两处静态闸，合并前再核一次。
 - 以后写作台再改静态闸，照 Jev#24 的做法同步，并在 `judge/rules.py` 顶部注释写明对齐到 aw 的哪个提交。
+- Jev#25 顺带改了 `tests/test_regex_parity.py`：「例子本身得慢」的前置条件不再看机器快慢，不够慢就把字数翻倍再试，最多翻两次（同写作台 aw#115 `18dd530`）。CI 上 `.*a++.*x` 配 1000 字只跑了 0.049 秒，10-21 红过两次。
 
 ### 依赖 Jev 的在路上的东西
 
