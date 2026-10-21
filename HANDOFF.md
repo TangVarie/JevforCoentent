@@ -1,6 +1,6 @@
 # Jev 交接 · 2026-10-21（最新，先看这一节）
 
-快照 **2026-10-21 03:30 UTC**。三库总交接看 [truth-vault HANDOFF.md 最上面一节](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)，未完成清单看 [OPEN-ITEMS.md](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)。下面 10-15 那一版里写「评论服务关闭」的部分已过时：D-112 10-16 验收后评论工具已打开（J-01 已关），其余照旧有效。
+快照 **2026-10-21 03:00 UTC**。三库总交接看 [truth-vault HANDOFF.md 最上面一节](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)，未完成清单看 [OPEN-ITEMS.md](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)。下面 10-15 那一版里写「评论服务关闭」的部分已过时：D-112 10-16 验收后评论工具已打开（J-01 已关），其余照旧有效。
 
 ### 线上
 
