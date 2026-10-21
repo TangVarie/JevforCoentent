@@ -1,10 +1,10 @@
 # Jev 交接 · 2026-10-21（最新，先看这一节）
 
-快照 **2026-10-21 03:30 UTC**。三库总交接看 [truth-vault HANDOFF.md 最上面一节](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)，未完成清单看 [OPEN-ITEMS.md](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)。下面 10-15 那一版里**评论线的状态已过时**：D-112 10-16 owner 验收，C4 原样发布成 `comment_reader_v0.6`，写手评论工具和评论回填默认用它（`comment_reader_v0.4` 只剩内部 stdio 工具在用）；10-16 07:15 UTC 生产开关已开（J-01 已关）。所以下面写「C4 不推广」「生产评论关闭」「`comment_reader_v0.4` 生产默认」「待 owner 验收」的几处都以这里为准，现行口径看 [docs/comment-tools-rollout-2026-10-12.md](docs/comment-tools-rollout-2026-10-12.md) 开头。其余照旧有效。
+快照 **2026-10-21 08:25 UTC**（上一位接手的 Claude 会话到这里停手，owner 换人接手）。三库总交接看 [truth-vault HANDOFF.md 最上面一节](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)，未完成清单看 [OPEN-ITEMS.md](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)。下面 10-15 那一版里**评论线的状态已过时**：D-112 10-16 owner 验收，C4 原样发布成 `comment_reader_v0.6`，写手评论工具和评论回填默认用它（`comment_reader_v0.4` 只剩内部 stdio 工具在用）；10-16 07:15 UTC 生产开关已开（J-01 已关）。所以下面写「C4 不推广」「生产评论关闭」「`comment_reader_v0.4` 生产默认」「待 owner 验收」的几处都以这里为准，现行口径看 [docs/comment-tools-rollout-2026-10-12.md](docs/comment-tools-rollout-2026-10-12.md) 开头。其余照旧有效。
 
 ### 线上
 
-- main `a8285aa`，Railway 自动部署。
+- main `c2183fe`（Jev#25：只改这份交接和 `tests/test_regex_parity.py` 的计时前置条件，服务代码和 `a8285aa` 一样），Railway 自动部署。
 - `/health`（`https://judge-production-601c.up.railway.app/health`）10-21 读到：
   - `comment_tools_enabled: true`、`write_enabled: true`；
   - `auth.writer_keys: 2`、`workers: 4`；
@@ -21,7 +21,7 @@
 
 ### 依赖 Jev 的在路上的东西
 
-- 写作台 aw E：TangVarie/autowriter#117，draft，叠在 aw#115 上。
+- 写作台 aw E：TangVarie/autowriter#117，08:16 UTC 改成 ready、Codex 在审，叠在 aw#115 上（base 还是 aw#115 的分支，aw#115 合并前不能合它）。
   - `check_rules` 工具和后台补编调 `/compile_rules`。
   - 编题按次计费：后台补编每批记一行 INFO，进程退出时还在路上的那一批记 WARNING。
   - 规则原文会发给 Jev 编题，owner 10-20 放行（D-121）。
