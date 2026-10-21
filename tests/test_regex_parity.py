@@ -302,6 +302,19 @@ def test_what_the_probe_caught_jev_refusing_compiles_again(pattern):
     assert R.validate_code(_code(pattern))["pattern"] == pattern
 
 
+def _assert_slow_with_re(pattern: str, ch: str, n: int) -> None:
+    """这条的例子本身得是慢的，否则测不出东西。机器快慢差几倍（CI 的 runner 比本机快两三倍：.*a++.*x 1000 个字本机 0.12 秒、
+    CI 上 0.049 秒，卡在 0.05 上就红了）：不够慢就把字数翻倍再试，最多翻两次。这几条都是平方级以上，翻一倍慢四倍以上
+    （同写作台 tests/test_regex_safety.py 的 _assert_slow_with_re，aw#115 18dd530）。"""
+    for _ in range(3):
+        t0 = time.perf_counter()
+        re.search(pattern, ch * n)
+        if time.perf_counter() - t0 > 0.05:
+            return
+        n *= 2
+    pytest.fail(f"{pattern!r} 配 {n // 2} 个字还不到 0.05 秒：这条的例子本身得是慢的，否则测不出东西")
+
+
 @pytest.mark.parametrize("pattern, ch", [                  # 写作台 test_scoped_flags_are_honored 原样：例子本身得是慢的
     ("(?i:a*)A*B", "A"),
     ("a*(?i:A)*b", "a"),
@@ -311,9 +324,7 @@ def test_what_the_probe_caught_jev_refusing_compiles_again(pattern):
 ])
 def test_scoped_flags_are_honored_with_a_reason_the_model_can_act_on(pattern, ch):
     """组里的旗 (?i:…) (?s:…) (?a:…) 和开头的 (?a) 按它们自己管的那一段比字集；打回的话和别的「挨在一起」一样。"""
-    t0 = time.perf_counter()
-    re.search(pattern, ch * 1000)
-    assert time.perf_counter() - t0 > 0.05, "这条的例子本身得是慢的，否则测不出东西"
+    _assert_slow_with_re(pattern, ch, 1000)
     with pytest.raises(R.RuleOutputError) as ei:
         R.validate_code(_code(pattern))
     assert "挨在一起" in str(ei.value)
@@ -332,9 +343,7 @@ def test_scoped_flags_are_honored_with_a_reason_the_model_can_act_on(pattern, ch
 def test_case_insensitive_sets_are_compared_the_way_re_matches(pattern, ch):
     """哪些字算在字集里交给 re 自己判（_char_src + _one_char_rx），不手写折叠：(?i)[A-Z] 也吃 a、ẞ 和 ß 互认、× 在 [À-Þ] 中间。
     配 700 个字（同写作台），例子本身得是慢的；打回的话和别的「挨在一起」一样。"""
-    t0 = time.perf_counter()
-    re.search(pattern, ch * 700)
-    assert time.perf_counter() - t0 > 0.05, "这条的例子本身得是慢的，否则测不出东西"
+    _assert_slow_with_re(pattern, ch, 700)
     with pytest.raises(R.RuleOutputError) as ei:
         R.validate_code(_code(pattern))
     assert "挨在一起" in str(ei.value)
@@ -360,9 +369,7 @@ def _refusal(pattern: str) -> str:
 def test_lookaheads_possessives_and_atomic_groups_do_not_separate(pattern, ch):
     """前瞻里的量词和前面开着的照样挨着；占有量词 / 原子组能吃空、或者吃的是前面开着的也能吃的字，前后照样挨着（同写作台）。
     配 1000 个字（同写作台），例子本身得是慢的；形状那道都过，打回的话说「挨在一起」。"""
-    t0 = time.perf_counter()
-    re.search(pattern, ch * 1000)
-    assert time.perf_counter() - t0 > 0.05, "这条的例子本身得是慢的，否则测不出东西"
+    _assert_slow_with_re(pattern, ch, 1000)
     assert _adjacent_gate_refuses(pattern)
     assert "挨在一起" in _refusal(pattern)
 
@@ -371,9 +378,7 @@ def test_lookaheads_possessives_and_atomic_groups_do_not_separate(pattern, ch):
 def test_repeats_inside_optional_or_counted_groups_still_meet_their_neighbours(pattern, ch, n):
     """(?:…)? / (?:…){m,n} 不是一整块：组里的量词接着组前面开着的查，组里走完还开着的往后传（同写作台）。
     形状那道也拒的（量词套了带量词 / 分支的组）先说形状；其余说「挨在一起」。"""
-    t0 = time.perf_counter()
-    re.search(pattern, ch * n)
-    assert time.perf_counter() - t0 > 0.05, "这条的例子本身得是慢的，否则测不出东西"
+    _assert_slow_with_re(pattern, ch, n)
     assert _adjacent_gate_refuses(pattern)
     msg = _refusal(pattern)
     assert ("挨在一起" if R._regex_shape_ok(R._regex_tree(pattern)) else "套在") in msg, (pattern, msg)

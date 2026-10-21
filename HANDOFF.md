@@ -1,3 +1,34 @@
+# Jev 交接 · 2026-10-21（最新，先看这一节）
+
+快照 **2026-10-21 03:30 UTC**。三库总交接看 [truth-vault HANDOFF.md 最上面一节](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)，未完成清单看 [OPEN-ITEMS.md](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)。下面 10-15 那一版里**评论线的状态已过时**：D-112 10-16 owner 验收，C4 原样发布成 `comment_reader_v0.6`，写手评论工具和评论回填默认用它（`comment_reader_v0.4` 只剩内部 stdio 工具在用）；10-16 07:15 UTC 生产开关已开（J-01 已关）。所以下面写「C4 不推广」「生产评论关闭」「`comment_reader_v0.4` 生产默认」「待 owner 验收」的几处都以这里为准，现行口径看 [docs/comment-tools-rollout-2026-10-12.md](docs/comment-tools-rollout-2026-10-12.md) 开头。其余照旧有效。
+
+### 线上
+
+- main `a8285aa`，Railway 自动部署。
+- `/health`（`https://judge-production-601c.up.railway.app/health`）10-21 读到：
+  - `comment_tools_enabled: true`、`write_enabled: true`；
+  - `auth.writer_keys: 2`、`workers: 4`；
+  - `compile.key: true`、`compile.model: claude-sonnet-5-5`。
+- 最近两次合并：
+  - **Jev#23**（10-20，`dde0e4f`）：`project_layer_cleared` 改 `["*"]`，Rx 闸不变（D-121）；新增 `POST /compile_rules`，把规则编成是非题、能用代码查的给出代码检查，题号带规则原文 sha 和题目指纹；Jev 格式题可带 `scope`。
+  - **Jev#24**（10-20，`a8285aa`）：`judge/rules.py` 的静态正则闸（几道安全判据）照写作台 aw#115 `892769b` 同步，写作台测试里拒收 / 放行的两张清单原样抄进 `tests/test_regex_parity.py`。唯一的差别是 Jev 另限 pattern 最长 300 字（`MAX_PATTERN_CHARS`，写作台不限），所以写作台收的正则在 `/compile_rules` 编题时仍可能因为太长被拒。
+
+### Jev 这边没有做到一半的
+
+- 10-21 核过：aw#115 从 `892769b` 到 `c709793`（10-21 03:25 的 head），写作台静态正则闸（`validator.assert_regex_is_safe`、`deskcore/rulecheck._assert_regex_shape` 和它们调的函数）只改了说明文字，放行 / 拒绝没变（Jev 多出的 300 字上限照旧）。之后加的是执行期限时（`validator.search_user_regex`），Jev 不跑用户正则，用不着。**Jev 不用跟进。** aw#115 之后的提交要是动了这两处静态闸，合并前再核一次。
+- 以后写作台再改静态闸，照 Jev#24 的做法同步，并在 `judge/rules.py` 顶部注释写明对齐到 aw 的哪个提交。
+- Jev#25 顺带改了 `tests/test_regex_parity.py`：「例子本身得慢」的前置条件不再看机器快慢，不够慢就把字数翻倍再试，最多翻两次（同写作台 aw#115 `18dd530`）。CI 上 `.*a++.*x` 配 1000 字只跑了 0.049 秒，10-21 红过两次。
+
+### 依赖 Jev 的在路上的东西
+
+- 写作台 aw E：TangVarie/autowriter#117，draft，叠在 aw#115 上。
+  - `check_rules` 工具和后台补编调 `/compile_rules`。
+  - 编题按次计费：后台补编每批记一行 INFO，进程退出时还在路上的那一批记 WARNING。
+  - 规则原文会发给 Jev 编题，owner 10-20 放行（D-121）。
+- aw E 上线前要先跑 aw 的迁移 015。Jev 这边不用改。
+
+---
+
 # Jev交接 · 2026-10-15
 
 > **评论线云端交接**：[完整中文交接、180条对照及完整Excel/交接包](docs/handoff/2026-10-15/README.md)，可直接在GitHub阅读。
