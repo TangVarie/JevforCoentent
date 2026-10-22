@@ -1,4 +1,10 @@
-# Jev 交接 · 2026-10-21（最新，先看这一节）
+# Jev 移交下一位 · 2026-10-22
+
+先读 [Jev接手卡](docs/handoff-2026-10-22-next-owner.md) 与 [三仓执行书PR TV#215](https://github.com/TangVarie/truth-vault/pull/215)。本轮未改Jev实现；评论v0.6已上线、编译接口已在线，aw也已限制正则源长300字（148条对拍差异0）。aw#121已合并但生产部署待核，#117最终head fdeaa9f过审/CI、未合并。用户要求本轮交接给同事，已有生产授权与私有操作包见总执行书。下方10-21及更早段落是历史快照，与本节冲突时按本节。
+
+---
+
+# Jev 交接 · 2026-10-21（历史快照）
 
 快照 **2026-10-21 08:25 UTC**（上一位接手的 Claude 会话到这里停手，owner 换人接手）。三库总交接看 [truth-vault HANDOFF.md 最上面一节](https://github.com/TangVarie/truth-vault/blob/main/HANDOFF.md)，未完成清单看 [OPEN-ITEMS.md](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)。下面 10-15 那一版里**评论线的状态已过时**：D-112 10-16 owner 验收，C4 原样发布成 `comment_reader_v0.6`，写手评论工具和评论回填默认用它（`comment_reader_v0.4` 只剩内部 stdio 工具在用）；10-16 07:15 UTC 生产开关已开（J-01 已关）。所以下面写「C4 不推广」「生产评论关闭」「`comment_reader_v0.4` 生产默认」「待 owner 验收」的几处都以这里为准，现行口径看 [docs/comment-tools-rollout-2026-10-12.md](docs/comment-tools-rollout-2026-10-12.md) 开头。其余照旧有效。
 
