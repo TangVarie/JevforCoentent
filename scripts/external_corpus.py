@@ -10,7 +10,7 @@
 产物：运行报告（md）、账本 SQL（note_feature_answers，subject_type = external_note，run_tag = external）、
 外部笔记表 SQL（truth_vault.external_notes，migrations/notes_v1_18）、rows.json（两张表的行，给 scripts/apply_rows.py 经 PostgREST 写库）、
 state/external_corpus_state.json（去重与月度计数）。
-定时：.github/workflows/external-corpus.yml 每周一跑一次；改频率改 cron，改量级改 config。
+定时：.github/workflows/external-corpus.yml 每周一、周四各跑一次；改频率改 cron，改量级改 config。
 """
 from __future__ import annotations
 

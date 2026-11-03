@@ -34,7 +34,7 @@ python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --opus fixt
 uvicorn judge.api:app --port 8080              # HTTP：POST /judge（一个题库、一批 subject，并行）· POST /judge_draft（一篇稿、多层题库、带修改单）· POST /compile_rules（规则编成写后检查）· GET /banks · GET /health（不鉴权）
 JUDGE_URL=https://… JUDGE_API_KEY=… python3 -m judge.mcp_server   # 内部 / 运维机器的 MCP 工具（上面那个 HTTP 服务的薄客户端）：judge_draft · repair_plan_for · list_banks。写手不用它：这三个工具 2026-10-09 起由写作台 deskcore 转发（写手只配 deskcore 那一个 MCP）；
                                                 #   旧 stdio MCP 的 judge_comments · comment_repair_plan_for · judge_thread 仍为显式本机路径；写手通过 deskcore 转发已实现的评论HTTP（默认关闭），见 HANDOFF
-python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要花多少钱；--probe 花一次请求钉字段；正式跑由 .github/workflows/external-corpus.yml 每周一触发
+python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要花多少钱；--probe 花一次请求钉字段；正式跑由 .github/workflows/external-corpus.yml 每周一、周四触发
 ```
 
 金标准报告头会写明对的是哪一版金标准；`cg-v0.2-proposed` 是提议版、未经勘误，命中率不等于对勘误版的命中率。影子跑从库里取用 `--from-db --mappings ../truth-vault/mappings`，切标题按每个项目的 mapping 走。
@@ -131,7 +131,7 @@ brief 可换。每一位生成端出 k 条，逐条过读者侧 7 题 + 运营�
 三道闸都在 `config/external_corpus.yaml`：`budget_usd_per_run`（一次运行的硬上限，到了就停并写进报告）、`max_keep_per_category_per_run` / `_per_month`（每品类留多少篇全文）、`pages_per_sort`（每个关键词搜几页）。
 钱花在两处：搜索按页（0.01 美元 / 页）、取全文按篇（0.01 美元 / 篇）。分诊（Jev 四题）只看搜索页的摘要，不花抓取费，所以「先分诊再取全文」是省钱的关键。
 分诊通过的一律取全文再打 fq：TikHub 搜索页的摘要截在 60 字，拿它打标等于只看半句话。详情接口没有公开 schema，正文从整棵返回里找（id 对得上的优先）；每次运行的前 3 份原始返回进产物 `kept.json` 的 `detail_samples`，开头 5 篇都解析不出正文就整次停、job 红。
-默认配置（2026-11-02 起）：8 品类（戒烟、鼻炎、运动补给、术后营养、求职留学、家居家电、个护、藻油）× 4 词 × 2 排序 × 2 页 = 128 页，每品类每次最多 40 篇全文，最坏 4.48 美元 / 次（单次硬上限 6 美元）；每周一跑、一个月最多 5 个周一，每月最坏 5 次 ≈ 22.4 美元（平均每月约 4.3 周时约 19 美元，手动触发另算）；每品类每月 160 篇只封顶入库篇数、不封顶花费（前四次没留满的品类第五次照样取全文）；实际到上限的品类就停搜，按 10 月的量推一次约 3.5～3.9 美元。加品类要同时在 TV 的 `prompts/external_shelf_v1.json` 补同名一行（外部参考书架按品类名对表），`budget_usd_per_run` 不能低于 `--dry-run` 算出的最坏花费（测试钉住）。
+默认配置（2026-11-02 起）：8 品类（戒烟、鼻炎、运动补给、术后营养、求职留学、家居家电、个护、藻油）× 4 词 × 2 排序 × 2 页 = 128 页，每品类每次最多 40 篇全文，最坏 4.48 美元 / 次（单次硬上限 6 美元）；2026-11-03 起每周一、周四各跑一次（以前每周一一次），一个月最多 9 次，每月最坏 9 次 ≈ 40.3 美元（平均每月约 8.7 次时约 39 美元，手动触发另算）；每品类每月 360 篇（= 9 × 40，定时跑拦不住任何一次）只封顶入库篇数、不封顶花费；实际到上限的品类就停搜，按 10 月一周一次的量推一次约 3.5～3.9 美元，一周两次后每次新帖少一些、花得更少。加品类要同时在 TV 的 `prompts/external_shelf_v1.json` 补同名一行（外部参考书架按品类名对表），`budget_usd_per_run` 不能低于 `--dry-run` 算出的最坏花费（测试钉住）。
 去重靠 `state/external_corpus_state.json`（GitHub Actions 用 cache 保留）和 `--known-ids`（账本里已有的 external note_id）；一条笔记只在有了结局（分诊拒绝 / 太短 / 入账本）后才记为「见过」，因上限、预算或报错没看的下次还会看。从库里删掉一批外部笔记后要重抓，手动触发时设 `fresh_state=true`（不恢复 cache 里的 state）。
 翻页按 TikHub 的规矩带首页返回的 `search_id` / `search_session_id`；单条笔记或单页搜索出错只记进报告、不中止整次运行。写库走 `scripts/apply_rows.py`（PostgREST upsert，外部笔记表在前、账本行在后），产物先上传再写库。`--mock` 的 state 默认落到临时目录。
 

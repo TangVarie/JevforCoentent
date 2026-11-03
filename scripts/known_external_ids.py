@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """把 TV 里【账本写齐了】的外部笔记 id 列出来（一行一个），给 external_corpus.py --known-ids 做第二道去重。
 
-为什么要第二道：state 文件只靠 actions/cache 续命，GitHub 会淘汰 7 天没访问的缓存，周更正好卡在线上，cron 一延迟 state 就归零，
-归零那周会把看过的笔记再付一遍钱。库里的 external_notes 不会丢。
+为什么要第二道：state 文件只靠 actions/cache 续命，GitHub 会淘汰 7 天没访问的缓存（周更时正好卡在线上；2026-11-03 起一周两次，
+连漏两次才会过 7 天），cache 一丢 state 就归零，归零那次会把看过的笔记再付一遍钱。库里的 external_notes 不会丢。
 
 为什么只认"账本写齐了"的（codex review on #6，P1）：apply_rows 先写 external_notes 再写账本；账本那一步失败时 job 红、cache 不存，
 但 external_notes 里已经有这批笔记了 —— 要是 known_ids 照 external_notes 全收，下周这批按 known 跳过、永远不再判，账本那一半
