@@ -35,13 +35,13 @@ def test_db_write_failure_must_make_the_job_red():
     assert "always()" in str(step.get("if", "")), "产物上传之后仍要尝试写库（run 步 systemic 红时也写已有的行）"
 
 
-def test_schedule_is_off_the_hour_and_weekly():
+def test_schedule_is_off_the_hour_and_twice_weekly():
     d = _doc()
     crons = [x["cron"] for x in d[True]["schedule"]] if True in d else [x["cron"] for x in d["on"]["schedule"]]
     assert len(crons) == 1
     minute, hour, dom, mon, dow = crons[0].split()
     assert minute != "0", "定时跑别放整点（GitHub 整点队列漂得最厉害）"
-    assert dow == "1" and dom == "*" and mon == "*", "每周一一次"
+    assert dow == "1,4" and dom == "*" and mon == "*", "每周一、周四各一次（2026-11-03 起；改了要同步 config 的每月上限和每月最坏花费）"
     assert hour == "3", "小时不动：docs/29 登记的是 03:07 UTC，改了要同步登记册"
 
 
