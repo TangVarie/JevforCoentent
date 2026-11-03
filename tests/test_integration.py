@@ -301,23 +301,48 @@ def _cj(text, **profile):
     return cj
 
 
-def test_thread_repair_plan_config_problems_and_friction():
+@pytest.mark.parametrize("max_named", [0, 1])
+def test_thread_repair_plan_explicit_quota_removes_optional_brand_mentions(max_named):
     from judge import comments as CM
-    tj = CM.ThreadJudgement(hard_fails=[("named_count", "2", "≤1", None)])
+    tj = CM.ThreadJudgement(hard_fails=[("named_count", "2", f"≤{max_named}", None)])
     slots = [CM.Slot("a", ["补充经验"], may_name_brand=True), CM.Slot("b", ["补充经验"], may_name_brand=True)]
     judged = [_cj("x", names_brand="是"), _cj("y", names_brand="是")]
     plan = CM.thread_repair_plan(tj, slots, judged)
-    assert [p["slot"] for p in plan] == [None] and "配置" in plan[0]["why"]                  # 换谁都修不了：不换位
+    assert len(plan) == 2 - max_named and all(p["slot"] in {"a", "b"} for p in plan)
+    assert all("去掉" in p["why"] and "品牌" in p["why"] for p in plan)
+
+
+def test_thread_quota_prioritizes_explicitly_forbidden_brand_mention():
+    from judge import comments as CM
+    tj = CM.ThreadJudgement(hard_fails=[("named_count", "2", "≤1", None)])
+    slots = [CM.Slot("allowed", ["补充经验"]), CM.Slot("forbidden", ["补充经验"], may_name_brand=False)]
+    judged = [_cj("x", names_brand="是"), _cj("y", names_brand="是")]
+    assert [p["slot"] for p in CM.thread_repair_plan(tj, slots, judged)] == ["forbidden"]
+
+
+def test_thread_combines_template_and_brand_quota_repairs_for_the_same_slot():
+    from judge import comments as CM
+    tj = CM.ThreadJudgement(hard_fails=[("same_template", "是", "否", 0.9), ("named_count", "1", "≤0", None)])
+    slot = CM.Slot("exp", ["亲历背书"])
+    cj = _cj("x", speech_act="亲历背书", names_brand="是")
+    cj.flags = ["背书体"]
+    plan = CM.thread_repair_plan(tj, [slot], [cj])
+    assert len(plan) == 1 and plan[0]["slot"] == "exp"
+    assert "重复说法" in plan[0]["why"] and "去掉" in plan[0]["why"] and "品牌称呼" in plan[0]["why"]
+
+
+def test_thread_repair_plan_config_problems_and_friction():
+    from judge import comments as CM
     tj2 = CM.ThreadJudgement(hard_fails=[("has_friction", "否", "是", 0.8)])
     only_exp = [CM.Slot("e1", ["补充经验"]), CM.Slot("e2", ["补充经验"])]
     assert [p["slot"] for p in CM.thread_repair_plan(tj2, only_exp, [_cj("x"), _cj("y")])] == [None]
     with_reply = only_exp + [CM.Slot("r", ["回复答疑"], role="贴主", reply_to="e1")]
     assert [p["slot"] for p in CM.thread_repair_plan(tj2, with_reply, [_cj("x"), _cj("y"), _cj("z")])] == ["r"]
-    # brief 硬放的背书位：同一句式时不换（重出还是背书体），标配置问题
+    # 同一句式可调整措辞；不因 brief 允许亲历表达就宣称配置错误或送复核
     tj3 = CM.ThreadJudgement(hard_fails=[("same_template", "是", "否", 0.9)])
     endorse_slot = [CM.Slot("en", ["亲历背书"])]
     cj = _cj("x", speech_act="亲历背书"); cj.flags = ["背书体"]
-    assert [p["slot"] for p in CM.thread_repair_plan(tj3, endorse_slot, [cj])] == [None]
+    assert [p["slot"] for p in CM.thread_repair_plan(tj3, endorse_slot, [cj])] == ["en"]
 
 
 def test_judge_comment_missing_answers_go_to_review_not_hard_fail():

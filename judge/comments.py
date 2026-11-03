@@ -13,8 +13,9 @@
   整条  produce_comments()                 逐位 best-of-k + 修补 → 成组判 → 换位重出 → 返回评论组、每条画像、评论区画像、轨迹。
 
 生成端可插拔（同 loop.Generator：prompt, n → [text]）；每一位的生成 prompt 由调用方的 prompt_for(post, slot) 给。
-本模块不写字，只判、只出修改单。默认评论位里没有「亲历背书 / 旁观推荐」：读者侧题库把它们直接路由进高风险复核（feeds 写明），
-一组里若 brief 硬要放这样的位，产出会带 needs_review。评论区的营销职能是承接（回答、补充、指路），不是背书（docs/31 §6.3）。
+本模块不写字，只判、只出修改单。评论可自然点出品牌，经验和答疑位可采用有素材依据的亲历、评价或推荐，不要求每条都点名。
+「亲历背书 / 旁观推荐」是表达分类，不单凭这个分类送复核；真假仍须由调用方按真实素材核实，模型不替代事实核验。
+2026-11-03 路由更新覆盖题库 feeds 中的旧高风险路由说明；冻结题面、选项和分类定义保持不变。
 
 题干里按篇变的部分（帖子要点、主体称呼）通过 fill 填进题库 v0.4 / v0.3 的占位符；同一篇帖子下所有候选用同一份 fill。
 """
@@ -32,6 +33,7 @@ from .jev_client import JevClient
 Generator = Callable[..., list]
 
 ENDORSE = ("亲历背书", "旁观推荐")
+REVIEW_GATES = frozenset({"speech_act", "names_brand", "echoes_post", "detail_level"})
 AGENCY_FILL = {"subject": "这家机构", "arranger": "机构", "decide": "找机构", "praised": "机构", "helper": "机构/老师"}
 PRODUCT_FILL = {"subject": "这个产品", "arranger": "商家", "decide": "买", "praised": "这个产品", "helper": "这个产品"}
 SHOP_FILL = {"subject": "这家店", "arranger": "店家", "decide": "去", "praised": "这家店", "helper": "店家"}
@@ -73,7 +75,7 @@ class Slot:
     speech_act: list                                  # 允许的言语行为（读者侧 speech_act 的选项名）
     role: str = "读者位"                               # 贴主 / 读者位 / 运营
     reply_to: Optional[str] = None                    # 回复哪一位（slot id），贴主回复答疑用
-    may_name_brand: bool = False                      # names_brand 允许为「是」
+    may_name_brand: bool = True                       # 可以自然点名，不表示必须点名；显式 False 仍禁名
     must_echo: bool = True                            # echoes_post 必须为「是」
     value_ok: list = field(default_factory=lambda: ["可行动信息", "判断依据"])   # reader_value 允许值
     min_detail: str = "模糊"                           # detail_level 至少到：无 / 模糊 / 具体
@@ -81,23 +83,25 @@ class Slot:
     note: str = ""                                    # 给生成端的备注，本模块只原样传给 prompt_for
 
     def wants(self) -> dict:
-        return {"speech_act": self.speech_act, "names_brand": "是" if self.may_name_brand else "否",
+        return {"speech_act": self.speech_act, "names_brand": "不限" if self.may_name_brand else "否",
                 "echoes_post": "是" if self.must_echo else "不限", "reader_value": self.value_ok,
                 "register": ["随手口语", "认真分享"], "detail_level": f"≥{self.min_detail}", "intent": self.intent}
 
 
 def default_slots(n_questions: int = 2, with_author_reply: bool = True, with_experience: bool = True) -> list:
-    """默认一组：提问 ×n（读者位，不点名，不强求接帖）· 补充经验 ×1（读者位，不点名，要接帖、要有情境）·
-    贴主回复答疑 ×1（回第一条提问，可点名，要给可行动信息）。有作者回复，评论区 has_friction 就有了着落，不用造质疑。"""
+    """默认一组：提问 ×n · 补充经验 ×1 · 贴主回复答疑 ×1。各位均可自然点名，不要求条条点名。
+    经验和答疑位允许有素材依据的亲历、评价或推荐；经验仍要接帖、有情境，答疑仍要回应问题。"""
     slots = []
     for i in range(n_questions):
         slots.append(Slot(f"q{i + 1}", ["提问"], must_echo=False, value_ok=["可行动信息", "判断依据", "无"], min_detail="无",
                           intent="其他", note="问一件帖子没写清的事"))
     if with_experience:
-        slots.append(Slot("exp", ["补充经验"], intent="补充信息", note="讲一段自己相关的事，不对主体下结论"))
+        slots.append(Slot("exp", ["补充经验", *ENDORSE], intent="补充信息",
+                          note="补充和帖子相关的情境、做法或有真实素材依据的体验与推荐，不编造使用事实"))
     if with_author_reply and n_questions:
-        slots.append(Slot("reply", ["回复答疑"], role="贴主", reply_to="q1", may_name_brand=True, must_echo=False,
-                          value_ok=["可行动信息"], min_detail="无", intent="补充信息", note="贴主回答第一条提问，给能用的信息"))
+        slots.append(Slot("reply", ["回复答疑", *ENDORSE], role="贴主", reply_to="q1", must_echo=False,
+                          value_ok=["可行动信息"], min_detail="无", intent="补充信息",
+                          note="贴主回答第一条提问，给能用的信息；体验、评价或推荐须有真实素材依据"))
     return slots
 
 
@@ -106,7 +110,7 @@ def slots_from_brief(brief: dict) -> list:
     out = []
     for s in brief.get("comment_slots") or []:
         out.append(Slot(id=s["id"], speech_act=list(s["speech_act"]), role=s.get("role", "读者位"), reply_to=s.get("reply_to"),
-                        may_name_brand=bool(s.get("may_name_brand", False)), must_echo=bool(s.get("must_echo", True)),
+                        may_name_brand=bool(s.get("may_name_brand", True)), must_echo=bool(s.get("must_echo", True)),
                         value_ok=list(s.get("value_ok") or ["可行动信息", "判断依据"]), min_detail=s.get("min_detail", "模糊"),
                         intent=s.get("intent"), note=s.get("note", "")))
     return out or default_slots()
@@ -121,7 +125,7 @@ class CommentJudgement:
     hard_fails: list = field(default_factory=list)     # [(qid, now, want, p)]
     flags: list = field(default_factory=list)          # 背书体 / 文案腔 / 只有评价 / 像安排的 / 像脚本
     ambiguous: list = field(default_factory=list)
-    needs_review: bool = False                         # 背书体：进高风险复核
+    needs_review: bool = False                         # 门槛题漏答等无法完成判断的情况
     hints: list = field(default_factory=list)          # 只提示不判定的题没达到评论位要求时记这里，同 hard_fails 的形状
     advisory: frozenset = frozenset()                  # 本次按「只提示」处理的题；空 = 老口径，全部题都能判硬伤
     calls: int = 0
@@ -184,7 +188,7 @@ def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot]
         # 漏答 / 选项外：是非题和选择题一样处理 —— 不当硬伤（不会下发「现在判『None』」的修改单），整条进复核
         cj.flags.append("漏答"); cj.needs_review = True
     if a.get("speech_act") in ENDORSE:
-        cj.flags.append("背书体"); cj.needs_review = True
+        cj.flags.append("背书体")                      # 描述表达类型，不推断真假或自动送复核
     if a.get("register") == "文案腔":
         cj.flags.append("文案腔")
     if a.get("reader_value") == "只有评价":
@@ -194,6 +198,8 @@ def judge_comment(client: JevClient, post: dict, text: str, slot: Optional[Slot]
     if a.get("is_scripted") == "是":
         cj.flags.append("像脚本")
     cj.ambiguous = [q for q, it in cj.items.items() if it.get("ambiguous")]
+    if REVIEW_GATES.intersection(cj.review_ambiguous()):
+        cj.needs_review = True                         # 各入口保留四项门槛歧义复核，不扩展运营参考题的约束
     if slot is not None:
         p = lambda q: cj.items.get(q, {}).get("p")  # noqa: E731
         known = lambda q: a.get(q) is not None       # noqa: E731 — 没判出来的题不参与硬伤
@@ -256,11 +262,11 @@ def comment_repair_plan(cj: CommentJudgement, banks: dict, fill: Optional[dict] 
 
 
 def comment_repair_prompt(post: dict, text: str, plan: list, slot: Optional[Slot] = None) -> str:
-    lines = ["下面是一篇小红书帖子、它下面的一条候选评论和一张修改单。只按修改单改这条评论，长度和口吻保持原样，不要加评价词，不要加感叹。",
+    lines = ["下面是一篇小红书帖子、它下面的一条候选评论和一张修改单。只按修改单改这条评论，长度和口吻保持原样。可以自然提品牌、保留有素材依据的体验、评价和推荐；不要新增或编造使用事实。",
              "只输出改后的评论原文，不要解释。", "", f"帖子标题：{post.get('title', '')}", f"帖子正文：{(post.get('body') or '')[:600]}", "",
              f"候选评论：{text}", ""]
     if slot is not None:
-        lines.append(f"这一位的要求：{slot.speech_act[0]}；{'可以' if slot.may_name_brand else '不要'}点名；{'要接住帖子里具体的事' if slot.must_echo else '不必接帖子'}。")
+        lines.append(f"这一位的要求：{' / '.join(slot.speech_act)}；{'可以自然点名，不必每条都提' if slot.may_name_brand else '不要点名'}；{'要接住帖子里具体的事' if slot.must_echo else '不必接帖子'}。")
     lines.append("修改单：")
     for i, p in enumerate(plan, 1):
         lines.append(f"{i}. {p['instruction']}")
@@ -319,8 +325,8 @@ class ThreadJudgement:
 
 
 def judge_thread(client: JevClient, post: dict, comments: list, thread: Bank, *, fill: Optional[dict] = None,
-                 judged: Optional[list] = None, max_named: int = 1, subject_id: str = "set") -> ThreadJudgement:
-    """comments 同 thread_state；judged（可选）= 每条的 CommentJudgement，用来算代码特征。"""
+                 judged: Optional[list] = None, max_named: Optional[int] = None, subject_id: str = "set") -> ThreadJudgement:
+    """comments 同 thread_state；judged 用来算代码特征。max_named 默认不限；只有显式整数才限制点名条数。"""
     fill = fill or fill_for(post)
     tj = ThreadJudgement()
     r = judge_state(client, thread, subject_id, thread_state(post, comments), subject_type="comment", fill=fill)
@@ -342,7 +348,7 @@ def judge_thread(client: JevClient, post: dict, comments: list, thread: Bank, *,
         named = sum(1 for cj in judged if cj.profile().get("names_brand") == "是")
         endorse = sum(1 for cj in judged if cj.profile().get("speech_act") in ENDORSE)
         tj.code = {"n": len(judged), "named": named, "endorse": endorse}
-        if named > max_named:
+        if max_named is not None and named > max_named:
             tj.hard_fails.append(("named_count", str(named), f"≤{max_named}", None))
     return tj
 
@@ -350,8 +356,8 @@ def judge_thread(client: JevClient, post: dict, comments: list, thread: Bank, *,
 def thread_repair_plan(tj: ThreadJudgement, slots: list, judged: list) -> list:
     """评论区不过 → 指出哪一位要重出。每条 = {"slot": 位 id 或 None, "why": …}；slot 为 None = 换谁都修不了，问题在评论位配置，只记录不换。
     规则：
-      · 同一句式 / 夸的太多 → 换掉背书体和文案腔的位；brief 硬放的背书位（slot 本身就要背书）不换 —— 重出还是同一类，标 needs_review。
-      · 点名太多 → 换掉不该点名却点了名的位；点名的位全是允许点名的 → 配置问题（max_named 与 may_name_brand 打架）。
+      · 同一句式 / 夸的太多 → 调整评价集中的位，保留有素材依据的信息，不因推荐或亲历的表达类型送复核。
+      · 点名太多 → 优先去掉显式禁名位的点名，再选足够多的其他点名位；允许点名不代表必须点名，显式上限可通过删减品牌称呼满足。
       · 没有摩擦 → 有贴主回复位就重出它（要真的回应读者）；没有就重出一个提问位（改成追问价格或效果）；两者都没有 → 配置问题。
       · 整体像安排的但单条都能过 → 换分数最差的一位。"""
     plan = []
@@ -359,16 +365,16 @@ def thread_repair_plan(tj: ThreadJudgement, slots: list, judged: list) -> list:
     by_slot = {s.id: (s, cj) for s, cj in zip(slots, judged)}
     if fails & {"same_template", "praise_share"}:
         for sid, (s, cj) in by_slot.items():
-            if "背书体" in cj.flags and set(s.speech_act) & set(ENDORSE):
-                plan.append({"slot": None, "why": f"位 {sid} 是 brief 要求的背书位，重出还是背书体；评论区判同一句式 / 夸的太多时它会一直拖后腿，整组进复核"})
-            elif "背书体" in cj.flags or "文案腔" in cj.flags:
-                plan.append({"slot": sid, "why": "评论区被判同一句式或夸的太多，这一位是背书体 / 文案腔"})
+            if "背书体" in cj.flags or "文案腔" in cj.flags:
+                plan.append({"slot": sid, "why": "评论区被判同一句式或评价集中，调整这一位的重复说法，保留有素材依据的体验和信息"})
     if "named_count" in fails:
-        offenders = [sid for sid, (s, cj) in by_slot.items() if cj.profile().get("names_brand") == "是" and not s.may_name_brand]
-        for sid in offenders:
-            plan.append({"slot": sid, "why": "点名的评论超过上限，这一位不该点名"})
-        if not offenders:
-            plan.append({"slot": None, "why": "点名条数超过 max_named，但点了名的都是允许点名的位：是评论位配置和 max_named 打架，换谁都修不了"})
+        named = [sid for sid, (_, cj) in by_slot.items() if cj.profile().get("names_brand") == "是"]
+        # 明确禁止点名的位优先处理；其余位“可以点名”也可以省略，和上限并不冲突。
+        named.sort(key=lambda sid: by_slot[sid][0].may_name_brand)
+        cap = next((re.fullmatch(r"≤(\d+)", f[2]) for f in tj.hard_fails if f[0] == "named_count"), None)
+        excess = max(1, len(named) - int(cap.group(1))) if cap else len(named)
+        for sid in named[:excess]:
+            plan.append({"slot": sid, "why": "点名条数超过显式上限，去掉这一位的品牌称呼，保留原有行为和有素材依据的信息"})
     if "has_friction" in fails:
         reply = next((sid for sid, (s, _) in by_slot.items() if s.role == "贴主" or s.reply_to), None)
         ask = next((sid for sid, (s, _) in by_slot.items() if "提问" in s.speech_act), None)
@@ -381,11 +387,14 @@ def thread_repair_plan(tj: ThreadJudgement, slots: list, judged: list) -> list:
     if tj.hard_fails and not plan:
         worst = max(by_slot.items(), key=lambda kv: score_comment(kv[1][1]))
         plan.append({"slot": worst[0], "why": f"评论区不过（{'、'.join(sorted(fails))}）但没有一位能单独归因：换掉分数最差的一位"})
-    seen = set(); out = []
+    seen = {}; out = []
     for p in plan:
         key = p["slot"] if p["slot"] is not None else ("cfg", p["why"])
         if key not in seen:
-            seen.add(key); out.append(p)
+            seen[key] = p
+            out.append(p)
+        elif p["why"] != seen[key]["why"]:
+            seen[key]["why"] += "；" + p["why"]          # 同一位既要调句式又要减点名时，两条改法都要送到生成端
     return out
 
 
@@ -393,7 +402,7 @@ def thread_repair_plan(tj: ThreadJudgement, slots: list, judged: list) -> list:
 
 def produce_comments(client: JevClient, generator: Generator, post: dict, slots: list, prompt_for: Callable[[dict, Slot], str], *,
                      reader: Bank, thread: Bank, ops: Optional[Bank] = None, k: int = 3, max_repairs: int = 1,
-                     max_thread_rounds: int = 1, max_named: int = 1) -> dict:
+                     max_thread_rounds: int = 1, max_named: Optional[int] = None) -> dict:
     """返回 {"comments": [{slot, text, profile, flags, passed, needs_review, hard_fails}], "thread": {...}, "trail": [...], "calls": n}"""
     fill = fill_for(post)
     banks = {b.name: b for b in (reader, ops) if b is not None}

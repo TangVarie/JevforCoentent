@@ -306,7 +306,8 @@ def judge_comments(post_title: str, post_body: str, comments: list, kind: str = 
 def comment_repair_plan_for(post_title: str, post_body: str, text: str, slot: dict, kind: str = "product",
                             points: Optional[list] = None, project: Optional[str] = None, category: Optional[str] = None) -> dict:
     """判一条候选评论是否对得上它的评论位，不对就给修改单。
-    slot 例：{"id": "exp", "speech_act": ["补充经验"], "may_name_brand": false, "must_echo": true, "value_ok": ["判断依据"], "min_detail": "模糊"}
+    slot 例：{"id": "exp", "speech_act": ["补充经验", "亲历背书", "旁观推荐"], "must_echo": true, "value_ok": ["判断依据"], "min_detail": "模糊"}。
+    默认允许自然点名；亲历、评价和推荐须有真实素材依据，不因表达类型自动送复核。
     或提问位 {"id": "q1", "speech_act": ["提问"], "must_echo": false, "value_ok": ["可行动信息","判断依据","无"], "min_detail": "无"}。
     返回 passed / hard_fails / flags / plan（每条 = 题号 + 现在的答案与概率 + 要改成什么 + 那个选项的定义）。不改评论。
     【本机 Jev】没有 HTTP 端点，默认拒绝并返回 {"error": …}；只有设了 JUDGE_ALLOW_LOCAL_JEV=1 的内部机器才跑。"""
@@ -325,9 +326,10 @@ def comment_repair_plan_for(post_title: str, post_body: str, text: str, slot: di
 
 @mcp.tool()
 def judge_thread(post_title: str, post_body: str, comments: list, kind: str = "product", points: Optional[list] = None,
-                 max_named: int = 1, project: Optional[str] = None, category: Optional[str] = None) -> dict:
+                 max_named: Optional[int] = None, project: Optional[str] = None, category: Optional[str] = None) -> dict:
     """把一组评论当评论区整体判：夸的比例 / 同一句式 / 有没有摩擦（含贴主回复）/ 整体像不像安排的，外加代码算的点名条数、背书条数。
-    四题任一不过都算不过（没有摩擦也算）；评论区题漏答、或任一条评论要复核（漏答 / 背书体），整组也不算过，needs_review=true。
+    本机路径四题任一不过都算不过（没有摩擦也算）；评论区题漏答、或任一条评论漏答需复核，整组也不算过。
+    max_named 默认不限，显式整数才限制点名条数；亲历/推荐分类本身不触发复核。
     comments: [{"text": "...", "account"?: "...", "role"?: "贴主|读者位|运营", "reply_to_text"?: "..."}]。返回整体判定 + 每条的旗子。
     【本机 Jev】没有 HTTP 端点，默认拒绝并返回 {"error": …}；只有设了 JUDGE_ALLOW_LOCAL_JEV=1 的内部机器才跑。"""
     try:
