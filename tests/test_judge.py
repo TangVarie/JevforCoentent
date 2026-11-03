@@ -377,6 +377,23 @@ POST = {"title": "想问下各位留学生秋招真的不慌吗？", "kind": "ag
         "points": ["美本文科", "反复问简历是不是你们写", "三千字素材库", "四版简历"]}
 
 
+def test_comment_defaults_allow_natural_brand_and_source_backed_experience():
+    from judge import comments as CM
+    slots = CM.default_slots()
+    assert all(s.may_name_brand and s.wants()["names_brand"] == "不限" for s in slots)
+    for sid in ("exp", "reply"):
+        slot = next(s for s in slots if s.id == sid)
+        assert set(CM.ENDORSE) <= set(slot.speech_act)
+    configured = CM.slots_from_brief({"comment_slots": [
+        {"id": "default", "speech_act": ["提问"]},
+        {"id": "explicit", "speech_act": ["提问"], "may_name_brand": False}]})
+    assert configured[0].may_name_brand and configured[0].wants()["names_brand"] == "不限"
+    assert not configured[1].may_name_brand and configured[1].wants()["names_brand"] == "否"
+    prompt = CM.comment_repair_prompt(POST, "原评论", [], next(s for s in slots if s.id == "exp"))
+    assert "亲历背书" in prompt and "旁观推荐" in prompt and "不必每条都提" in prompt
+    assert "不要加评价词" not in prompt and "不要新增或编造使用事实" in prompt
+
+
 def test_comment_fill_and_judge_routes():
     from judge import comments as CM
     reader, ops = B.load_bank(READER4), B.load_bank(OPS)
@@ -384,18 +401,18 @@ def test_comment_fill_and_judge_routes():
     assert fill["subject"] == "这家机构" and "四版简历" in fill["post_points"] and fill["post_examples"].startswith("「美本文科」")
     assert CM.fill_for({"title": "t", "body": "戒烟第三天，嘴里没味。", "kind": "product"})["subject"] == "这个产品"
     jev = ScriptedJev()
-    # 背书体：只判不算硬伤（slot=None），但打旗 + 进复核
+    # 背书体：只判不算硬伤（slot=None），保留分类标记，不因分类自动送复核
     cj = CM.judge_comment(jev, POST, "文社科真的需要有人帮你挖掘亮点 途鸽老师帮我找到了最适合我的赛道", None, reader, ops=ops, fill=fill)
-    assert cj.needs_review and {"背书体", "文案腔", "只有评价", "像安排的", "像脚本"} <= set(cj.flags) and cj.passed()
-    # 同一条放到「补充经验」位：五处硬伤，修改单每条带定义
+    assert not cj.needs_review and {"背书体", "文案腔", "只有评价", "像安排的", "像脚本"} <= set(cj.flags) and cj.passed()
+    # 默认经验位允许亲历/推荐和点名，其余接帖、细节等要求照常判断
     exp = CM.default_slots()[2]
     assert exp.id == "exp"
     cj2 = CM.judge_comment(jev, POST, "文社科真的需要有人帮你挖掘亮点 途鸽老师帮我找到了最适合我的赛道", exp, reader, ops=ops, fill=fill)
     fails = {f[0] for f in cj2.hard_fails}
-    assert fails == {"speech_act", "names_brand", "echoes_post", "register", "reader_value", "detail_level", "comment_intent"}
+    assert fails == {"echoes_post", "register", "reader_value", "detail_level", "comment_intent"}
     plan = CM.comment_repair_plan(cj2, {"reader": reader, "ops": ops}, fill)
     assert len(plan) == len(cj2.hard_fails) and all(p["definition"] for p in plan)
-    assert any("不对这家机构下结论" in p["instruction"] for p in plan)          # 占位符已按本篇填好
+    assert any("美本文科" in p["instruction"] for p in plan)                    # 接帖定义中的占位符已按本篇填好
     assert not any("{" in p["instruction"] for p in plan)
     # 提问位：「在哪里」过
     q1 = CM.default_slots()[0]
@@ -439,9 +456,12 @@ def test_produce_comments_best_of_k_repair_and_thread_swap():
     # 成组不过 → 换位：三条背书体的组，评论区判同一句式 + 像安排的，thread_repair_plan 指到那几位
     bad = [CM.judge_comment(jev, POST, t, None, reader, fill=CM.fill_for(POST)) for t in
            ["途鸽老师帮我本土化了", "感谢途鸽 帮我度过了提前批", "在哪里"]]
+    unlimited = CM.judge_thread(jev, POST, [{"text": cj.text} for cj in bad], thread, fill=CM.fill_for(POST), judged=bad)
+    assert unlimited.code["named"] == 2 and "named_count" not in {f[0] for f in unlimited.hard_fails}
     tj = CM.judge_thread(jev, POST, [{"text": cj.text} for cj in bad], thread, fill=CM.fill_for(POST), judged=bad, max_named=1)
     assert {f[0] for f in tj.hard_fails} >= {"same_template", "thread_arranged", "named_count"}
-    plan = CM.thread_repair_plan(tj, [CM.Slot("a", ["补充经验"]), CM.Slot("b", ["补充经验"]), CM.Slot("c", ["提问"])], bad)
+    plan = CM.thread_repair_plan(tj, [CM.Slot("a", ["补充经验"], may_name_brand=False),
+                                    CM.Slot("b", ["补充经验"], may_name_brand=False), CM.Slot("c", ["提问"])], bad)
     # a / b 是背书体；这组没有摩擦（没有贴主回复、没有质疑）→ 提问位 c 也要重出成审慎的追问（摩擦那题也「不过就换位」）
     assert {p["slot"] for p in plan} == {"a", "b", "c"} and "摩擦" in next(p["why"] for p in plan if p["slot"] == "c")
     assert "has_friction" in {f[0] for f in tj.hard_fails}

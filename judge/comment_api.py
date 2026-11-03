@@ -12,13 +12,14 @@ from . import comments as C
 from .jev_client import JevError
 
 # 2026-10-16 owner 验收 D-112（truth-vault DECISIONS）：写手评论工具用 C4 题库原样（digest a0c04acf…）。
-# 通过与否只看四道门槛题（speech_act / names_brand / echoes_post / detail_level）和背书复核；
+# 通过与否只看四道门槛题（speech_act / names_brand / echoes_post / detail_level）及门槛漏答/歧义复核；
+# 2026-11-03：默认自然点名、无整组点名配额；亲历/推荐分类不再自动送复核，事实依据由调用方核实。
 # register / reader_value / arranged 只给提示。运营侧整套（comment_intent、is_scripted）没有验收过，同样只提示
 # （测试钉住：运营侧题库的每道题都在这里，新加的运营题不会悄悄变成门槛）。
 READER_BANK = "comment_reader_v0.6"
 ADVISORY = frozenset({"register", "reader_value", "arranged", "comment_intent", "is_scripted"})
 # 整组评论区题库 comment_thread_v0.4 不在 D-112 范围、没验收过：四道模型题同样只提示（不判不过、歧义或漏答不送复核）。
-# 仍然判定的只有代码算的点名条数（named_count）和每条评论自己的门槛题 / 背书复核。测试钉住整组题库的每道题都在这里。
+# 仍然判定的只有显式配置的点名条数上限（named_count）和每条评论自己的门槛题 / 复核。测试钉住整组题库的每道题都在这里。
 THREAD_ADVISORY = frozenset({"praise_share", "same_template", "has_friction", "thread_arranged"})
 
 
@@ -31,7 +32,7 @@ class CommentSlot(InputModel):
     speech_act: list[str] = Field(min_length=1, max_length=8)
     role: str = Field(default="读者位", max_length=40)
     reply_to: Optional[str] = Field(default=None, max_length=80)
-    may_name_brand: bool = False
+    may_name_brand: bool = True
     must_echo: bool = True
     value_ok: list[str] = Field(default_factory=lambda: ["可行动信息", "判断依据"], min_length=1, max_length=8)
     min_detail: Literal["无", "模糊", "具体"] = "模糊"
@@ -65,7 +66,7 @@ class Candidate(InputModel):
 
 class ThreadRequest(CommentPost):
     comments: list[Candidate] = Field(min_length=1, max_length=20)
-    max_named: int = Field(default=1, ge=0, le=20)
+    max_named: Optional[int] = Field(default=None, ge=0, le=20)
 
 
 def _slot(value, reader, ops):

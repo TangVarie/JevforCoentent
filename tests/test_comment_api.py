@@ -70,8 +70,8 @@ def test_writer_key_gets_real_comment_profile_and_unpublished_policy(wired):
 
 def test_slot_failure_returns_an_actionable_plan(wired):
     client, jev = wired
-    jev.overrides["names_brand"] = True   # 门槛题：提问位不许点名
-    data = single(client).json()
+    jev.overrides["names_brand"] = True   # 只有显式禁名的评论位才因点名不过
+    data = single(client, slot={**SLOT, "may_name_brand": False}).json()
     assert data["passed"] is False
     assert any(p["qid"] == "names_brand" and p["definition"] for p in data["plan"])
 
@@ -93,7 +93,7 @@ def test_advisory_questions_only_hint(wired, qid, value):
 def test_arranged_hint_is_kept_alongside_gate_failures(wired):
     client, jev = wired
     jev.overrides.update(names_brand=True, arranged=True)
-    data = single(client).json()
+    data = single(client, slot={**SLOT, "may_name_brand": False}).json()
     assert data["passed"] is False and [p["qid"] for p in data["plan"]] == ["names_brand"]
     assert [h["qid"] for h in data["hints"]] == ["arranged"]
 
@@ -160,9 +160,51 @@ def test_thread_model_failures_are_hints_not_plan(wired):
 def test_named_count_code_check_still_gates(wired):
     client, jev = wired
     jev.overrides["names_brand"] = True
-    data = thread(client, [{"text": "这个牌子怎么买"}, {"text": "这个牌子在哪买"}], max_named=1).json()
+    data = thread(client, [{"text": "这个牌子怎么买", "slot": {**SLOT, "id": "a"}},
+                           {"text": "这个牌子在哪买", "slot": {**SLOT, "id": "b"}}], max_named=1).json()
     assert data["passed"] is False and [f[0] for f in data["hard_fails"]] == ["named_count"], data
-    assert data["plan"] and data["plan"][0]["slot"] is None
+    assert len(data["plan"]) == 1 and data["plan"][0]["slot"] in {"a", "b"}
+
+
+def test_brand_question_is_allowed_without_explicit_brand_configuration(wired):
+    client, jev = wired
+    jev.overrides["names_brand"] = True
+    data = single(client, text="途鸽这项服务怎么约呀").json()
+    assert data["passed"] is True and data["needs_review"] is False, data
+    assert not data["hard_fails"] and data["profile"]["names_brand"] == "是"
+
+
+@pytest.mark.parametrize("limit", ["omitted", None])
+def test_multiple_natural_brand_mentions_have_no_default_quota(wired, limit):
+    client, jev = wired
+    jev.overrides["names_brand"] = True
+    changes = {} if limit == "omitted" else {"max_named": limit}
+    data = thread(client, [{"text": "途鸽怎么约", "slot": {**SLOT, "id": "a"}},
+                           {"text": "途鸽周末能约吗", "slot": {**SLOT, "id": "b"}}], **changes).json()
+    assert data["passed"] is True and data["needs_review"] is False, data
+    assert data["code"]["named"] == 2 and not data["hard_fails"]
+
+
+def test_explicit_zero_brand_quota_is_preserved(wired):
+    client, jev = wired
+    jev.overrides["names_brand"] = True
+    data = thread(client, [{"text": "途鸽怎么约", "slot": SLOT}], max_named=0).json()
+    assert data["passed"] is False and data["hard_fails"][0][:3] == ["named_count", "1", "≤0"]
+    assert len(data["plan"]) == 1 and data["plan"][0]["slot"] == "q1"
+
+
+@pytest.mark.parametrize("slot_id", ["exp", "reply"])
+@pytest.mark.parametrize("speech_act", ["亲历背书", "旁观推荐"])
+def test_source_backed_experience_and_recommendation_fit_default_slots(wired, slot_id, speech_act):
+    """用已提供素材的表达作路由回归，不把测试替身当作事实核验或模型质量证明。"""
+    from dataclasses import asdict
+    from judge.comments import default_slots
+    client, jev = wired
+    slot = next(s for s in default_slots() if s.id == slot_id)
+    jev.overrides.update(speech_act=speech_act, names_brand=True, echoes_post=True, detail_level="具体")
+    data = single(client, slot=asdict(slot), text="素材里这位同学在途鸽改了四版简历，最后一版把项目职责写清楚了").json()
+    assert data["passed"] is True and data["needs_review"] is False, data
+    assert data["profile"]["speech_act"] == speech_act and "背书体" in data["flags"]
 
 
 def test_every_thread_question_is_advisory():
@@ -189,13 +231,9 @@ def test_advisory_ambiguity_is_reported_but_not_routed_to_review(wired):
     assert "comment_intent" in data["ambiguous"] and data["needs_review"] is False and data["passed"] is True
 
 
-@pytest.mark.parametrize("which", ["missing", "endorsement"])
-def test_missing_answers_and_endorsements_do_not_pass(wired, which):
+def test_missing_gate_answer_still_requires_review(wired):
     client, jev = wired
-    if which == "missing":
-        jev.omit.add("echoes_post")   # 门槛题漏答
-    else:
-        jev.overrides["speech_act"] = "亲历背书"
+    jev.omit.add("echoes_post")   # 门槛题漏答
     data = single(client).json()
     assert data["needs_review"] is True and data["passed"] is False
 
@@ -203,12 +241,56 @@ def test_missing_answers_and_endorsements_do_not_pass(wired, which):
 def test_thread_propagates_individual_review_and_checks_whole_group(wired):
     client, jev = wired
     jev.overrides["speech_act"] = "亲历背书"
+    jev.omit.add("echoes_post")   # 复核来自门槛题漏答，不来自亲历表达分类
     r = client.post("/judge_thread", headers={"X-Judge-Key": "writer"},
                     json={**POST, "comments": [{"text": "我用过", "role": "读者位"}, {"text": "谢谢", "role": "贴主"}]})
     data = r.json()
     assert r.status_code == 200 and data["passed"] is False and data["needs_review"] is True
     assert data["code"]["endorse"] == 2 and len(data["comments"]) == 2
     assert len(jev.calls) == 5
+
+
+def test_thread_endorsement_classification_does_not_require_review(wired):
+    client, jev = wired
+    jev.overrides.update(speech_act="亲历背书", names_brand=True)
+    data = thread(client, [{"text": "素材里的体验一"}, {"text": "素材里的体验二"}]).json()
+    assert data["passed"] is True and data["needs_review"] is False, data
+    assert data["code"] == {"n": 2, "named": 2, "endorse": 2}
+
+
+def test_recommendation_does_not_bypass_an_explicit_question_only_slot(wired):
+    client, jev = wired
+    jev.overrides["speech_act"] = "旁观推荐"
+    data = single(client).json()
+    assert data["passed"] is False and data["needs_review"] is False, data
+    assert [f[0] for f in data["hard_fails"]] == ["speech_act"]
+
+
+@pytest.mark.parametrize("endpoint", ["single", "thread"])
+def test_internal_stdio_comment_paths_preserve_gate_ambiguity_review(wired, monkeypatch, endpoint):
+    from judge import mcp_server as M
+    client, jev = wired
+    jev.overrides["speech_act"] = "亲历背书"
+    jev.ambiguous.add("names_brand")
+    monkeypatch.setenv("JUDGE_ALLOW_LOCAL_JEV", "1")
+    monkeypatch.setattr(M, "_client", lambda: jev)
+    if endpoint == "single":
+        data = M.comment_repair_plan_for("标题", POST["post_body"], "素材中提供的体验", {**SLOT, "speech_act": ["亲历背书"]}, project="TUGE")
+    else:
+        data = M.judge_thread("标题", POST["post_body"], [{"text": "素材中提供的体验"}], project="TUGE")
+    assert data["needs_review"] is True, data
+
+
+def test_generation_loop_preserves_gate_ambiguity_review(wired):
+    from judge import comments as C
+    client, jev = wired
+    jev.overrides["speech_act"] = "旁观推荐"
+    jev.ambiguous.add("names_brand")
+    slot = C.Slot("reply", ["旁观推荐"], must_echo=False, min_detail="无", value_ok=["无"])
+    data = C.produce_comments(jev, lambda prompt, n: ["素材中的推荐"], {"title": "标题", "body": POST["post_body"]},
+                              [slot], lambda post, slot: "按素材写", reader=A.get_bank("comment_reader_v0.6"),
+                              thread=A.get_bank("comment_thread_v0.4"), k=1, max_repairs=0, max_thread_rounds=0)
+    assert data["needs_review"] is True and data["passed"] is False, data
 
 
 @pytest.mark.parametrize("change", [{"project": "OKMAN"}, {"category": "处方药"}])
