@@ -7,8 +7,10 @@
 
 为什么只认"账本写齐了"的（codex review on #6，P1）：apply_rows 先写 external_notes 再写账本；账本那一步失败时 job 红、cache 不存，
 但 external_notes 里已经有这批笔记了 —— 要是 known_ids 照 external_notes 全收，下周这批按 known 跳过、永远不再判，账本那一半
-就永久丢了。所以判据是 note_feature_answers 里这篇 (subject_type=external_note) 的行数 ≥ fq 题库的题数；
-不够的下周重抓重判（多花一次钱，不丢）。账本读不到（TV 还没跑 notes_v1_17）就退回只看 external_notes，并把原因打出来。
+就永久丢了。所以判据是 note_feature_answers 里这篇 (subject_type=external_note) 判成了的 fq 题数 ≥ fq 题库的题数；
+不够的下周重抓重判（多花一次钱，不丢）。「判成了」= 属于 fq 题库、invalid_reason 为空或是设计内的无效（no_title / text_too_short /
+evidence_not_found / span_truncated）；Jev 缺答（missing）/ 答案不在选项里（out_of_vocab）的行不算，分诊那 4 行也不算
+（2026-11-04，外部评审 F03：以前只数行数，20 行全是 missing 也算写齐，这篇永远不再重判）。账本读不到（TV 还没跑 notes_v1_17）就退回只看 external_notes，并把原因打出来。
 
   python3 scripts/known_external_ids.py state/known_ids.txt
 表还没建（TV 没跑 notes_v1_18）→ 写一个空文件、打印原因、退出 0：去重退回只靠 state。
@@ -24,9 +26,12 @@ import urllib.error
 import urllib.request
 from collections import Counter
 from pathlib import Path
+from typing import Optional
 
 PAGE = 1000
 ROOT = Path(__file__).resolve().parent.parent
+# 设计内的无效：判完了的结论（没标题 / 太短不问 / 答是却找不到依据 / 片段截断的「否」），算判成了。值与 judge.core / TV feature_bank 同一套（测试钉住）
+DESIGNED_INVALID = frozenset({"no_title", "text_too_short", "evidence_not_found", "span_truncated"})
 
 
 def _get(url: str, key: str, path: str) -> list:
@@ -50,11 +55,34 @@ def fetch_note_ids(url: str, key: str) -> list:
     return [str(x["note_id"]) for x in _pages(url, key, "external_notes?select=note_id&order=note_id") if x.get("note_id")]
 
 
+def valid_counts(rows: list, fq_ids: Optional[set]) -> Counter:
+    """每篇外部笔记判成了几道 fq 题（不同 question_id 计一次）。fq_ids 为 None（题库读不到）时不按题库筛题号。"""
+    got: dict = {}
+    for r in rows:
+        sid, qid = r.get("subject_id"), r.get("question_id")
+        if not sid or (fq_ids is not None and qid not in fq_ids):
+            continue
+        if r.get("invalid_reason") not in (None, *DESIGNED_INVALID):
+            continue
+        got.setdefault(str(sid), set()).add(qid)
+    return Counter({sid: len(qs) for sid, qs in got.items()})
+
+
 def fetch_ledger_counts(url: str, key: str) -> Counter:
-    """每篇外部笔记在账本里有几行（subject_type=external_note）。按主键全序翻页。"""
-    rows = _pages(url, key, "note_feature_answers?select=subject_id&subject_type=eq.external_note"
+    """每篇外部笔记在账本里判成了几道 fq 题（subject_type=external_note，见 valid_counts）。按主键全序翻页。"""
+    rows = _pages(url, key, "note_feature_answers?select=subject_id,question_id,invalid_reason&subject_type=eq.external_note"
                             "&order=subject_id,question_id,question_version,extractor,run_tag")
-    return Counter(str(r["subject_id"]) for r in rows if r.get("subject_id"))
+    return valid_counts(rows, fq_question_ids())
+
+
+def fq_question_ids() -> Optional[set]:
+    """fq 题库的题号；题库读不到返回 None。"""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from judge.banks import load_bank
+        return {q.id for q in load_bank(ROOT / "banks" / "vendor" / "feature_questions_v0_1.yaml", name="feature_questions_v0_1").questions}
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def expected_rows() -> int:
@@ -68,7 +96,7 @@ def expected_rows() -> int:
 
 
 def complete_ids(note_ids: list, counts: Counter, need: int) -> tuple[list, list]:
-    """(账本写齐的, 没写齐的)。"""
+    """(账本写齐的, 没写齐的)。counts 是判成了的 fq 题数（valid_counts），不是原始行数。"""
     done = [n for n in note_ids if counts.get(n, 0) >= need]
     short = [n for n in note_ids if counts.get(n, 0) < need]
     return done, short
@@ -102,7 +130,7 @@ def main(argv: list) -> int:
     need = expected_rows()
     done, short = complete_ids(ids, counts, need)
     out.write_text("\n".join(done) + ("\n" if done else ""), encoding="utf-8")
-    print(f"已入库的外部笔记 {len(ids)} 篇，账本写齐（≥{need} 行）的 {len(done)} 篇 → {out}；没写齐的 {len(short)} 篇下周重抓重判")
+    print(f"已入库的外部笔记 {len(ids)} 篇，账本写齐（判成 ≥{need} 道 fq 题）的 {len(done)} 篇 → {out}；没写齐的 {len(short)} 篇下周重抓重判")
     if short:
         print("  没写齐的前几篇:", ", ".join(short[:8]))
     return 0

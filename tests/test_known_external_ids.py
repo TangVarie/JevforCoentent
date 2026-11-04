@@ -27,7 +27,9 @@ def test_main_writes_only_complete_notes(monkeypatch, tmp_path):
             return [] if "offset=1000" in path else [{"note_id": "n1"}, {"note_id": "n2"}, {"note_id": "n3"}]
         if path.startswith("note_feature_answers?"):
             assert "subject_type=eq.external_note" in path and "order=subject_id,question_id,question_version,extractor,run_tag" in path
-            return [] if "offset=1000" in path else [{"subject_id": "n1"}] * 20 + [{"subject_id": "n2"}] * 5
+            qs = sorted(K.fq_question_ids())
+            return [] if "offset=1000" in path else ([{"subject_id": "n1", "question_id": q, "invalid_reason": None} for q in qs]
+                                                     + [{"subject_id": "n2", "question_id": q, "invalid_reason": None} for q in qs[:5]])
         raise AssertionError(path)
     monkeypatch.setattr(K, "_get", fake_get)
     monkeypatch.setattr(K, "expected_rows", lambda: 20)
