@@ -57,6 +57,10 @@
   写手 key 可用 GET /banks、POST /judge_draft 和两个只读评论端点（不回账本行；评论参数不接受 write / published）—— 发到服务端之外的机器上的凭据不能换来 /judge 的任意 subject、
   write=true 和带暗题的账本行（审计 A-09，codex review on #7）。没配 JUDGE_API_KEY 时默认一律 503 拒绝（fail-closed），本地开发显式设 JUDGE_ALLOW_ANONYMOUS=1。
 /health 不鉴权（Railway 探活），只回布尔与题库名，不回密钥。Jev 密钥不出服务端；调用方自己 fail-open。
+  另回 policy_sha256 = config/data_policy.yaml 文件字节的 sha256，和仓里 `sha256sum config/data_policy.yaml` 对得上就是同一份（J-10）。
+  数据出境配置 / 暗题配置缺失或坏了（审计 11-02 F15）：服务起不来（启动时两份都先校验）；运行中 /health 每次重新校验两份，哪份坏了都回 503、ok=false、
+  config_error 说清哪里坏；别的端点只在读到坏的那份时回 503，在调 Jev 之前就返回（/judge 和评论端点不读暗题配置，/banks 不读数据出境配置，
+  不读的那份坏了它们照常）—— 不再静默回落成「没有处方药项目」「没有暗题」。
 """
 from __future__ import annotations
 
@@ -64,10 +68,12 @@ import concurrent.futures as cf
 import hmac
 import os
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
@@ -77,7 +83,7 @@ from . import spans as sp
 from .banks import Bank, check_bank, discover, load_bank, unfilled
 from .core import LedgerWriteError, judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
 from .draft import DraftSetupError, setup_draft
-from .hidden import all_hidden
+from .hidden import HiddenConfigError, all_hidden, check_config as _check_hidden_config
 from .jev_client import JevClient, JevError
 from .loop import judge_draft as _judge_draft, redact, repair_plan
 
@@ -267,20 +273,52 @@ def _parallel(fn, items: list) -> list:
         return list(ex.map(fn, items))
 
 
-app = FastAPI(title="judge", version=__version__)
+CONFIG_ERRORS = (P.PolicyConfigError, HiddenConfigError)
+
+
+def check_configs() -> dict:
+    """数据出境配置和暗题配置各校验一遍（审计 11-02 F15），回 {"policy_sha256": …}。坏了抛 PolicyConfigError / HiddenConfigError。"""
+    sha = P.config_sha256()
+    _check_hidden_config()
+    return {"policy_sha256": sha}
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    # 启动先校验两份配置：坏了直接抛，uvicorn 起不来，Railway 的 /health 探活过不了，这次部署失败、旧版本照常服务。
+    check_configs()
+    yield
+
+
+app = FastAPI(title="judge", version=__version__, lifespan=_lifespan)
+
+
+@app.exception_handler(P.PolicyConfigError)
+@app.exception_handler(HiddenConfigError)
+async def _config_error(_request, exc):
+    # 运行中配置坏了（文件被删 / 改坏）：读到坏配置的端点 503，读配置在调 Jev 之前，所以一次 Jev 都不调；不回落成空配置。
+    # 不读那份配置的端点不受影响（/judge 和评论端点不读暗题配置，/banks 不读数据出境配置）；/health 自己校验两份。
+    return JSONResponse(status_code=503, content={"detail": f"config: {exc}"})
 
 
 @app.get("/health")
 def health():
     mode = auth_mode()
-    return {"ok": True, "version": __version__, "banks": sorted(discover(BANKS_DIR)),
-            "auth": {"mode": mode, "required": mode == "key", "writer_keys": len(writer_keys())}, "workers": workers(),
-            "jev_key": bool(os.environ.get("TYPESAFE_API_KEY")), "mock": os.environ.get("JUDGE_MOCK") == "1",
-            "write_enabled": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
-            "comment_tools_enabled": os.environ.get("JUDGE_COMMENT_TOOLS_ENABLED") == "1",
-            # /compile_rules 的生成端：只回模型名和「有没有密钥」，不回密钥
-            "compile": {"model": "mock" if os.environ.get("JUDGE_MOCK") == "1" else _rules.model_name(),
-                        "key": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MOONSHOT_API_KEY"))}}
+    out = {"ok": True, "version": __version__, "banks": sorted(discover(BANKS_DIR)),
+           "auth": {"mode": mode, "required": mode == "key", "writer_keys": len(writer_keys())}, "workers": workers(),
+           "jev_key": bool(os.environ.get("TYPESAFE_API_KEY")), "mock": os.environ.get("JUDGE_MOCK") == "1",
+           "write_enabled": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
+           "comment_tools_enabled": os.environ.get("JUDGE_COMMENT_TOOLS_ENABLED") == "1",
+           # /compile_rules 的生成端：只回模型名和「有没有密钥」，不回密钥
+           "compile": {"model": "mock" if os.environ.get("JUDGE_MOCK") == "1" else _rules.model_name(),
+                       "key": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MOONSHOT_API_KEY"))}}
+    try:
+        out.update(check_configs())
+    except CONFIG_ERRORS as exc:
+        # 配置坏了 /health 就不绿（Railway 部署探活失败）；policy_sha256 不给坏文件算
+        out.update(ok=False, policy_sha256=None, config_error=str(exc))
+        return JSONResponse(status_code=503, content=out)
+    return out
 
 
 _BANK_VERSION = re.compile(r"^(?P<family>.+?)_v(?P<major>\d+)[._](?P<minor>\d+)$")

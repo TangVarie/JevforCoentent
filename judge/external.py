@@ -454,13 +454,44 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
     return rep
 
 
+# 发帖时间从 note_id 解（J-17，TV D-138）：小红书 note_id 是 24 位十六进制，前 8 位就是发帖时刻的 unix 秒。
+# 和 TV librarian/external.py 的 posted_at、写作台发牌各自现解是同一个口径；以前 external_notes.publish_time 整列是空的（TikHub 搜索页不给）。
+# 解出来的时刻早于小红书上线（2013 年）或晚于这次抓取 1 天以上，就当 id 规则变了，不写（留 NULL），不写一个错的时间进表。
+_PUBLISH_FLOOR = datetime(2013, 1, 1, tzinfo=timezone.utc).timestamp()
+_PUBLISH_SLACK_S = 86400
+
+
+def publish_time_from_note_id(note_id: Any, fetched_at: Optional[str] = None) -> Optional[str]:
+    """note_id 前 8 位十六进制 → 发帖时刻（UTC，ISO 8601 到秒，和 fetched_at 同格式）。解不出或不在合理范围 → None。"""
+    head = str(note_id or "")[:8]
+    if len(head) != 8 or any(c not in "0123456789abcdefABCDEF" for c in head):
+        return None
+    ts = int(head, 16)
+    try:
+        ceiling = datetime.fromisoformat(str(fetched_at).replace("Z", "+00:00")).timestamp() if fetched_at else time.time()
+    except ValueError:
+        ceiling = time.time()
+    if ts < _PUBLISH_FLOOR or ts > ceiling + _PUBLISH_SLACK_S:
+        return None
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds")
+
+
+def _publish_time(n: dict, fetched_at: str) -> Optional[str]:
+    """平台给了就照存（不推算、不改格式）；没给（None / 空串）才从 note_id 解。"""
+    given = n.get("publish_time")
+    if given is not None and str(given).strip():
+        return str(given)
+    return publish_time_from_note_id(n.get("note_id"), fetched_at)
+
+
 def external_note_rows(kept: list, run_id: str, fetched_at: Optional[str] = None) -> list:
-    """给 truth_vault.external_notes（migrations/notes_v1_18）的行。fetched_at 显式带上，SQL 路径与 PostgREST 路径冲突更新时口径一样。"""
+    """给 truth_vault.external_notes（migrations/notes_v1_18）的行。fetched_at 显式带上，SQL 路径与 PostgREST 路径冲突更新时口径一样。
+    publish_time：平台给了照存，没给就从 note_id 解（J-17）。"""
     fetched_at = fetched_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     return [{"note_id": n["note_id"], "platform": "xiaohongshu", "category": n["category"], "keyword": n["keyword"], "sort_type": n["sort_type"],
              "title": n["title"], "body": n["body"], "author": n["author"], "author_id": n["author_id"],
              "liked": n["liked"], "collected": n["collected"], "comments": n["comments"], "shares": n["shares"],
-             "publish_time": None if n.get("publish_time") is None else str(n.get("publish_time")), "voice": (n.get("triage") or {}).get("voice"),
+             "publish_time": _publish_time(n, fetched_at), "voice": (n.get("triage") or {}).get("voice"),
              "ad_like": (n.get("triage") or {}).get("ad_like") == "是", "has_product": (n.get("triage") or {}).get("has_product") == "是",
              "run_id": run_id, "source": "tikhub", "fetched_at": fetched_at} for n in kept]
 

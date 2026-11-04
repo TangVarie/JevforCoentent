@@ -16,7 +16,7 @@
 |---|---|
 | `judge/` | `jev_client`（调用、重试、mock）· `banks`（两种题库格式 → 一种内部表示；歧义判定）· `spans`（TV 同款切片、切句）· `core`（判一篇 / 判一个 state、证据选句、账本行、SQL / PostgREST 写入）· `loop`（稿子的生产回路：brief 编译成项目题库、best-of-k、判 → 修改单 → 修补）· `comments`（评论的生产回路：评论位、best-of-k、修改单、评论区成组判、换位）· `external`（外部语料：TikHub 抓取、预算、去重、分诊、打标）· `draft`（一篇稿子判哪几层、哪些硬约束：`/judge_draft` 用，MCP 经 HTTP 间接用）· `policy`（数据出境：处方药未发布稿不出境；项目层看 `project_layer_cleared`，10-20 起 `"*"` 全部放行）· `rules`（`/compile_rules`：写作台的自由文本规则编成写后检查）· `hidden`（暗题：人感题库每季度 1/3 不进任何给写手看的输出）· `api`（HTTP `/judge` · `/judge_draft` · `/compile_rules`）· `mcp_server`（内部 / 运维机器用的 stdio MCP：HTTP 服务的薄客户端，不持 Jev 密钥、不读题库；写手的判稿入口在写作台 deskcore，见 docs/31 §5.4） |
 | `banks/` | `vendor/feature_questions_v0_1.yaml` TV 的 fq 题库原样 vendor（SHA256SUMS 记校验和，测试钉住）· `comment_reader_v0.6` 读者侧评论 7 题（C4 原样，D-112 owner 10-16 验收：四道门槛题 + 三道参考题；写手评论工具和评论回填默认用它）· `comment_reader_v0.4` 上一版读者侧 7 题（v0.3 + 按篇 / 按项目的占位符，途鸽用例逐字等同 v0.3）· `comment_thread_v0.4` 评论区 4 题（v0.3 + praise_share 的出口「评论太少」；v0.3 留给金标准）· `comment_ops_v0.2` 运营侧 comment_intent（草案；蓝词植入改成只看文字能判的定义，state 不带蓝词清单）· `platform_health_v0.1` 大健康平台层（草案）· `human_feel_para_v0.2` 人感段级（草案；para_function 加出口「说不清」）· `external_triage_v0.1` 外部语料分诊 4 题（草案）· `gold/` 金标准 |
-| `scripts/` | `run_gold.py` 金标准评测 · `fq_shadow.py` 特征层影子跑（与现行抽取器 / D-081 表比对，出 SQL）· `backfill_comments.py` 评论回填 · `external_corpus.py` 外部语料定时抓取（`--dry-run` 算钱、`--probe` 钉字段、`--rows` 出两张表的行）· `apply_rows.py` 把 rows.json 经 PostgREST 写进 TV（TV 没有、也不该有执行任意 SQL 的 RPC）· `known_external_ids.py` 从 TV 拉已入库的外部笔记 id 做第二道去重 |
+| `scripts/` | `run_gold.py` 金标准评测 · `fq_shadow.py` 特征层影子跑（与现行抽取器 / D-081 表比对，出 SQL）· `backfill_comments.py` 评论回填 · `external_corpus.py` 外部语料定时抓取（`--dry-run` 算钱、`--probe` 钉字段、`--rows` 出两张表的行）· `apply_rows.py` 把 rows.json 经 PostgREST 写进 TV（TV 没有、也不该有执行任意 SQL 的 RPC）· `known_external_ids.py` 从 TV 拉已入库的外部笔记 id 做第二道去重 · `backfill_external_publish_time.py` 一次性回填旧外部笔记的 `publish_time`（默认只看不写） |
 | `config/` | `external_corpus.yaml`：品类、关键词、排序、页数、每次 / 每月上限、预算——量级和频率都在这里改 · `data_policy.yaml`：处方药项目、合同已清出境的项目、放行项目层的项目 · `hidden_rotation.yaml`：暗题的比例与手工指定 |
 | `migrations/` | `notes_v1_17_judge_subjects.sql`（账本加 comment / ssll_sample / external_note，prob 口径统一）· `notes_v1_18_external_notes.sql`（外部笔记表 + 参考分布视图 `v_external_reference`） |
 | `fixtures/` | gate1 的 50 篇笔记 + Opus 答案（覆盖其中 47 篇，所以报告里有 921 与 999 两个分母）+ D-081 Jev 表；33 条运营评论（运营前缀【贴主回复】等已剥掉、角色已改正）；评论用例 |
@@ -31,7 +31,7 @@ export TYPESAFE_API_KEY=...                     # Jev 密钥，只在服务端
 python3 -m pytest -q                            # 全 mock
 python3 scripts/run_gold.py banks/comment_reader_v0.4.yaml fixtures/comment_cases.json --gold banks/gold/comment_reader_gold_v0.2_proposed.yaml   # 占位符从用例文件的 fill 填
 python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --opus fixtures/fq_opus_gate1_50.tsv --gate1 fixtures/fq_jev_d081_A_gate1_50.tsv --out fq.md --sql fq.sql --run-tag shadow-$(date +%F)
-uvicorn judge.api:app --port 8080              # HTTP：POST /judge（一个题库、一批 subject，并行）· POST /judge_draft（一篇稿、多层题库、带修改单）· POST /compile_rules（规则编成写后检查）· GET /banks · GET /health（不鉴权）
+uvicorn judge.api:app --port 8080              # HTTP：POST /judge（一个题库、一批 subject，并行）· POST /judge_draft（一篇稿、多层题库、带修改单）· POST /compile_rules（规则编成写后检查）· GET /banks · GET /health（不鉴权；回显 `policy_sha256`，两份配置坏了回 503）
 JUDGE_URL=https://… JUDGE_API_KEY=… python3 -m judge.mcp_server   # 内部 / 运维机器的 MCP 工具（上面那个 HTTP 服务的薄客户端）：judge_draft · repair_plan_for · list_banks。写手不用它：这三个工具 2026-10-09 起由写作台 deskcore 转发（写手只配 deskcore 那一个 MCP）；
                                                 #   旧 stdio MCP 的 judge_comments · comment_repair_plan_for · judge_thread 仍为显式本机路径；写手通过 deskcore 转发已实现的评论HTTP（默认关闭），见 HANDOFF
 python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要花多少钱；--probe 花一次请求钉字段；正式跑由 .github/workflows/external-corpus.yml 每周一、周四触发
@@ -56,10 +56,15 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
   通用层（fq、人感、评论、三省六部二审、外部分诊）+ 平台层照跑；项目层（brief / 内联 `project_bank` / 项目题库 / `/compile_rules` 的规则原文）只有 `project_layer_cleared` 里的项目才跑，否则整层去掉并在响应的 `policy.dropped_banks` 回显（`/compile_rules` 直接 403）。
   **2026-10-20 起 `project_layer_cleared: ["*"]`**：owner 拍板项目层对所有项目放行（原话「全部放行，一次到位」），`*` = 所有项目，显式列项目代号照旧认；YAML 里 `*` 必须带引号。
   处方药闸不受影响、仍先执行：处方药项目（`rx_categories` / `rx_projects`）的未发布稿在合同确认、加进 `rx_cleared` 之前一律 403，一次 Jev 都不调（`rx_cleared` 不认通配）。规则只在服务端执行一遍：MCP 是 `/judge_draft` 的薄客户端，只把 `project` / `category` 传过去，403 的 detail 原样带回写手。
+  **配置坏了直接报错**（2026-11-04，审计 11-02 F15）：`data_policy.yaml` / `hidden_rotation.yaml` 缺文件、YAML 读不出、少键多键、名单不是字符串列表、`rx_*` 里写了 `"*"`，都不再静默回落成空配置（以前缺文件等于「没有处方药项目」「没有暗题」）。
+  服务启动时两份都先校验，坏了起不来、Railway 的 `/health` 探活不过；运行中 `/health` 每次重新校验两份，哪份坏了都回 503（`ok=false`、`config_error` 说清哪里坏）。
+  别的端点只在读到坏的那份时回 503（detail 以 `config:` 开头），在调 Jev 之前就返回；不读那份的端点照常（`/judge` 和两个评论端点不读 `hidden_rotation.yaml`，`/banks` 不读 `data_policy.yaml`）。
+  `/health` 回显 `policy_sha256` = `data_policy.yaml` 文件字节的 sha256：和仓里 `sha256sum config/data_policy.yaml` 一致，就说明生产跑的是仓里这份出境规则（J-10，不用带鉴权的请求）。
 - **Jev 格式题的 `scope`**（2026-10-20）：Jev 格式题（含内联 `project_bank`）可选写 `scope: title | body | full`。只在 `/judge_draft` 的平台层 / 项目层起作用：题干前加「只看【标题】」之类的提示；
   答「是」的证据，`title` 只在标题里找、`full` 在「标题（自成一句）+ 正文各句」里找；稿子没标题时 `title` 题不问、记 `no_title`（不算 unjudged，同 fq）。不写 `scope` 的题行为不变：证据只从正文句里选。
-- **暗题**（docs/00 #4，`judge/hidden.py` + `config/hidden_rotation.yaml`）：人感题库每季度按 sha256(题号|季度) 自动换 1/3；暗题照判、照落账本、照算硬伤，
-  但不出现在修改单、`/judge_draft` 的 profile / detail / plan / ledger_rows、`/banks` 与 MCP `list_banks` 的题号列表里。
+- **暗题**（docs/00 #4，`judge/hidden.py` + `config/hidden_rotation.yaml`）：人感题库每季度按 sha256(题号|季度) 自动换 1/3；暗题照判（段级）、照落账本，
+  **不算硬伤、不影响 `passed`**：人感题库只在段级判，硬伤只看篇级的 `hard_rules`（fq / 平台 / 项目层）；暗题命中时修改单里命中的每一段各一条「第 N 段有一项不公开的检查没过：<段首 60 字>…」，不带题号和答案；修改单的段级条目只来自文案腔、总结收尾、评价词堆叠三项检查，暗题落在别的题上时不进修改单，只照判、照落账本（2026-11-04 改正：以前这里写「照算硬伤」，和代码不符，审计 11-02 F03）。
+  暗题的题号、题干、答案不出现在修改单、`/judge_draft` 的 profile / detail / plan / ledger_rows、`/banks` 与 MCP `list_banks` 的题号列表里。
   `judge_paras=on_fail`（默认）时篇级没硬伤也要把暗题逐段判一遍（暗题防的就是对着公开题库写、篇级全过的稿子）；`never` 一次段级调用都不发，暗题也不判。
   段级结果（含暗题）以 `subject_id = <稿 id>:p<段号>` 写进账本；`/judge` 的 ledger_rows 照带全部题，调用方不得转给写手。
 - `write=true` 时账本**可能写到一半**（PostgREST 一批一个事务，批之间没有）。2026-10-09 起 `/judge` / `/judge_draft` 不再因此 500：
@@ -136,6 +141,8 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 默认配置（2026-11-02 起）：8 品类（戒烟、鼻炎、运动补给、术后营养、求职留学、家居家电、个护、藻油）× 4 词 × 2 排序 × 2 页 = 128 页，每品类每次最多 40 篇全文，最坏 4.48 美元 / 次（单次硬上限 6 美元）；2026-11-03 起每周一、周四各跑一次（以前每周一一次），一个月最多 9 次，每月最坏 9 次 ≈ 40.3 美元（平均每月约 8.7 次时约 39 美元，手动触发另算）；每品类每月 360 篇（= 9 × 40，定时跑拦不住任何一次）只封顶入库篇数、不封顶花费；实际到上限的品类就停搜，按 10 月一周一次的量推一次约 3.5～3.9 美元，一周两次后每次新帖少一些、花得更少。加品类要同时在 TV 的 `prompts/external_shelf_v1.json` 补同名一行（外部参考书架按品类名对表），`budget_usd_per_run` 不能低于 `--dry-run` 算出的最坏花费（测试钉住）。
 去重靠 `state/external_corpus_state.json`（GitHub Actions 用 cache 保留）和 `--known-ids`（账本里已有的 external note_id）；一条笔记只在有了结局（分诊拒绝 / 太短 / 入账本）后才记为「见过」，因上限、预算或报错没看的下次还会看。从库里删掉一批外部笔记后要重抓，手动触发时设 `fresh_state=true`（不恢复 cache 里的 state）。
 翻页按 TikHub 的规矩带首页返回的 `search_id` / `search_session_id`；单条笔记或单页搜索出错只记进报告、不中止整次运行。写库走 `scripts/apply_rows.py`（PostgREST upsert，外部笔记表在前、账本行在后），产物先上传再写库。`--mock` 的 state 默认落到临时目录。
+写库密钥（`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`）在 workflow 一开头就查（`apply_rows.py --check-env`），缺了直接红、一次付费调用都不发；`known_external_ids.py` / `apply_rows.py` 在 GitHub Actions 里缺密钥也退非零（2026-11-04，审计 11-02 F16：以前照样先花钱抓取、判定，写库那步退 0、job 绿，cache 存下 seen state，下周这批被跳过）。本机跑没有密钥时照旧：known_ids 为空、rows 留给人拿 SQL 编辑器跑。
+`external_notes.publish_time`：平台给了照存；没给（TikHub 搜索页一直不给）就从 note_id 解，前 8 位十六进制 = 发帖时刻的 unix 秒，写成 UTC 的 ISO 时间（和 `fetched_at` 同格式），和 TV 书架、写作台发牌各自现解同一个口径（J-17，TV D-138）；解出来早于 2013 年或晚于抓取 1 天以上的留空。迁移 v1_18 这一列的注释「平台给什么存什么，不推算」是建表时的口径，现在以这里为准。2026-11-04 之前入库的行用 `scripts/backfill_external_publish_time.py` 补（默认只看；`--sql` 出 UPDATE 给 SQL editor，`--apply` 才写，都只补仍为空的行）。
 
 ## 三个仓库怎么接
 

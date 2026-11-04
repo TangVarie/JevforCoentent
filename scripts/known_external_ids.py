@@ -11,7 +11,9 @@
 不够的下周重抓重判（多花一次钱，不丢）。账本读不到（TV 还没跑 notes_v1_17）就退回只看 external_notes，并把原因打出来。
 
   python3 scripts/known_external_ids.py state/known_ids.txt
-没配 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY、或表还没建（TV 没跑 notes_v1_18）→ 写一个空文件、打印原因、退出 0：去重退回只靠 state。
+表还没建（TV 没跑 notes_v1_18）→ 写一个空文件、打印原因、退出 0：去重退回只靠 state。
+没配 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY：本机跑同上（空文件、退 0）；在 GitHub Actions 里（GITHUB_ACTIONS=true）退 1、job 红
+（2026-11-04，审计 11-02 F16）：这一步在抓取之前，缺密钥的话后面写库也写不进去，不该先花钱。
 """
 from __future__ import annotations
 
@@ -76,6 +78,10 @@ def main(argv: list) -> int:
     out = Path(argv[0] if argv else "state/known_ids.txt")
     out.parent.mkdir(parents=True, exist_ok=True)
     url, key = os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not (url and key) and os.environ.get("GITHUB_ACTIONS") == "true":
+        miss = [k for k, v in (("SUPABASE_URL", url), ("SUPABASE_SERVICE_ROLE_KEY", key)) if not v]
+        print(f"::error::缺 {' / '.join(miss)}：抓完也写不进库，这次不抓（一次付费调用都没发）", file=sys.stderr)
+        return 1
     if not (url and key):
         out.write_text("", encoding="utf-8")
         print("没有 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY：known_ids 为空，去重只靠 state")

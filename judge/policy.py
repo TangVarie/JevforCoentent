@@ -10,9 +10,13 @@ HTTP（/judge、/judge_draft）和写手侧 MCP 共用这一处判断，配置�
     project_layer_cleared 里写 "*" = 所有项目（2026-10-20 owner 拍板「全部放行，一次到位」）；显式列项目代号照旧有效。
     "*" 只认在 project_layer_cleared 里：处方药闸（rx_projects / rx_cleared）不认通配、照旧先执行，没清出境的处方药项目照样 403。
   · POST /compile_rules（写作台的自由文本规则编成写后检查）：规则原文就是项目层内容，按未发布稿过同一套判断，项目层没放行 → 403。
+  · 配置文件缺失、读不出或形状不对 → 直接抛 PolicyConfigError（2026-11-04，审计 11-02 F15）。以前缺文件时 load() 静默回 {}，
+    处方药名单整个变空、处方药闸等于没装（今天唯一的处方药项目碰巧已放行，才没出事）。服务启动时先校验一遍，坏部署 /health 就失败；
+    /health 回显 policy_sha256 = 这份文件字节的 sha256，和仓里 `sha256sum config/data_policy.yaml` 对得上就是同一份（J-10）。
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,10 +38,60 @@ class PolicyInputError(ValueError):
     """未发布稿没带 project 等：HTTP 映射成 422。"""
 
 
+class PolicyConfigError(RuntimeError):
+    """config/data_policy.yaml 缺失、读不出或形状不对：HTTP 映射成 503，一次 Jev 都不调。不回落成空配置（审计 11-02 F15）。"""
+
+
+PROJECT_LAYER_ALL = "*"
+# 四个键都必须写（空名单写 []）：少一个就是配置坏了，不能当「没有处方药项目」处理。多出来的键也算坏：
+# 比如把 rx_projects 拼错成 rx_project 再补一行，新处方药项目就悄悄没进闸。
+REQUIRED_KEYS = ("rx_categories", "rx_projects", "rx_cleared", "project_layer_cleared")
+
+
+def _read() -> bytes:
+    try:
+        return CONFIG.read_bytes()
+    except FileNotFoundError:
+        raise PolicyConfigError(f"数据出境配置不存在：{CONFIG}（处方药闸靠它；部署要带上 config/data_policy.yaml，或用 JUDGE_POLICY_CONFIG 指对位置）") from None
+    except OSError as exc:
+        raise PolicyConfigError(f"数据出境配置读不了：{CONFIG}：{exc}") from None
+
+
+def validate(cfg) -> dict:
+    """形状校验。合格原样返回；不合格抛 PolicyConfigError，说清哪一个键错了。"""
+    if not isinstance(cfg, dict):
+        raise PolicyConfigError(f"数据出境配置 {CONFIG} 顶层要是映射（四个键：{', '.join(REQUIRED_KEYS)}），读到的是 {type(cfg).__name__}")
+    missing = [k for k in REQUIRED_KEYS if k not in cfg]
+    unknown = sorted(str(k) for k in cfg if k not in REQUIRED_KEYS)
+    if missing or unknown:
+        raise PolicyConfigError(f"数据出境配置 {CONFIG} 的键不对：缺 {missing}，多出 {unknown}（四个键都要写，空名单写 []）")
+    for k in REQUIRED_KEYS:
+        v = cfg[k]
+        if not isinstance(v, list) or not all(isinstance(x, str) and x.strip() for x in v):
+            raise PolicyConfigError(f"数据出境配置 {CONFIG} 的 {k} 要是字符串列表（例：[OKMAN, OKMAN_phase1]），读到的是 {v!r}")
+        if k != "project_layer_cleared" and PROJECT_LAYER_ALL in {x.strip() for x in v}:
+            raise PolicyConfigError(f"数据出境配置 {CONFIG} 的 {k} 里不能写 \"*\"：通配只在 project_layer_cleared 认，处方药闸要逐个写项目代号")
+    return cfg
+
+
+def parse(raw: bytes) -> dict:
+    try:
+        cfg = yaml.safe_load(raw.decode("utf-8"))
+    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise PolicyConfigError(f"数据出境配置 {CONFIG} 读不出：{exc}（YAML 里 * 要带引号写成 \"*\"）") from None
+    return validate(cfg)
+
+
 def load() -> dict:
-    if not CONFIG.exists():
-        return {}
-    return yaml.safe_load(CONFIG.read_text(encoding="utf-8")) or {}
+    """读并校验 config/data_policy.yaml。缺文件、YAML 坏、形状不对都抛 PolicyConfigError，不再静默回 {}。"""
+    return parse(_read())
+
+
+def config_sha256() -> str:
+    """校验过的配置文件字节的 sha256（/health 回显，J-10）。配置坏了照样抛，不给坏文件算指纹。"""
+    raw = _read()
+    parse(raw)
+    return hashlib.sha256(raw).hexdigest()
 
 
 def layer_of(bank_name: str) -> str:
@@ -80,9 +134,6 @@ def decide(subject_types: Iterable[str], project: Optional[str] = None, category
         raise PolicyBlocked(f"policy: 处方药项目 {project} 的未发布稿不出境，合同确认后把它加进 config/data_policy.yaml 的 rx_cleared（docs/00 #7）")
     return Decision(published=False, project=project, category=category,
                     project_layer=project_layer_cleared(project, cfg))
-
-
-PROJECT_LAYER_ALL = "*"
 
 
 def project_layer_cleared(project: Optional[str], cfg: Optional[dict] = None) -> bool:

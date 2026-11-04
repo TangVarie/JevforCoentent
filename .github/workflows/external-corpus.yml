@@ -2,7 +2,9 @@ name: external-corpus
 # 每周一、周四 03:07 UTC（北京时间 11:07）各抓一次外部语料（2026-11-03 起；以前每周一一次）。量级和预算在 config/external_corpus.yaml，这里只管频率。
 # 一周两次是为了新帖早几天进书架：一个项目一个周期约一个月，等一周才见到新外部参考太慢。再密（每天）每月最坏要 130 多美元，而同一组关键词隔天搜大多是看过的帖。
 # 分钟故意不取 0：GitHub 整点的定时队列最挤、漂得最厉害（TV 的 daily-sync 02:17 实际 08:04–09:00 才起），错开一点。
-# 顺序：从 TV 拉已入库的外部笔记 id（第二道去重）→ 抓取 → 先上传产物（哪怕后面失败）→ 经 PostgREST 写库（没配密钥就跳过并提示）。
+# 顺序：先查写库密钥（缺就红，一次付费调用都不发）→ 从 TV 拉已入库的外部笔记 id（第二道去重）→ 抓取 → 先上传产物（哪怕后面失败）→ 经 PostgREST 写库。
+# ⚠️ 缺 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 时一开始就红（2026-11-04，审计 11-02 F16）。以前照样先花钱抓取、判定，写库那步打一行提示退 0、
+#   job 照绿、cache 把 seen state 存下来，下周这批被跳过，只剩 artifact 能手动重放。现在 known_ids / 写库两个脚本在 Actions 里缺密钥也退非零。
 # ⚠️ 写库失败让 job 红（2026-10-08，TV 审计 A-08）。以前这一步 continue-on-error：job 绿、actions/cache 把 run 步已经存好的
 #   seen state 保存下来、而账本里没有这批笔记（known_ids 也不会有）→ 下周按 seen 跳过、永远不再抓 —— 那一周的钱和笔记静默丢掉，
 #   唯一痕迹是 artifact。现在 job 红 = cache 不保存 = state 回到上周 = 下周重抓这批（多花一次钱，不丢）；邮件发给改过 cron 那行的人。
@@ -38,6 +40,10 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
+      # 写库密钥先查，在任何付费调用（TikHub 搜索 / 取全文、Jev 判定）之前：缺了抓完也写不进库（AU-F16）。只看在不在，不打印值。
+      - name: check DB secrets before any paid call
+        if: github.event.inputs.dry_run != 'true'
+        run: python3 scripts/apply_rows.py --check-env
       - name: restore state
         uses: actions/cache@v4
         with:
@@ -65,6 +71,6 @@ jobs:
         with:
           name: "external-corpus-${{ github.run_id }}"
           path: out
-      - name: write to db via PostgREST (skipped with a notice when the key is absent; needs TV notes_v1_17 + v1_18; failure makes the job red so the cache does not keep a seen-but-unwritten state)
+      - name: write to db via PostgREST (missing key or failed write makes the job red so the cache does not keep a seen-but-unwritten state; needs TV notes_v1_17 + v1_18)
         if: always() && github.event.inputs.dry_run != 'true' && hashFiles('out/rows.json') != ''
         run: python3 scripts/apply_rows.py out/rows.json
