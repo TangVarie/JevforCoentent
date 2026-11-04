@@ -140,3 +140,29 @@ def test_healthy_mock_run_keeps_no_search_samples():
 def test_masking_replaces_secret_like_fields_and_the_api_key():
     raw = {"a": {"Authorization": "Bearer x", "cookie": "c", "items": ["k-123 in text"]}, "sign": "", "title": "ok"}
     assert E._masked(raw, "k-123") == {"a": {"Authorization": "***", "cookie": "***", "items": ["*** in text"]}, "sign": "", "title": "ok"}
+
+
+def _wrapped(inner: dict) -> dict:
+    """里层外壳包着一页正常的笔记：{code: 200, data: {…inner, data: {items: [20 篇]}}}。"""
+    page = E.mock_search({"keyword": "戒烟", "page": 1})["data"]
+    return {"code": 200, "data": dict(inner, data=page)}
+
+
+@pytest.mark.parametrize("inner", [{"code": 1000, "msg": "ok"}, {"success": False, "code": 0}, {"code": -1}])
+def test_page_with_recognisable_notes_is_used_whatever_the_nested_code(inner):
+    """业务码只在一条笔记都没认出来时才用来判「报错」：认得出笔记的页照常处理（真实外壳没在仓库里钉过，别把好页扔掉）。"""
+    raw = _wrapped(inner)
+    assert E._search_business_error(raw)                      # 单看业务码像报错
+    prov = _provider(lambda params: raw)
+    notes, _ = prov.search("戒烟", 1, "general", None)
+    assert len(notes) == 20 and prov.search_samples == []
+    triage, fq = _banks()
+    rep = E.run_once(_cfg(), _provider(lambda params: raw), JevClient(mock=True), triage, fq, {"seen": {}, "monthly": {}})
+    assert rep.errors == [] and rep.systemic_failure == "" and rep.candidates > 0 and rep.judged > 0
+
+
+def test_business_error_without_notes_still_raises():
+    raw = {"code": 200, "data": {"code": 1000, "msg": "x", "data": {"items": []}}}
+    with pytest.raises(E.SearchUnparseable, match="data.code=1000"):
+        _provider(lambda params: raw).search("戒烟", 1, "general", None)
+

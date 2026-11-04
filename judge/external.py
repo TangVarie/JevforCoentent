@@ -56,7 +56,7 @@ class DetailEndpointDown(RuntimeError):
 
 
 class SearchUnparseable(RuntimeError):
-    """搜索接口 HTTP 200，但业务码报错（顶层 code ≠ 200，或里层 success=false / code 不是 0 或 200）。这次请求已计费。"""
+    """搜索接口 HTTP 200、一条笔记都没认出来，且业务码报错（顶层 code ≠ 200，或里层 success=false / code 不是 0 或 200）。这次请求已计费。"""
 
 
 class JevIncomplete(RuntimeError):
@@ -201,7 +201,7 @@ def _as_int(v: Any) -> Optional[int]:
 
 
 def _search_business_error(raw: Any) -> str:
-    """搜索返回 HTTP 200 但业务上报错时说明哪里错；没报错返回 ""。
+    """搜索返回 HTTP 200 但业务上报错时说明哪里错；没报错返回 ""。只在这页一条笔记都没认出来时才查（认得出笔记就照常用）。
     顶层 code 有值且不是 200、或 success=false；里层 data.success=false、或 data 没说 success 而 data.code 不是 0 / 200。
     （TikHub 成功时是 {code: 200, data: {code: 0, success: true, data: {items…}}}；详情接口已见过 code 200 外壳包着上游失败。）"""
     if not isinstance(raw, dict):
@@ -291,17 +291,17 @@ class TikHubClient:
         if page > 1 and sess:
             params.update(sess)
         raw = self._get(SEARCH_PATH, params)
-        bad = _search_business_error(raw)
-        if bad:                                      # HTTP 200 的业务报错：当这页搜索失败（上层记错、不翻后面的页、全失败就红）
+        notes = _find_notes(raw)
+        if not notes:
             self._keep_search_sample(keyword, page, sort_type, raw)
-            raise SearchUnparseable(f"搜索业务报错（{bad}）：{json.dumps(_masked(raw, self.api_key), ensure_ascii=False)[:300]}")
+            # 业务码只在一条笔记都没认出来时才算数：真实外壳的里层 code 没钉过，认得出笔记的页不能因为它被扔掉
+            bad = _search_business_error(raw)
+            if bad:                                  # HTTP 200 的业务报错：当这页搜索失败（上层记错、不翻后面的页、全失败就红）
+                raise SearchUnparseable(f"搜索业务报错（{bad}）：{json.dumps(_masked(raw, self.api_key), ensure_ascii=False)[:300]}")
         if not sess:
             found = _find_session(raw)
             if found:
                 self._sessions[(keyword, sort_type)] = found
-        notes = _find_notes(raw)
-        if not notes:
-            self._keep_search_sample(keyword, page, sort_type, raw)
         return notes, raw
 
     def _keep_search_sample(self, keyword: str, page: int, sort_type: str, raw: Any) -> None:

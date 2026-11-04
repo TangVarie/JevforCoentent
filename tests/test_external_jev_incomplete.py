@@ -183,3 +183,38 @@ def test_main_skips_notes_whose_ledger_is_all_missing(monkeypatch, tmp_path):
     out = tmp_path / "known.txt"
     assert K.main([str(out)]) == 0
     assert out.read_text(encoding="utf-8").split() == ["n1"], "n2 的 20 行全是 missing：不算写齐，下次重抓重判"
+
+
+class OneSidedTriageJev(FlakyJev):
+    """分诊那次只回一个判成的、决定性的拒绝答案，另一题缺；fq / 证据照常。"""
+
+    def __init__(self, answers: dict):
+        super().__init__(lambda k, n: False)
+        self.answers = answers
+
+    def call(self, body):
+        r = super().call(body)
+        return dict(r, answers=dict(self.answers)) if _kind(body) == "triage" else r
+
+
+@pytest.mark.parametrize("answers", [
+    {"on_topic": {"type": "noul", "noul": 0.05}},                                             # 判成「否」、voice 缺
+    {"voice": {"type": "choice", "choice": "商家或品牌", "probabilities": {"商家或品牌": 0.9}}},  # 判成不留的视角、on_topic 缺
+    {"on_topic": {"type": "noul", "noul": 0.05}, "voice": {"type": "choice", "choice": "外星人", "probabilities": {"外星人": 0.9}}},
+])
+def test_one_valid_decisive_reject_is_a_reject_even_if_the_other_gate_answer_is_missing(answers):
+    triage, fq = _banks()
+    state = {"seen": {}, "monthly": {}}
+    rep = E.run_once(_cfg(), E.TikHubClient(budget=E.Budget(limit_usd=5.0), mock=True), OneSidedTriageJev(answers),
+                     triage, fq, state)
+    assert rep.errors == [] and rep.note_errors == 0 and rep.processed > 0 and rep.judged == 0
+    assert state["seen"] and all(v["why"] == "triage_reject" for v in state["seen"].values())
+
+
+def test_on_topic_yes_with_voice_missing_is_still_not_judged():
+    triage, fq = _banks()
+    state = {"seen": {}, "monthly": {}}
+    rep = E.run_once(_cfg(), E.TikHubClient(budget=E.Budget(limit_usd=5.0), mock=True),
+                     OneSidedTriageJev({"on_topic": {"type": "noul", "noul": 0.95}}), triage, fq, state)
+    assert rep.processed > 0 and rep.note_errors == rep.processed and state["seen"] == {}
+    assert all(e.startswith("JevIncomplete") and "voice=missing" in e for _, e in rep.errors)
