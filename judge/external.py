@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -192,6 +193,48 @@ def _detail_text(raw: Any, note_id: str) -> tuple:
     return title, body
 
 
+def _as_int(v: Any) -> Optional[int]:
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _search_business_error(raw: Any) -> str:
+    """搜索返回 HTTP 200 但业务上报错时说明哪里错；没报错返回 ""。
+    顶层 code 有值且不是 200、或 success=false；里层 data.success=false、或 data 没说 success 而 data.code 不是 0 / 200。
+    （TikHub 成功时是 {code: 200, data: {code: 0, success: true, data: {items…}}}；详情接口已见过 code 200 外壳包着上游失败。）"""
+    if not isinstance(raw, dict):
+        return "返回不是 JSON 对象"
+    if raw.get("code") is not None and _as_int(raw["code"]) != 200:
+        return f"code={raw['code']}"
+    if raw.get("success") is False:
+        return "success=false"
+    data = raw.get("data")
+    if isinstance(data, dict):
+        if data.get("success") is False:
+            return "data.success=false"
+        if data.get("success") is not True and data.get("code") is not None and _as_int(data["code"]) not in (0, 200):
+            return f"data.code={data['code']}"
+    return ""
+
+
+_SECRETISH = re.compile(r"token|secret|auth|cookie|sign|passw|api_?key|access_?key|^key$", re.I)
+
+
+def _masked(obj: Any, api_key: str = "", depth: int = 0) -> Any:
+    """原始返回脱敏后再进报错信息 / 产物：像密钥的字段值换成 ***，回显里的 API key 也换掉。"""
+    if depth > 12:
+        return "…"
+    if isinstance(obj, dict):
+        return {k: ("***" if _SECRETISH.search(str(k)) and obj[k] not in (None, "") else _masked(obj[k], api_key, depth + 1)) for k in obj}
+    if isinstance(obj, list):
+        return [_masked(x, api_key, depth + 1) for x in obj]
+    if isinstance(obj, str) and api_key and api_key in obj:
+        return obj.replace(api_key, "***")
+    return obj
+
+
 def _find_session(obj: Any, depth: int = 0) -> dict:
     """搜索返回里的翻页会话：TikHub 要求第 2 页起回传首页给的 search_id / search_session_id（官方 OpenAPI 的「翻页说明」）。"""
     if depth > 5:
@@ -221,6 +264,7 @@ class TikHubClient:
         self.mock = mock
         self._sessions: dict = {}          # (keyword, sort_type) → {search_id, search_session_id}，翻页时回传
         self.detail_samples: list = []     # 前 DETAIL_SAMPLES 份详情原始返回，进产物
+        self.search_samples: list = []     # 前 SEARCH_SAMPLES 份「一条笔记都没认出来」的搜索返回（脱敏），进产物
         if not self.api_key and not mock:
             raise RuntimeError("没有 TIKHUB_API_KEY")
 
@@ -247,11 +291,22 @@ class TikHubClient:
         if page > 1 and sess:
             params.update(sess)
         raw = self._get(SEARCH_PATH, params)
+        bad = _search_business_error(raw)
+        if bad:                                      # HTTP 200 的业务报错：当这页搜索失败（上层记错、不翻后面的页、全失败就红）
+            self._keep_search_sample(keyword, page, sort_type, raw)
+            raise SearchUnparseable(f"搜索业务报错（{bad}）：{json.dumps(_masked(raw, self.api_key), ensure_ascii=False)[:300]}")
         if not sess:
             found = _find_session(raw)
             if found:
                 self._sessions[(keyword, sort_type)] = found
-        return _find_notes(raw), raw
+        notes = _find_notes(raw)
+        if not notes:
+            self._keep_search_sample(keyword, page, sort_type, raw)
+        return notes, raw
+
+    def _keep_search_sample(self, keyword: str, page: int, sort_type: str, raw: Any) -> None:
+        if len(self.search_samples) < SEARCH_SAMPLES:
+            self.search_samples.append({"keyword": keyword, "page": page, "sort_type": sort_type, "raw": _masked(raw, self.api_key)})
 
     def detail(self, note_id: str, note_type: str = "") -> tuple:
         """返回 ({title, desc}, 原始返回)；解析不出正文抛 DetailUnparseable（这次请求已计费）。"""
@@ -307,6 +362,8 @@ class RunReport:
     note_errors: int = 0
     detail_failed: int = 0         # 取全文失败的篇数（请求报错或解析不出正文；计在 note_errors 里）
     detail_samples: list = field(default_factory=list)
+    search_samples: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)    # 不至于红、但要人看一眼的（某品类搜了几页一条笔记都没认出来）
     systemic_failure: str = ""     # 全部搜索或全部笔记都失败：供应商 / Jev 挂了或密钥失效，脚本要让 job 红
     kept_notes: list = field(default_factory=list)
     rows: list = field(default_factory=list)
@@ -423,6 +480,8 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                         except Exception as exc:  # noqa: BLE001 — 供应商一页失败不中止整次运行；这个关键词×排序余下的页也不翻
                             err(f"search {kw}/{sort_type}/p{page}", exc, stats); break
                         rep.searched += 1; stats["searched"] += 1
+                        if not notes:
+                            break                                       # 这页一条笔记都没认出来：后面的页也不花钱翻
                         for raw in notes:
                             if not isinstance(raw, dict):
                                 continue
@@ -477,9 +536,21 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
         rep.stopped_reason = f"异常中止：{type(exc).__name__}: {exc}"
     rep.calls = provider.budget.calls; rep.spent_usd = provider.budget.spent
     rep.detail_samples = list(provider.detail_samples)
+    rep.search_samples = list(getattr(provider, "search_samples", []))
+    for name, s in rep.per_category.items():
+        if s["candidates"]:
+            continue
+        if s["searched"] >= 2:
+            rep.warnings.append(f"{name}：搜了 {s['searched']} 页，一条笔记都没认出来（关键词失效，或 TikHub 搜索返回格式变了；原始返回见产物 search_samples）")
+        elif s["searched"] == 0 and s["errors"]:
+            rep.warnings.append(f"{name}：搜索全部出错（{s['errors']} 处），这个品类本次一条没搜到")
     # 单条失败继续跑是为了不丢一整周；但「全部失败」是系统性故障（密钥失效 / 供应商或 Jev 挂了），不能悄悄绿着
     if rep.search_attempts and rep.searched == 0:
-        rep.systemic_failure = f"{rep.search_attempts} 次搜索请求全部失败：TikHub 不可用或 TIKHUB_API_KEY 失效"
+        rep.systemic_failure = f"{rep.search_attempts} 次搜索请求全部失败：TikHub 不可用、业务报错或 TIKHUB_API_KEY 失效"
+    elif rep.searched and rep.candidates == 0:
+        # 每页都「成功」却一条都没认出来：几十页全是真空结果不现实，多半是返回格式变了或外壳 200 里包着上游失败；白付搜索费还一直绿着
+        rep.systemic_failure = rep.systemic_failure or (f"{rep.searched} 页搜索都没认出一条笔记：TikHub 搜索返回格式变了或业务报错"
+                                                        f"（原始返回见产物 search_samples）")
     elif rep.processed and rep.note_errors == rep.processed:
         rep.systemic_failure = rep.systemic_failure or f"{rep.processed} 条笔记的分诊 / 取全文 / 打标全部失败：Jev 或 TikHub 详情接口不可用"
     return rep
@@ -551,6 +622,7 @@ def render_report(rep: RunReport, cfg: dict) -> str:
          + (f" · **提前停止：{rep.stopped_reason}**" if rep.stopped_reason else "")
          + (f" · **系统性故障：{rep.systemic_failure}**" if rep.systemic_failure else ""), "",
          f"搜索页 {rep.searched} · 候选 {rep.candidates} · 重复 {rep.duplicates} · 分诊通过 {rep.triaged_kept} · 取全文 {rep.fetched} · 太短丢弃 {rep.dropped_short} · 打标 {rep.judged} · 账本行 {len(rep.rows)} · 出错 {len(rep.errors)}", "",
+         *([f"注意：{w}" for w in rep.warnings] + [""] if rep.warnings else []),
          "| 品类 | 搜索页 | 候选 | 分诊通过 | 取全文 | 太短 | 打标 | 出错 | 备注 |", "|---|---|---|---|---|---|---|---|---|"]
     for name, s in rep.per_category.items():
         L.append(f"| {name} | {s['searched']} | {s['candidates']} | {s.get('triaged', 0)} | {s['fetched']} | {s.get('short', 0)} | {s['judged']} | {s.get('errors', 0)} | {s.get('note', '')} |")

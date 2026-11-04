@@ -27,7 +27,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from judge.banks import load_bank  # noqa: E402
 from judge.core import rows_to_sql  # noqa: E402
-from judge.external import Budget, TikHubClient, external_note_rows, load_state, render_report, rows_to_sql_external, run_once, save_state  # noqa: E402
+from judge.external import Budget, SearchUnparseable, TikHubClient, external_note_rows, load_state, render_report, rows_to_sql_external, run_once, save_state  # noqa: E402
 from judge.jev_client import JevClient, JevError  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -73,7 +73,10 @@ def main():
     except RuntimeError as exc:
         sys.exit(str(exc))
     if args.probe:
-        notes, raw = provider.search(args.keyword, 1, "general", cfg.get("note_type"))
+        try:
+            notes, raw = provider.search(args.keyword, 1, "general", cfg.get("note_type"))
+        except SearchUnparseable as exc:
+            sys.exit(f"{exc}\n花费 {budget.spent} 美元")
         print(json.dumps(raw, ensure_ascii=False)[:3000]); print(f"\n识别出 {len(notes)} 条笔记；花费 {budget.spent} 美元"); return
     try:
         jev = JevClient(mock=args.mock)
@@ -99,7 +102,10 @@ def main():
     if args.rows:
         Path(args.rows).write_text(json.dumps({"run_id": run_id, "external_notes": note_rows, "answers": rep.rows}, ensure_ascii=False), encoding="utf-8")
     if args.raw:
-        Path(args.raw).write_text(json.dumps({"run_id": run_id, "kept": rep.kept_notes, "detail_samples": rep.detail_samples}, ensure_ascii=False, indent=1), encoding="utf-8")
+        Path(args.raw).write_text(json.dumps({"run_id": run_id, "kept": rep.kept_notes, "detail_samples": rep.detail_samples,
+                                              "search_samples": rep.search_samples}, ensure_ascii=False, indent=1), encoding="utf-8")
+    for w in rep.warnings:
+        print(f"::warning::{w}", file=sys.stderr)
     if rep.stopped_reason:
         # 只告警不改退出码：job 一红，actions/cache 就不保存 state、写库步也被跳过，这周花钱看过的下周会重看。
         print(f"::warning::运行提前停止：{rep.stopped_reason}（产物与 state 已写出）", file=sys.stderr)
