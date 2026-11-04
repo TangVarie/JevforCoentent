@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from .banks import Bank
+from .banks import INVALID_MISSING, INVALID_OUT_OF_VOCAB, Bank
 from .core import judge_note, judge_state, ledger_rows
 from .jev_client import JevClient
 
@@ -32,6 +32,10 @@ DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"   # 官方文�
 USER_AGENT = "bywood-judge/0.1 (+https://github.com/TangVarie/JevforCoentent)"
 DETAIL_PROBE = 5           # 连着这么多篇取全文失败（接口报错或解析不出正文）→ 整次停，不再按篇白付费
 DETAIL_SAMPLES = 3         # 每次运行留几份详情原始返回进产物，字段变了能直接看
+SEARCH_SAMPLES = 1         # 每次运行留几份「一条笔记都没认出来」的搜索原始返回进产物（脱敏），格式变了能直接看
+# Jev 回了 200 却没答（missing）或答案不在选项里（out_of_vocab）：这篇「没判成」，不是「判了是否」。
+# 设计内的无效（no_title / text_too_short / evidence_not_found / span_truncated）是判完了的结论，照常入账本。
+JEV_INCOMPLETE = frozenset({INVALID_MISSING, INVALID_OUT_OF_VOCAB})
 
 
 class BudgetExceeded(Exception):
@@ -48,6 +52,20 @@ class DetailUnparseable(DetailFailed):
 
 class DetailEndpointDown(RuntimeError):
     pass
+
+
+class SearchUnparseable(RuntimeError):
+    """搜索接口 HTTP 200，但业务码报错（顶层 code ≠ 200，或里层 success=false / code 不是 0 或 200）。这次请求已计费。"""
+
+
+class JevIncomplete(RuntimeError):
+    """Jev 返回里缺题或答案不在选项里（invalid_reason = missing / out_of_vocab）：这篇没判成，不进 seen、不入账本，下次重判。"""
+
+
+def _incomplete(items: dict, qids: Optional[tuple] = None) -> list:
+    """没判成的题：["qid=missing", ...]（按题号排）。qids 给了就只看这几题。"""
+    return sorted(f"{q}={it['invalid_reason']}" for q, it in items.items()
+                  if (qids is None or q in qids) and (it or {}).get("invalid_reason") in JEV_INCOMPLETE)
 
 
 @dataclass
@@ -313,11 +331,18 @@ def triage_state(n: dict, category: str) -> dict:
 
 def _process_note(n: dict, name: str, cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Bank, fq_bank: Bank,
                   rep: RunReport, stats: dict, keep_voices: set, min_chars: int) -> str:
-    """一条候选从分诊到入账本。返回结局：triage_reject / short / kept。抛 BudgetExceeded 由上层停整次运行；其它异常由上层记错继续。"""
+    """一条候选从分诊到入账本。返回结局：triage_reject / short / kept。抛 BudgetExceeded 由上层停整次运行；其它异常由上层记错继续。
+    Jev 缺答 / 答案不在选项里 → JevIncomplete（上层记错、不进 seen，下次重判）：不能把「没判成」当成「分诊拒绝」或「判完了」。"""
     tr = judge_state(jev, triage_bank, n["note_id"], triage_state(n, name), subject_type="external_note")
     it = tr.items
+    bad = _incomplete(it, ("on_topic", "voice"))
+    if bad:
+        raise JevIncomplete(f"分诊没判成（{', '.join(bad)}）")
     if it.get("on_topic", {}).get("answer") != "是" or it.get("voice", {}).get("answer") not in keep_voices:
         return "triage_reject"
+    bad = _incomplete(it)                               # 留下的四题都要入账本 / 外部笔记表：取全文（付费）之前就查
+    if bad:
+        raise JevIncomplete(f"分诊没判成（{', '.join(bad)}）")
     n["triage"] = {k: v["answer"] for k, v in it.items()}
     # 一律取全文：搜索页的摘要被 TikHub 截在 60 字，拿摘要打 fq 等于只看半句话（10-08 首跑 200 篇全是 60 字片段）
     stats["detail_calls"] += 1                          # 每品类每次的全文上限按请求数算（含失败 / 太短的），plan() 的最坏花费才成立
@@ -336,6 +361,9 @@ def _process_note(n: dict, name: str, cfg: dict, provider: TikHubClient, jev: Je
         return "short"
     raw_text = f"标题：{n['title']}\n正文：{n['body']}" if n["title"] else n["body"]
     jr = judge_note(jev, fq_bank, n["note_id"], raw_text, title_extraction="markers", subject_type="external_note")
+    bad = _incomplete(jr.items)
+    if bad:                                             # 全文这次已付费；下次重取一次（0.01 美元），总比账本里留一篇缺题的、被 known_ids 当成写齐强
+        raise JevIncomplete(f"fq 打标没判成 {len(bad)} 题（{', '.join(bad[:5])}）")
     rep.rows.extend(ledger_rows(jr, fq_bank, run_tag="external"))
     rep.rows.extend(ledger_rows(tr, triage_bank, run_tag="external"))
     n["fq"] = {k: v.get("answer") for k, v in jr.items.items()}
@@ -409,6 +437,7 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                             if cap_reached():
                                 done = True; continue                               # 到上限：本页剩下的只数不看，也不进 seen
                             rep.processed += 1
+                            fetched_before = rep.fetched
                             try:
                                 outcome = _process_note(n, name, cfg, provider, jev, triage_bank, fq_bank, rep, stats, keep_voices, min_chars)
                             except BudgetExceeded:
@@ -420,6 +449,8 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                                     if detail_streak >= DETAIL_PROBE:
                                         raise DetailEndpointDown(f"连续 {DETAIL_PROBE} 篇取全文失败（TikHub 详情接口报错或返回里找不到正文），整次停；"
                                                                  f"原始返回见产物 detail_samples")
+                                elif rep.fetched > fetched_before:
+                                    detail_streak = 0                       # 全文取到了、是后面 Jev 没判成：详情接口是好的
                                 continue
                             seen[n["note_id"]] = {"cat": name, "kw": kw, "at": rep.started, "kept": outcome == "kept", "why": outcome}
                             if outcome != "triage_reject":
