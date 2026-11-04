@@ -58,8 +58,9 @@
   write=true 和带暗题的账本行（审计 A-09，codex review on #7）。没配 JUDGE_API_KEY 时默认一律 503 拒绝（fail-closed），本地开发显式设 JUDGE_ALLOW_ANONYMOUS=1。
 /health 不鉴权（Railway 探活），只回布尔与题库名，不回密钥。Jev 密钥不出服务端；调用方自己 fail-open。
   另回 policy_sha256 = config/data_policy.yaml 文件字节的 sha256，和仓里 `sha256sum config/data_policy.yaml` 对得上就是同一份（J-10）。
-  数据出境配置 / 暗题配置缺失或坏了（审计 11-02 F15）：服务起不来（启动时先校验）；运行中坏了 /health 回 503、ok=false、config_error 说清哪里坏，
-  别的端点一律 503，一次 Jev 都不调 —— 不再静默回落成「没有处方药项目」「没有暗题」。
+  数据出境配置 / 暗题配置缺失或坏了（审计 11-02 F15）：服务起不来（启动时两份都先校验）；运行中 /health 每次重新校验两份，哪份坏了都回 503、ok=false、
+  config_error 说清哪里坏；别的端点只在读到坏的那份时回 503，在调 Jev 之前就返回（/judge 和评论端点不读暗题配置，/banks 不读数据出境配置，
+  不读的那份坏了它们照常）—— 不再静默回落成「没有处方药项目」「没有暗题」。
 """
 from __future__ import annotations
 
@@ -295,7 +296,8 @@ app = FastAPI(title="judge", version=__version__, lifespan=_lifespan)
 @app.exception_handler(P.PolicyConfigError)
 @app.exception_handler(HiddenConfigError)
 async def _config_error(_request, exc):
-    # 运行中配置坏了（文件被删 / 改坏）：所有端点 503，一次 Jev 都不调；不回落成空配置。
+    # 运行中配置坏了（文件被删 / 改坏）：读到坏配置的端点 503，读配置在调 Jev 之前，所以一次 Jev 都不调；不回落成空配置。
+    # 不读那份配置的端点不受影响（/judge 和评论端点不读暗题配置，/banks 不读数据出境配置）；/health 自己校验两份。
     return JSONResponse(status_code=503, content={"detail": f"config: {exc}"})
 
 

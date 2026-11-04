@@ -5,12 +5,14 @@
   · policy.load() 缺文件回 {} —— 处方药名单整个变空，处方药闸等于没装（今天唯一的处方药项目碰巧已放行才没出事）；
   · hidden._config() 缺文件回 {} —— 没有暗题，暗题的题号和答案原样回给写手；
   · YAML 写坏（比如 * 没带引号）在请求时才炸成 500，部署照样绿。
-现在：读不出、少键多键、名单形状不对都抛；服务启动先校验（坏部署 /health 不绿），运行中坏了所有端点 503、一次 Jev 都不调。
+现在：读不出、少键多键、名单形状不对都抛；服务启动两份都先校验（坏部署 /health 不绿）；运行中 /health 重新校验、哪份坏了都 503，
+别的端点读到坏的那份才 503、在调 Jev 之前返回（不读那份的端点照常）。
 合格配置的行为一点不变。
 """
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -39,6 +41,14 @@ def _hidden_file(tmp_path, monkeypatch, text):
         p.write_text(text, encoding="utf-8")
     monkeypatch.setattr(H, "CONFIG", p)
     return p
+
+
+def _rewrite(p, text):
+    """同一路径重写暗题配置。缓存按 (路径, 修改时间) 认，粗粒度时钟的文件系统上连写几次 mtime 可能不变，
+    所以每次都从上一次的 mtime 往后拨 5 秒，保证缓存一定换新。"""
+    old = p.stat().st_mtime
+    p.write_text(text, encoding="utf-8")
+    os.utime(p, (p.stat().st_atime, old + 5))
 
 
 # ── policy.load() ──
@@ -125,12 +135,12 @@ def test_broken_hidden_config_raises(tmp_path, monkeypatch, text, why):
 
 def test_valid_hidden_configs_behaviour_unchanged(tmp_path, monkeypatch):
     qids = ["q1", "q2", "q3", "q4", "q5", "q6"]
-    _hidden_file(tmp_path, monkeypatch, "banks:\n  human_feel_para:\n    fraction: 0.3333\n    override: {}\n")
+    p = _hidden_file(tmp_path, monkeypatch, "banks:\n  human_feel_para:\n    fraction: 0.3333\n    override: {}\n")
     auto = H.hidden_ids("human_feel_para_v0.2", qids)
     assert len(auto) == 2 and H.hidden_ids("comment_reader_v0.6", qids) == set()
-    _hidden_file(tmp_path, monkeypatch, "banks:\n  human_feel_para:\n")                       # 空条目 = 默认 1/3
+    _rewrite(p, "banks:\n  human_feel_para:\n")                                                # 空条目 = 默认 1/3
     assert H.hidden_ids("human_feel_para_v0.2", qids) == auto
-    _hidden_file(tmp_path, monkeypatch, "banks:\n  human_feel_para:\n    override: {2026Q4: [q5, zz]}\n")
+    _rewrite(p, "banks:\n  human_feel_para:\n    override: {2026Q4: [q5, zz]}\n")
     from datetime import date
     assert H.hidden_ids("human_feel_para_v0.2", qids, when=date(2026, 11, 4)) == {"q5"}
 
@@ -139,9 +149,7 @@ def test_broken_hidden_config_is_not_cached(tmp_path, monkeypatch):
     p = _hidden_file(tmp_path, monkeypatch, "banks: [\n")
     with pytest.raises(H.HiddenConfigError):
         H.check_config()
-    p.write_text("banks:\n  human_feel_para: {fraction: 0.5}\n", encoding="utf-8")
-    import os
-    os.utime(p, (p.stat().st_atime, p.stat().st_mtime + 5))
+    _rewrite(p, "banks:\n  human_feel_para: {fraction: 0.5}\n")
     assert H.check_config()["banks"]["human_feel_para"]["fraction"] == 0.5
 
 
