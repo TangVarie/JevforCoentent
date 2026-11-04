@@ -392,11 +392,14 @@ def _process_note(n: dict, name: str, cfg: dict, provider: TikHubClient, jev: Je
     Jev 缺答 / 答案不在选项里 → JevIncomplete（上层记错、不进 seen，下次重判）：不能把「没判成」当成「分诊拒绝」或「判完了」。"""
     tr = judge_state(jev, triage_bank, n["note_id"], triage_state(n, name), subject_type="external_note")
     it = tr.items
-    bad = _incomplete(it, ("on_topic", "voice"))
-    if bad:
-        raise JevIncomplete(f"分诊没判成（{', '.join(bad)}）")
-    if it.get("on_topic", {}).get("answer") != "是" or it.get("voice", {}).get("answer") not in keep_voices:
+    on_topic, voice = it.get("on_topic") or {}, it.get("voice") or {}
+    # 判成了的那一题已经足以拒绝（on_topic 判成不是「是」，或 voice 判成不留的视角）就是拒绝，另一题缺不缺都一样
+    if ((on_topic.get("invalid_reason") not in JEV_INCOMPLETE and on_topic.get("answer") != "是")
+            or (voice.get("invalid_reason") not in JEV_INCOMPLETE and voice.get("answer") not in keep_voices)):
         return "triage_reject"
+    bad = _incomplete(it, ("on_topic", "voice"))
+    if bad:                                             # 判成的那题说「留」、另一题没判成：这篇没判成，下次重判
+        raise JevIncomplete(f"分诊没判成（{', '.join(bad)}）")
     bad = _incomplete(it)                               # 留下的四题都要入账本 / 外部笔记表：取全文（付费）之前就查
     if bad:
         raise JevIncomplete(f"分诊没判成（{', '.join(bad)}）")

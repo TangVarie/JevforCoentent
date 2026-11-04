@@ -61,8 +61,9 @@ class FlakyJev:
                 r = dict(r, answers={})
             elif self.how == "drop_ad_like":
                 r = dict(r, answers={q: a for q, a in r["answers"].items() if q != "ad_like"})
-            else:                                                # out_of_vocab：voice 选了不在选项里的值
+            else:                                                # out_of_vocab：on_topic 判成「是」、voice 选了不在选项里的值
                 ans = dict(r["answers"]); ans["voice"] = {"type": "choice", "choice": "外星人", "probabilities": {"外星人": 0.9}}
+                ans["on_topic"] = {"type": "noul", "noul": 0.95}  # on_topic 判成「否」本身就足以拒绝，就测不到「没判成」了
                 r = dict(r, answers=ans)
         return r
 
