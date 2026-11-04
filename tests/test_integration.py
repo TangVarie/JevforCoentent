@@ -423,6 +423,7 @@ def test_fq_shadow_mappings_and_latest_extractor(tmp_path):
 def test_known_external_ids_without_env(tmp_path, monkeypatch):
     import importlib.util
     monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)          # 本机跑：退 0；Actions 里缺密钥退 1，见 test_corpus_db_secrets.py
     spec = importlib.util.spec_from_file_location("kei", ROOT / "scripts" / "known_external_ids.py"); kei = importlib.util.module_from_spec(spec); spec.loader.exec_module(kei)
     out = tmp_path / "k.txt"
     assert kei.main([str(out)]) == 0 and out.read_text(encoding="utf-8") == ""
