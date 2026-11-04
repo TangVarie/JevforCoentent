@@ -166,3 +166,13 @@ def test_business_error_without_notes_still_raises():
     with pytest.raises(E.SearchUnparseable, match="data.code=1000"):
         _provider(lambda params: raw).search("戒烟", 1, "general", None)
 
+
+def test_masking_keeps_author_and_design_blocks_but_hides_tokens_and_signatures():
+    raw = {"author": {"nickname": "n", "userId": "u"}, "design": "d", "authorId": "a", "assign": "x",
+           "signature": "s", "xsec_token": "t", "accessToken": "t2", "api_key": "k", "apiKey": "k2", "Cookie": "c",
+           "client_secret": "cs", "password": "p", "auth": "a2", "key": "k3"}
+    got = E._masked(raw)
+    for k in ("author", "design", "authorId", "assign"):
+        assert got[k] == raw[k], k
+    for k in ("signature", "xsec_token", "accessToken", "api_key", "apiKey", "Cookie", "client_secret", "password", "auth", "key"):
+        assert got[k] == "***", k

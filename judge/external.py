@@ -219,7 +219,9 @@ def _search_business_error(raw: Any) -> str:
     return ""
 
 
-_SECRETISH = re.compile(r"token|secret|auth|cookie|sign|passw|api_?key|access_?key|^key$", re.I)
+# 只认整个键名或常见后缀：裸子串会误伤 author（含 auth）、design（含 sign）这类字段，整块换成 ***，形状漂移时正好丢掉要看的结构
+_SECRETISH = re.compile(r"^(auth|authorization|proxy[_-]?authorization|cookies?|set[_-]?cookie|sign|key)$"
+                        r"|(token|secret|signature|passw(or)?d|api[_-]?key|access[_-]?key|secret[_-]?key)$", re.I)
 
 
 def _masked(obj: Any, api_key: str = "", depth: int = 0) -> Any:
