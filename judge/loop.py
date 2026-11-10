@@ -28,6 +28,7 @@ from typing import Callable, Optional
 from .banks import Bank, Question
 from .core import JudgeResult, add_usage, apply_evidence, build_evidence_call, enforce_evidence, judge_note, judge_state
 from .jev_client import JevClient
+from . import relay as _relay
 from . import spans as sp
 
 Generator = Callable[..., list]  # (prompt: str, n: int = 1) -> list[str]
@@ -66,9 +67,12 @@ def compile_project_bank(brief: dict, name: str = "project", model: str = "jev-1
 class GeneratorHTTPError(RuntimeError):
     """生成端回了 4xx / 5xx（重试用完）：消息里带返回体的前 300 字（密钥打码），中转站说「不认 output_config」这类原因才看得见。"""
 
-    def __init__(self, code: int, reason: str, snippet: str):
+    def __init__(self, code: int, reason: str, snippet: str, relay: Optional[str] = None):
         self.code = code
-        super().__init__(f"HTTP {code} {reason}" + (f"：{snippet}" if snippet else ""))
+        # "primary" / "backup"：只在配了备用中转站时带，标在原因后面（「HTTP 529 Overloaded [backup]：…」）。不能放最前面：
+        # 写作台 deskcore 用「生成端调用失败：GeneratorHTTPError: HTTP 429/5xx」认没计费的失败（_FREE_GENERATOR_FAILURE），前缀会让它认不出
+        self.relay = relay
+        super().__init__(f"HTTP {code} {reason}" + (f" [{relay}]" if relay else "") + (f"：{snippet}" if snippet else ""))
 
 
 class GeneratorStopped(RuntimeError):
@@ -84,13 +88,16 @@ class AnthropicCompatGenerator:
     429 / 5xx / 529 与连不上按退避重试；重试用完或不该重试的 HTTP 错误抛 GeneratorHTTPError（带返回体前 300 字，密钥打码）。
     temperature=None 不发这个字段（2026-10-20：Sonnet 5.5 一类模型对非默认采样参数回 400，/compile_rules 用它）；
     extra 原样并进请求体（例如 output_config.effort）；usage / calls 累计这个实例发过的调用，多线程共用时加锁。
-    fail_on_stop：stop_reason 在里面就抛 GeneratorStopped（/compile_rules 传 refusal / max_tokens，免得拒答被报成「不是合法 JSON」）。"""
+    fail_on_stop：stop_reason 在里面就抛 GeneratorStopped（/compile_rules 传 refusal / max_tokens，免得拒答被报成「不是合法 JSON」）。
+    备用中转站（D-148，judge/relay.py）：ANTHROPIC_BASE_URL_BACKUP + ANTHROPIC_API_KEY_BACKUP 都配了（或显式传 backup_base_url / backup_api_key）
+    才启用：每次尝试先打主站一次（限时），超时 / 连不上 / 429 / 5xx / 401–404 等就这次改打备用站，连续失败熔断；没配时走原来的 _post_legacy，一字不变。"""
 
     RETRY_STATUSES = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}
 
     def __init__(self, model: str, base_url: Optional[str] = None, api_key: Optional[str] = None,
                  max_tokens: int = 2000, temperature: Optional[float] = 1.0, system: str = "", retries: int = 3, timeout: float = 180.0,
-                 extra: Optional[dict] = None, fail_on_stop: tuple = ()):
+                 extra: Optional[dict] = None, fail_on_stop: tuple = (),
+                 backup_base_url: Optional[str] = None, backup_api_key: Optional[str] = None):
         self.model, self.max_tokens, self.temperature, self.system = model, max_tokens, temperature, system
         base = (base_url or os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")).rstrip("/")
         self.base_url = base[:-3] if base.endswith("/v1") else base
@@ -101,8 +108,67 @@ class AnthropicCompatGenerator:
         self.usage: dict = {}
         self.calls = 0
         self._lock = threading.Lock()
+        # 备用中转站（D-148）：只有从 env 取主站的生成端（没传 base_url）才读 env 里的备用站；显式指定端点的（Kimi、测试）不会被改道
+        if base_url is None and backup_base_url is None and backup_api_key is None:
+            backup_base_url, backup_api_key = _relay.backup_base_url(), _relay.backup_api_key()
+        bb = (backup_base_url or "").strip().rstrip("/")
+        self.backup_base_url = bb[:-3] if bb.endswith("/v1") else bb
+        self.backup_api_key = (backup_api_key or "").strip()
+        self._relay_mode = _relay.mode(configured=bool(self.backup_base_url and self.backup_api_key))
 
     def _post(self, body: dict) -> dict:
+        """没配备用站（或 RELAY_FORCE=primary）→ _post_legacy，原样；否则每次尝试经 relay.call 先主站（一次、限时）再备用站。"""
+        if getattr(self, "_relay_mode", _relay.MODE_PRIMARY_ONLY) == _relay.MODE_PRIMARY_ONLY:
+            return self._post_legacy(body)
+        import time
+        import urllib.error
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        last: Exception = RuntimeError("未知错误")
+        for attempt in range(self.retries + 1):
+            try:
+                return _relay.call(lambda target: self._post_once(target, data), relay_mode=self._relay_mode,
+                                   primary_url=self.base_url, slow_after_s=_relay.slow_s(0.0))
+            except GeneratorHTTPError as exc:
+                last = exc
+                if exc.code not in self.RETRY_STATUSES or attempt >= self.retries:
+                    raise
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+                last = exc
+                if attempt >= self.retries:
+                    raise
+            time.sleep(min(0.5 * (2 ** attempt), 8.0))
+        raise last
+
+    def _post_once(self, target: str, data: bytes) -> dict:
+        """一次传输（relay.call 的 unit）：主站限时 RELAY_PRIMARY_TIMEOUT_S（默认 = self.timeout），备用站用 self.timeout。
+        HTTP 错误 → GeneratorHTTPError(relay=target)；连不上 / 超时只留 primary / backup + 异常类名（URLError 的原因里可能有主机名）；
+        地址本身写错（备用站地址漏了 https:// 之类）→ ValueError(「backup: invalid base URL」)，urllib 的原文会带整个地址，不能进 rules[].error。
+        返回体解析（json.loads）放在 try 外面：不是 JSON 照旧抛 JSONDecodeError（主站这样就切备用站），不被当成「地址写错」。"""
+        import http.client
+        import urllib.error
+        if target == "backup":
+            url, key, timeout = self.backup_base_url, self.backup_api_key, self.timeout
+        else:
+            url, key, timeout = self.base_url, self.api_key, _relay.primary_timeout_s(self.timeout)
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        try:
+            req = urllib.request.Request(url + "/v1/messages", data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read()
+        except urllib.error.HTTPError as exc:
+            raise GeneratorHTTPError(exc.code, str(exc.reason or ""), self._error_snippet(exc), relay=target) from exc
+        except urllib.error.URLError as exc:
+            why = type(exc.reason).__name__ if isinstance(exc.reason, BaseException) else "URLError"
+            raise urllib.error.URLError(f"{target}: {why}") from None
+        except TimeoutError:
+            raise TimeoutError(f"{target}: timed out") from None
+        except (ConnectionError, http.client.HTTPException) as exc:
+            raise ConnectionError(f"{target}: {type(exc).__name__}") from None
+        except ValueError as exc:   # unknown url type / 代理隧道的 host 带空格等：原文带地址
+            raise ValueError(f"{target}: invalid base URL ({type(exc).__name__})") from None
+        return json.loads(raw.decode("utf-8"))
+
+    def _post_legacy(self, body: dict) -> dict:
         import time
         import urllib.error
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -129,8 +195,9 @@ class AnthropicCompatGenerator:
             raw = exc.read(2000).decode("utf-8", errors="replace")
         except Exception:  # noqa: BLE001 — 读不到返回体就不带
             return ""
-        if self.api_key:
-            raw = raw.replace(self.api_key, "***")
+        for k in (self.api_key, getattr(self, "backup_api_key", "")):
+            if k:
+                raw = raw.replace(k, "***")
         raw = re.sub(r"(sk-[A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]{8,}", r"\1***", raw)
         return " ".join(raw.split())[:300]
 

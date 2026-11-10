@@ -78,6 +78,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from . import policy as P
+from . import relay as _relay
 from . import rules as _rules
 from . import spans as sp
 from .banks import Bank, check_bank, discover, load_bank, unfilled
@@ -312,6 +313,11 @@ def health():
            # /compile_rules 的生成端：只回模型名和「有没有密钥」，不回密钥
            "compile": {"model": "mock" if os.environ.get("JUDGE_MOCK") == "1" else _rules.model_name(),
                        "key": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MOONSHOT_API_KEY"))}}
+    # 备用中转站（D-148）：只回模式 / 有没有配 / 手动开关 / 熔断状态和本进程计数，不回地址、不回密钥；出错也不能让 /health 500
+    try:
+        out["relay"] = _relay.health(include_counts=True)
+    except Exception as exc:  # noqa: BLE001
+        out["relay"] = {"relay_error": type(exc).__name__}
     try:
         out.update(check_configs())
     except CONFIG_ERRORS as exc:
