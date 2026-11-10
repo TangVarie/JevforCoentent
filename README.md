@@ -44,7 +44,8 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 `JUDGE_BANKS_DIR` / `JUDGE_POLICY_CONFIG` / `JUDGE_HIDDEN_CONFIG`（换题库目录与两份配置的位置）·
 `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`（或 `MOONSHOT_API_KEY`）（`loop.AnthropicCompatGenerator` 的生成端；末尾带不带 `/v1` 都行；`/compile_rules` 用它，没配则 503）·
 `JUDGE_COMPILE_MODEL`（`/compile_rules` 的模型，默认 `claude-sonnet-5-5`）· `JUDGE_COMPILE_EFFORT`（默认 `low`；中转站不认 `output_config` 时设空串）·
-`JUDGE_COMPILE_BATCH`（每次调用编几条，默认 10）· `JUDGE_COMPILE_WORKERS`（并行几路，默认 6）· `JUDGE_COMPILE_TIMEOUT_SEC` / `JUDGE_COMPILE_RETRIES`（单次调用超时与 429/5xx 重试，默认 90 秒 / 1 次）。
+`JUDGE_COMPILE_BATCH`（每次调用编几条，默认 10）· `JUDGE_COMPILE_WORKERS`（并行几路，默认 6）· `JUDGE_COMPILE_TIMEOUT_SEC` / `JUDGE_COMPILE_RETRIES`（单次调用超时与 429/5xx 重试，默认 90 秒 / 1 次）·
+`ANTHROPIC_BASE_URL_BACKUP` + `ANTHROPIC_API_KEY_BACKUP`（可选的备用中转站，两个都配才启用；`RELAY_FORCE` 手动切换；`RELAY_PRIMARY_TIMEOUT_S` / `RELAY_SLOW_S` / `RELAY_BREAKER_FAILS` / `RELAY_BREAKER_COOLDOWN_S` 一般不用动；见下面「备用中转站（D-148，可选）」）。
 环境变量（`judge.mcp_server` 所在机器的 `.mcp.json` env；2026-10-09 审计 A-09。写手机器**不再**起它——写手通过 deskcore 的 `judge_draft` / `repair_plan_for` / `list_banks` 判稿，deskcore 用服务端的管理 key 转发）：`JUDGE_URL`（判定服务地址）+ `JUDGE_API_KEY`（填服务端 `JUDGE_WRITER_API_KEYS` 里的一把写手 key，**不是**服务端的管理 key；鉴权头 `X-Judge-Key`）两个必需，没配则启动记一条警告、工具返回 `{"error": …}` ·
 `JUDGE_PROJECT` / `JUDGE_CATEGORY`（默认项目代号与品类；`project` 两处都没有在本地就拒绝，其余数据出境规则由服务端执行并回显在 `policy`）· `JUDGE_HTTP_TIMEOUT_SEC`（默认 180；429 / 5xx 退避重试最多 2 次）·
 `JUDGE_ALLOW_LOCAL_JEV=1`（旧stdio MCP三个评论工具的本机路径默认拒绝；内部机器需合法持有vendor密钥及本地banks。写手使用deskcore转发的HTTP接口，服务开关仍关闭，见HANDOFF）。写手机器上**没有** `TYPESAFE_API_KEY`，MCP 不读 `banks/`、不 import `judge.hidden`。
@@ -108,6 +109,7 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
   - `qid` = `<规则 id 只留小写字母数字的前 8 位>_<sha 前 6 位>_<n>_<这道题本身的指纹 6 位>`：带 sha，规则一改题号就变；带题目指纹（问法 + pass_if + scope），重编出来问法变了题号也变，账本里不同问法的答案不会互相覆盖（Jev 格式题的 question_version 永远是 1）；与本服务所有题库的题号、同一请求里别的规则都不撞，撞了那条带 `error`。
   - 单条编不出（输出不是 JSON、形状不对、漏了这条）先带着「哪里不对」重试一次，仍不行只让那一条带 `error`；一条都没编出 → 502。生成端没配密钥 → 503。
     生成端回 4xx / 5xx 时 `error` 带返回体前 300 字（密钥打码，比如中转站不认 `output_config` 时设 `JUDGE_COMPILE_EFFORT=""`）；模型拒答 / 输出被截断报成「模型拒答」「输出被截断」，不重试。
+    配了备用中转站时，`error` 里的 HTTP 错误在原因后面标 `[primary]` / `[backup]`（是哪个站回的，比如 `HTTP 529 Overloaded [backup]：…`；两把 key 都打码；标在后面是因为写作台按 `GeneratorHTTPError: HTTP 429/5xx` 认没计费的失败），连不上 / 超时 / 地址写错只写 `primary: …` / `backup: …` 加异常类名（比如 `backup: timed out`、`backup: invalid base URL (ValueError)`），不带地址；没配备用站时报错文字和以前一字不差。
 - **送回 `/judge_draft`**：**单独发一次**，不和存档那次评分合在一起（TV docs/32 §E.3 / E.4：存档的判定预算只剩约 1.8 秒，影子题的行不能和 `primary` 混）——
   存档返回之后异步发 `{"banks": [], "project_bank": <拼好的题库>, "project_bank_name": "desk_rules", "run_tag": "shadow-rules", "judge_paras": "never", …}`：
   只判规则题、不重复花 fq / 平台 / 人感的钱，也不判段。写作台缓存的是每条规则的结果，
@@ -118,10 +120,22 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 - **延迟与费用**：每次调用编 `JUDGE_COMPILE_BATCH`（默认 10）条，`JUDGE_COMPILE_WORKERS`（默认 6）路并行，60 条是一轮调用的时间。
   最坏耗时 = 2 次调用（格式不合格重试一次）×（`JUDGE_COMPILE_RETRIES` + 1）× `JUDGE_COMPILE_TIMEOUT_SEC` + 退避，默认 2 × 2 × 90 秒 + 1 秒 ≈ 361 秒；
   调用方的 HTTP 超时设 ≥ 400 秒（改了这两个 env 就按公式重算），端点没有整体截止时间，调用方先断开服务端也会把这一轮跑完、照样花钱。
+  配了备用中转站（D-148）时：主站挂住、备用站正常 → 头几次调用各多花一个主站超时（`RELAY_PRIMARY_TIMEOUT_S`，默认 = `JUDGE_COMPILE_TIMEOUT_SEC`）再加备用站耗时，之后熔断 20 分钟只走备用站，和没配时差不多；
+  两个站都挂住 → 2 ×（`JUDGE_COMPILE_RETRIES` + 1）×（主站超时 + `JUDGE_COMPILE_TIMEOUT_SEC`）+ 退避，默认 2 × 2 ×（90 + 90）秒 + 1 秒 ≈ 721 秒，超过写作台默认 420 秒的调用方超时（只在两个站同时故障时出现，调用方会先超时）。
   **编译不能放在写手工具的调用里**（写作台 MCP 工具的预算封顶 20 秒，`JUDGE_DRAFT_TOOL_TIMEOUT_SEC`）：放在写作台后台（规则存下 / 改了之后按（规则 id, sha）补编），
   写手工具和送回 `/judge_draft` 只用已经缓存的编译结果，没编好的规则这一轮照旧留在简报里。
   按（规则 id, sha）缓存后只有新增或改过的规则才花钱。送回 `/judge_draft` 时多一次 Jev 调用（+ `pass_if: 否` 的题答「是」时一次证据调用），约 0.5–1 秒。
 - `JUDGE_MOCK=1`：用 `MockRuleGenerator`（不联网、按关键词给确定的结果），只测流程，不代表编译质量。
+
+## 备用中转站（D-148，可选）
+
+`/compile_rules` 是本仓唯一调中转站的地方（Railway `judge` 服务，`judge/loop.AnthropicCompatGenerator`）；判稿走 TypeSafe Jev、外部语料走 TikHub，都不经过中转站，GitHub Actions 里也不调。逻辑在 `judge/relay.py`（三个仓同一份）。
+
+- **启用**：在 Railway `judge` 服务的 Variables 里加两个变量（三个仓同名）：`ANTHROPIC_BASE_URL_BACKUP`（备用站地址，要带 `https://`，末尾带不带 `/v1` 都行）和 `ANTHROPIC_API_KEY_BACKUP`（备用站 key）。两个都填了才算启用，缺一个等于没配，行为和现在完全一样。改变量会自动重新部署。加完看 `GET /health` 的 `relay.relay_backup_configured` 是 `true`、`relay.relay_mode` 是 `auto`。想确认备用站本身能用：truth-vault 的 Actions → gateway-probe，`target` 选 `backup`（同一个备用站时），或者临时设 `RELAY_FORCE=backup`，等下一次 `/compile_rules` 之后看 `/health` 的 `relay.relay_counts.backup_ok` 涨了，再把 `RELAY_FORCE` 删掉。备用站必须认同样的模型名（`claude-sonnet-5-5` 或 `JUDGE_COMPILE_MODEL`）和 `output_config`（不认就设 `JUDGE_COMPILE_EFFORT=""`），不认会回 404 / 400。
+- **自动切换**：配好后每次调用先打主站，但主站只给一次机会且限时（`RELAY_PRIMARY_TIMEOUT_S`，默认沿用 `JUDGE_COMPILE_TIMEOUT_SEC`）。主站超时、连不上、429、5xx（含 520 / 522 / 524 / 529）、401 / 402 / 403（多半是余额或 key 失效）、404（多半是不认模型名）、返回的不是 JSON → 这次立刻改打备用站。400 / 422 这类请求本身有问题的不切；中转站敏感词拦截（`sensitive_words_detected`）也不切。主站连续 2 次失败 → 熔断 20 分钟：这期间所有调用直接走备用站；到点放一个调用去试主站，好了切回，不行再熔断 20 分钟。Jev 默认不按「慢」判（`RELAY_SLOW_S` 默认 0）。同一台机器上的进程共用熔断状态（存在临时目录的一个小 JSON 文件里，文件名和内容都不含地址）。重试照旧：一共 `JUDGE_COMPILE_RETRIES` + 1 次尝试，每次都是「主站一次 → 不行备用站一次」（熔断期间只打备用站），备用站用 `JUDGE_COMPILE_TIMEOUT_SEC`。
+- **手动切换**：变量 `RELAY_FORCE`：`backup` = 只走备用站；`primary` = 只走主站、不切换，和没配备用站时一模一样；留空或删掉 = 自动。在 Railway `judge` 服务的 Variables 设（会重新部署）。备用站没配时设 `backup` 不生效，日志会提示一行。
+- **怎么看走的是哪条**：`GET /health`（不鉴权）有 `relay` 字段：`relay_mode`（`primary_only` / `auto` / `backup_only`）、`relay_backup_configured`、`relay_force`（`auto` / `primary` / `backup`）、`relay_breaker`（`off` 没在自动模式 / `closed` 正常 / `open` 熔断中 / `half_open` 该试主站了），以及本进程计数 `relay_counts`：`primary_ok` / `primary_slow` / `primary_fail`、`backup_ok` / `backup_fail`、`breaker_open_skips`（熔断期间直接走备用的次数）。服务日志里第一次切换打一行 `relay: primary failed (HTTP 503); failing over to backup`，熔断打 `relay: breaker open for 1200s ...`，进程结束打 `relay summary: {...}`。`/compile_rules` 里规则的 `error`：HTTP 错误在原因后面标 `[primary]` / `[backup]`（如 `HTTP 402 Payment Required [backup]：…`），连不上 / 超时 / 地址写错写成 `backup: timed out`、`backup: ConnectionRefusedError`、`backup: invalid base URL (ValueError)` 这样，说明是哪个站出的错（`invalid base URL` = 备用站地址填错了，多半漏了 `https://`）。日志和 `/health` 只出现 primary / backup、状态码、错误类型、耗时和次数，从不出现地址、key 或中转站返回的报错原文。
+- **代价**：备用站另外计费；主站超时那次主站可能已经扣了钱；两个站的 prompt cache 不通用。两个站都挂住时最坏约 721 秒（见上面「延迟与费用」），超过写作台 420 秒的调用方超时。可调（一般不用动）：`RELAY_PRIMARY_TIMEOUT_S`（5–600 秒）、`RELAY_SLOW_S`（0 = 不按慢判）、`RELAY_BREAKER_FAILS`（默认 2）、`RELAY_BREAKER_COOLDOWN_S`（默认 1200 秒）。
 
 ## 评论怎么写
 

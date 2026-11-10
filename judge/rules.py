@@ -998,6 +998,9 @@ def make_generator():
     JUDGE_COMPILE_EFFORT 设空串则不发 output_config —— 中转站不认这个字段时用；不认时 400 的返回体会带进 error）。
     超时 / 重试从 env 读，默认 90 秒 / 1 次：/compile_rules 是同步 HTTP，默认的 180 秒 × 3 次会让调用方先超时。
     最坏耗时 = 2 次调用（格式不合格重试一次）×（JUDGE_COMPILE_RETRIES + 1）× JUDGE_COMPILE_TIMEOUT_SEC + 退避，默认约 361 秒（README 写了调用方超时）。
+    配了备用中转站（D-148，ANTHROPIC_BASE_URL_BACKUP + ANTHROPIC_API_KEY_BACKUP，见 judge/relay.py；不传 base_url，所以自动读 env 里的备用站）：
+    主站挂住、备用站正常 → 头几次调用多花一个主站超时（RELAY_PRIMARY_TIMEOUT_S，默认 = JUDGE_COMPILE_TIMEOUT_SEC）再加备用站耗时，之后 20 分钟熔断只走备用站；
+    两个站都挂住 → 2 ×（JUDGE_COMPILE_RETRIES + 1）×（主站超时 + JUDGE_COMPILE_TIMEOUT_SEC）+ 退避，默认约 721 秒，超过写作台 420 秒的调用方超时（只在双双故障时）。
     模型拒答 / 输出被截断（stop_reason = refusal / max_tokens）当生成端失败报，不报成「不是合法 JSON」、也不白重试。"""
     if os.environ.get("JUDGE_MOCK") == "1":
         return MockRuleGenerator()

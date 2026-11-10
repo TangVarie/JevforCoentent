@@ -9,6 +9,17 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+_RELAY_ENV = ("ANTHROPIC_BASE_URL_BACKUP", "ANTHROPIC_API_KEY_BACKUP", "RELAY_FORCE", "RELAY_PRIMARY_TIMEOUT_S", "RELAY_SLOW_S",
+              "RELAY_BREAKER_FAILS", "RELAY_BREAKER_COOLDOWN_S")
+
+
+@pytest.fixture(autouse=True)
+def _no_backup_relay_from_the_shell(monkeypatch):
+    """备用中转站（D-148）：开发机 shell 里配了备用站也不带进测试——老用例照旧走「没配备用站」的原路（不写临时目录的熔断文件），
+    也绝不会打到真的备用站；要测备用站的用例（tests/test_relay_backup.py）自己设 .invalid 假地址。"""
+    for k in _RELAY_ENV:
+        monkeypatch.delenv(k, raising=False)
+
 
 @pytest.fixture
 def mcp_via_testclient(monkeypatch):
