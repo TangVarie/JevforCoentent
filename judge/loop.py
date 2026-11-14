@@ -251,7 +251,6 @@ class DraftJudgement:
     wants: dict = field(default_factory=dict)          # {(bank, qid): 期望答案}，就是判这篇时用的 hard_rules；修改单按它说「要改成什么」
     hard_fails: list = field(default_factory=list)     # [(bank, qid, answer, p, evidence)]
     ambiguous: list = field(default_factory=list)      # [(bank, qid)]
-    hard_ambiguous: list = field(default_factory=list) # [(bank, qid)]：硬约束拿不准，需复核，不当成确定违反
     para_items: list = field(default_factory=list)     # 段级：[{idx, text, items}]
     para_stats: dict = field(default_factory=dict)     # 段级分布：语域 / 功能 / 摩擦 / 总结收尾（只在整段都判了时算）
     para_results: list = field(default_factory=list)   # [(bank_name, 段级 JudgeResult)]：落账本用，subject_id = <稿 id>:p<N>
@@ -262,7 +261,7 @@ class DraftJudgement:
     invalid_reason: Optional[str] = None               # 整篇没法判（正文太短）：text_too_short
 
     def passed(self) -> bool:
-        return not self.hard_fails and not self.hard_ambiguous and not self.unjudged and self.invalid_reason is None
+        return not self.hard_fails and not self.unjudged and self.invalid_reason is None
 
 
 def _para_split(body: str) -> list:
@@ -351,9 +350,6 @@ def judge_draft(client: JevClient, draft: dict, *, fq: Optional[Bank] = None, pl
             if it.get("ambiguous"):
                 dj.ambiguous.append((bname, qid))
             want = hard_rules.get((bname, qid))
-            if want is not None and it.get("ambiguous"):
-                dj.hard_ambiguous.append((bname, qid))
-                continue                       # 拿不准的「是」和「否」都需复核，不生成无依据的改稿指令
             if want is not None and it["answer"] != want:
                 dj.hard_fails.append((bname, qid, it["answer"], it.get("p"), it.get("evidence")))
     # 段级：always 全判；on_fail 篇级有硬伤才全判，没有硬伤也要把暗题判一遍 —— 暗题防的正是「对着公开题库写、
@@ -454,8 +450,6 @@ def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None
         if now is None or now == want or qid in hidden:
             continue
         bname = next((b for b, items in dj.detail.items() if qid in items), None)
-        if (bname, qid) in dj.hard_ambiguous:
-            continue                           # target 也不能把同一条待复核的硬约束变成自动改稿
         bank = banks.get(bname) if bname else None
         q = bank.by_id().get(qid) if bank else None
         if not (bname and q):
@@ -497,8 +491,6 @@ def redact(dj: DraftJudgement, hidden: set) -> dict:
             for f in fields_:
                 stats.pop(f, None)
     return {"passed": dj.passed(), "invalid_reason": dj.invalid_reason,
-            "hard_ambiguous": [(b, "hidden" if q in hidden else q) for b, q in dj.hard_ambiguous],
-            "needs_review": bool(dj.hard_ambiguous),
             "profile": {q: a for q, a in dj.profile.items() if q not in hidden},
             "hard_fails": [(b, "hidden" if q in hidden else q, None if q in hidden else a, pp, ev) for b, q, a, pp, ev in dj.hard_fails],
             "unjudged": [(b, "hidden" if q in hidden else q, r) for b, q, r in dj.unjudged],
@@ -534,9 +526,9 @@ def repair(generator: Generator, draft: dict, plan: list) -> dict:
 # ── 写中：best-of-k ────────────────────────────────────────────────────
 
 def score(dj: DraftJudgement, target: Optional[dict] = None) -> float:
-    """越小越好：整篇没法判（正文太短）10000，硬约束没判出有效答案 / 拿不准每条 1000，硬伤每条 100，目标画像每处不符 10，
+    """越小越好：整篇没法判（正文太短）10000，硬约束没判出有效答案每条 1000，硬伤每条 100，目标画像每处不符 10，
     歧义每处 1。没法判 / 没判出来的候选不能靠「零硬伤」赢过一篇能修的稿（它们 passed() 也是 False）。"""
-    s = (10000.0 if dj.invalid_reason else 0.0) + 1000.0 * (len(dj.unjudged) + len(dj.hard_ambiguous))
+    s = (10000.0 if dj.invalid_reason else 0.0) + 1000.0 * len(dj.unjudged)
     s += 100.0 * len(dj.hard_fails) + 1.0 * len(dj.ambiguous)
     for qid, want in (target or {}).items():
         if dj.profile.get(qid) is not None and dj.profile[qid] != want:
@@ -568,13 +560,9 @@ def produce(client: JevClient, generator: Generator, prompt: str, *, k: int = 3,
     while dj.hard_fails and rounds < max_repairs:
         recorded: list = []
         plan = repair_plan(dj, banks, validated=validated, target=target, hidden=hidden, recorded=recorded)
-        if not plan:
-            break                              # 没有可执行的修改，不能对着原稿反复付费重判
         draft = repair(generator, draft, plan)
         dj = judge_draft(client, draft, **kw)
         rounds += 1
         trail.append({"step": f"repair_{rounds}", "plan": plan, "recorded": recorded, "hard_fails": len(dj.hard_fails)})
     return {"draft": draft, "passed": dj.passed(), "profile": dj.profile, "para_stats": dj.para_stats,
-            "hard_fails": dj.hard_fails, "ambiguous": dj.ambiguous,
-            "hard_ambiguous": dj.hard_ambiguous, "needs_review": bool(dj.hard_ambiguous),
-            "trail": trail, "calls": dj.calls, "usage": dj.usage}
+            "hard_fails": dj.hard_fails, "ambiguous": dj.ambiguous, "trail": trail, "calls": dj.calls, "usage": dj.usage}

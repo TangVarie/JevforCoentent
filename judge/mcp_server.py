@@ -196,8 +196,7 @@ def judge_draft(title: str, body: str, banks: Optional[list] = None, judge_paras
                 target: Optional[dict] = None, validated: Optional[list] = None, subject_id: str = "draft") -> dict:
     """判一篇稿子（POST {JUDGE_URL}/judge_draft）：默认跑特征题库 fq + 平台题库（大健康）+ 人感题库（篇级不过时再判段；过了也逐段判一遍不公开的检查，结果不回显）；
     给 brief 就按 brief 现编项目题库、brief 里的 P0 硬约束（want）接到判定（项目放行了项目层才跑）。project 不给就用环境变量 JUDGE_PROJECT，两处都没有就拒绝。
-    返回服务端的响应原样：篇级画像 profile、硬伤 hard_fails（题、答案、概率、依据句）、没判出来的硬约束 unjudged、
-    拿不准的硬约束 hard_ambiguous（需复核、passed=false，不自动改稿）、needs_review、歧义题、段级分布 para_stats、
+    返回服务端的响应原样：篇级画像 profile、硬伤 hard_fails（题、答案、概率、依据句）、没判出来的硬约束 unjudged、歧义题、段级分布 para_stats、
     修改单 plan、只记录的目标题 recorded、数据出境 policy、用的题库 banks。不改稿；不落账本。出错时返回 {"error": …, "status"?: …, "detail"?: …}。"""
     try:
         _config()   # 先报缺 JUDGE_URL / JUDGE_API_KEY，再报缺 project：新机器第一次配时一次看全 (codex review on #7)
@@ -213,7 +212,7 @@ def repair_plan_for(title: str, body: str, banks: Optional[list] = None, project
                     target: Optional[dict] = None, validated: Optional[list] = None, subject_id: str = "draft") -> dict:
     """判一篇稿子并只拿修改单（同 judge_draft 的一次 /judge_draft 调用）：plan 每条 = 题号 + 现在的答案与概率 + 依据句 + 该题定义，只说哪一句犯了哪条，不给改法；
     recorded 是没过闸二、只记录不下发的目标题（给了 target 才有）。与 judge_draft 同样的层和硬约束（含 brief 编出的项目题库）。
-    返回 {"plan": […], "recorded": […], "passed": …, "hard_ambiguous": […], "needs_review": …, "invalid_reason": …, "policy": …}；出错时返回 {"error": …}。"""
+    返回 {"plan": […], "recorded": […], "passed": …, "invalid_reason": …, "policy": …}；出错时返回 {"error": …}。"""
     try:
         _config()
         d = _post_json("/judge_draft", _draft_body(title, body, banks, "on_fail", project, category, brief, hard_rules, target, validated, subject_id))
@@ -223,7 +222,6 @@ def repair_plan_for(title: str, body: str, banks: Optional[list] = None, project
         return {"error": "judge 服务的 /judge_draft 响应里没有 plan（服务端版本太旧，或不是 judge 服务？）",
                 "keys": sorted(d) if isinstance(d, dict) else type(d).__name__}
     return {"plan": d["plan"], "recorded": d.get("recorded", []), "passed": d.get("passed"), "invalid_reason": d.get("invalid_reason"),
-            "hard_ambiguous": d.get("hard_ambiguous", []), "needs_review": d.get("needs_review", False),
             "policy": d.get("policy"), "calls": d.get("calls")}
 
 

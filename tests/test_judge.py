@@ -121,7 +121,7 @@ def test_spans_and_askable():
 
 def test_evidence_call_and_apply():
     b = B.load_bank(FQ)
-    sp = S.build_spans("标题：戒烟第几天最难熬？\n正文：戒烟第15天，记录一下。昨天在药店看到咀嚼胶就买了一盒。嚼了几口辣嗓子。", mode="markers")
+    sp = S.build_spans("标题：早起第几天最难熬？\n正文：早起第12天，写两句。昨天在便利店看到无糖茶就买了一瓶。喝了几口有点苦。", mode="markers")
     items = {"title_is_question": {"answer": "是", "raw": True}, "has_specific_time": {"answer": "是", "raw": True},
              "has_specific_place": {"answer": "否", "raw": False}, "product_role": {"answer": "解决方案", "raw": "解决方案"},
              "opening_type": {"answer": "具体事件", "raw": "具体事件"}}
@@ -132,8 +132,8 @@ def test_evidence_call_and_apply():
                         "has_specific_time": {"choice": "1", "probabilities": {"1": 0.8}},
                         "product_role": {"choice": "没有", "probabilities": {"没有": 0.7}}}}
     C.apply_evidence(items, resp, sent_map)
-    assert items["title_is_question"]["evidence"] == "戒烟第几天最难熬？"
-    assert items["has_specific_time"]["evidence"].startswith("戒烟第15天")
+    assert items["title_is_question"]["evidence"] == "早起第几天最难熬？"
+    assert items["has_specific_time"]["evidence"].startswith("早起第12天")
     assert items["product_role"]["invalid_reason"] == "evidence_not_found" and items["product_role"]["evidence"] is None
 
 
@@ -142,7 +142,7 @@ def test_evidence_call_and_apply():
 def test_judge_note_mock_and_ledger_sql():
     b = B.load_bank(FQ)
     client = JevClient(mock=True)
-    r = C.judge_note(client, b, "NUC_phase1_recTEST", "标题：普通朋友住院送什么？\n正文： 一个普通朋友突发阑尾炎割了，预算200左右。水果篮太沉，鲜花不实用。大家平时都送什么啊？", with_evidence=True)
+    r = C.judge_note(client, b, "NUC_phase1_recTEST", "标题：同事搬新家送什么？\n正文： 一个新同事上周搬了新家，预算三百上下。绿植太占地方，摆件不实用。你们一般都带点什么？", with_evidence=True)
     assert r.subject_type == "note" and len(r.items) == 20 and r.calls in (1, 2)
     rows = C.ledger_rows(r, b, run_tag="shadow-test")
     # mock 判出的行 extractor 一律 mock:<模型>（传了 extractor 也不行），写库直接拒绝：假答案进不了真账本
@@ -217,7 +217,7 @@ def test_loop_compile_judge_repair_produce():
                                    "hard_rules": [{"id": "no_price", "ask": "有没有说便宜？", "yes": "说了", "no": "没说", "want": False}],
                                    "angle": {"label": "教练劝戒烟", "means": "健身房"}})
     assert proj.ids() == ["intent_of_para", "no_price", "on_angle"] and B.check_bank(proj) == []
-    draft = {"title": "健身房教练劝我先戒烟", "body": "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？"}
+    draft = {"title": "游泳班教练劝我先调作息", "body": "上个月报了个游泳班。\n教练问我平时是不是熬夜。\n报名花了两千出头，有点心疼。\n你们是先调作息还是边学边调？"}
     hard = {("platform_health_v0.1", "efficacy_claim"): "否", ("project", "no_price"): "否"}
     dj = L.judge_draft(client, draft, fq=fq, platform=ph, project=proj, human=hf, judge_paras="always", hard_rules=hard)
     assert set(dj.detail) == {"feature_questions_v0_1", "platform_health_v0.1", "project"}
@@ -240,7 +240,7 @@ def test_mcp_tools_mock(monkeypatch, mcp_via_testclient):
     from judge import mcp_server as M
     names = {b["name"] for b in M.list_banks()}
     assert {"feature_questions_v0_1", "comment_reader_v0.6", "platform_health_v0.1", "human_feel_para_v0.2"} <= names
-    body = "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？"
+    body = "上个月报了个游泳班，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先调作息还是边学边调？"
     d = M.judge_draft("测试标题？", body)
     assert set(d) >= {"passed", "profile", "hard_fails", "para_stats", "policy", "plan"} and d["policy"]["project"] == "TUGE" and "ledger_rows" not in d
     plan = M.repair_plan_for("测试标题？", body)
@@ -545,7 +545,7 @@ def test_api_judge_draft_with_brief(monkeypatch, policy_cfg):
     from fastapi.testclient import TestClient
     from judge.api import app
     c = TestClient(app); H = {"X-Judge-Key": "k"}
-    body = {"title": "健身房教练劝我先戒烟", "body": "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？",
+    body = {"title": "游泳班教练劝我先调作息", "body": "上个月报了个游泳班。\n教练问我平时是不是熬夜。\n报名花了两千出头，有点心疼。\n你们是先调作息还是边学边调？",
             "subject_id": "11111111-2222-3333-4444-555555555555", "project": "TUGE",
             "brief": {"intents": [{"label": "烟瘾场景", "means": "想抽烟的时刻"}],
                       "hard_rules": [{"id": "must_ask", "ask": "有没有向读者提问？", "yes": "问了", "no": "没问", "want": True}]},
@@ -615,7 +615,7 @@ def test_repair_plan_uses_configured_want_for_choice_rules():
     from judge import loop as L
     client = JevClient(mock=True)
     fq = B.load_bank(FQ, name="feature_questions_v0_1")
-    draft = {"title": "健身房教练劝我先戒烟", "body": "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？"}
+    draft = {"title": "游泳班教练劝我先调作息", "body": "上个月报了个游泳班。\n教练问我平时是不是熬夜。\n报名花了两千出头，有点心疼。\n你们是先调作息还是边学边调？"}
     ans = L.judge_draft(client, draft, fq=fq).profile["product_role"]
     want = next(lab for lab in fq.by_id()["product_role"].criteria if lab != ans)      # 取一个和答案不同的选项 → 必是硬伤
     dj = L.judge_draft(client, draft, fq=fq, hard_rules={("feature_questions_v0_1", "product_role"): want})
@@ -830,7 +830,7 @@ def test_writer_key_is_scoped_to_banks_and_non_writing_judge_draft(monkeypatch, 
         {"subject_type": "note", "subject_id": "n1", "raw_content": "标题：测试标题？\n正文：昨天在药店买了一盒东西，嚼了几口辣嗓子，有点想戒了。大家怎么看？"}]}
     assert c.post("/judge", json=body, headers=W).status_code == 403, "写手 key 够不着 /judge"
     assert c.post("/judge", json=body, headers=A).status_code == 200
-    draft = {"title": "t", "body": "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？",
+    draft = {"title": "t", "body": "上个月报了个游泳班，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先调作息还是边学边调？",
              "project": "TUGE", "subject_id": "v1", "return_rows": True}
     r = c.post("/judge_draft", json={**draft, "write": True}, headers=W)
     assert r.status_code == 403 and "write" in r.json()["detail"], r.text

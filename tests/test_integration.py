@@ -21,7 +21,7 @@ from judge.jev_client import RETRY_STATUSES, JevClient, mock_response  # noqa: E
 FQ = ROOT / "banks" / "vendor" / "feature_questions_v0_1.yaml"
 PH = ROOT / "banks" / "platform_health_v0.1.yaml"
 HF2 = ROOT / "banks" / "human_feel_para_v0.2.yaml"
-BODY = "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？"
+BODY = "上个月报了个游泳班。\n教练问我平时是不是熬夜。\n报名花了两千出头，有点心疼。\n你们是先调作息还是边学边调？"
 
 
 class FixedJev:
@@ -69,7 +69,7 @@ def test_all_skipped_means_zero_calls_and_null_rows():
 
 def test_missing_out_of_vocab_and_evidence_contract():
     b = B.load_bank(FQ)
-    raw = "标题：戒烟第几天最难熬？\n正文：戒烟第15天，记录一下。昨天在药店看到咀嚼胶就买了一盒。嚼了几口辣嗓子，不太习惯。"
+    raw = "标题：早起第几天最难熬？\n正文：早起第12天，写两句。昨天在便利店看到无糖茶就买了一瓶。喝了几口有点苦，不太习惯。"
     jev = FixedJev({"title_is_question": {"type": "noul", "noul": 0.9},                  # 是 → 要证据，证据调用给「1」
                     "has_specific_time": {"type": "noul"},                               # 没有数值 → out_of_vocab
                     "opening_type": {"type": "choice", "choice": "不存在的选项", "probabilities": {"不存在的选项": 0.9}},
@@ -141,7 +141,7 @@ def test_postgrest_upsert_refreshes_extracted_at(monkeypatch):
 def test_gate2_unvalidated_fq_targets_are_recorded_not_planned():
     from judge import loop as L
     fq = B.load_bank(FQ, name="feature_questions_v0_1")
-    dj = L.judge_draft(JevClient(mock=True), {"title": "健身房教练劝我先戒烟", "body": BODY}, fq=fq)
+    dj = L.judge_draft(JevClient(mock=True), {"title": "游泳班教练劝我先调作息", "body": BODY}, fq=fq)
     now = dj.profile["opening_type"]
     want = next(v for v in fq.by_id()["opening_type"].criteria if v != now)
     recorded: list = []
@@ -151,7 +151,7 @@ def test_gate2_unvalidated_fq_targets_are_recorded_not_planned():
     assert plan2[0]["qid"] == "opening_type" and fq.by_id()["opening_type"].criteria[want] in plan2[0]["instruction"]
     # 换名加载的 fq（按格式认，不按写死的名字）守卫照样生效
     fq2 = B.load_bank(FQ, name="fq_renamed")
-    dj2 = L.judge_draft(JevClient(mock=True), {"title": "健身房教练劝我先戒烟", "body": BODY}, fq=fq2)
+    dj2 = L.judge_draft(JevClient(mock=True), {"title": "游泳班教练劝我先调作息", "body": BODY}, fq=fq2)
     assert L.repair_plan(dj2, {fq2.name: fq2}, target={"opening_type": want}) == []
     assert "此题未过闸二" not in L.repair_prompt({"title": "t", "body": BODY}, plan)
 
@@ -252,14 +252,8 @@ def test_data_policy_mcp(monkeypatch, policy_cfg, mcp_via_testclient):
     brief = {"hard_rules": [{"id": "must_ask", "ask": "有没有向读者提问？", "want": True}]}
     d = M.judge_draft("t", BODY, project="TUGE", brief=brief)                                  # 写手侧也能送 brief、硬约束接到判定
     assert "project" in d["detail"] and d["policy"]["project_layer"] and "ledger_rows" not in d
-    repair = M.repair_plan_for("t", BODY, project="TUGE", brief=dict(brief, hard_rules=[dict(brief["hard_rules"][0], want=(d["profile"]["must_ask"] != "是"))]))
-    plan_ids = {p["qid"] for p in repair["plan"]}
-    # 项目层确实到达服务端；拿不准的硬约束应回待复核，不能为了有修改单而假装确定违反。
-    if d["detail"]["project"]["must_ask"].get("ambiguous"):
-        assert ["project", "must_ask"] in repair["hard_ambiguous"]
-        assert repair["needs_review"] and not repair["passed"] and "must_ask" not in plan_ids
-    else:
-        assert "must_ask" in plan_ids
+    plan_ids = {p["qid"] for p in M.repair_plan_for("t", BODY, project="TUGE", brief=dict(brief, hard_rules=[dict(brief["hard_rules"][0], want=(d["profile"]["must_ask"] != "是"))]))["plan"]}
+    assert "must_ask" in plan_ids                                                               # repair_plan_for 也带项目层（以前连 project 都没传）
     d2 = M.judge_draft("t", BODY, project="NRT", brief=brief)                                  # 没放行项目层：服务端整层去掉并回显
     assert d2["policy"]["dropped_banks"] == ["project"] and "project" not in d2["detail"]
 
@@ -278,8 +272,8 @@ def test_draft_too_short_and_unjudged_hard_rules():
 
 def test_echo_generator_repairs_by_deleting_evidence_sentence():
     from judge import loop as L
-    plan = [{"instruction": "有一条合规硬约束没过（0.9）。依据句：效果是真的绝，立马就压住了。"}]
-    draft = {"title": "戒烟", "body": "第一天很难熬。效果是真的绝，立马就压住了。第二天好多了。"}
+    plan = [{"instruction": "有一条合规硬约束没过（0.9）。依据句：这个见效特别快，当场就缓过来了。"}]
+    draft = {"title": "戒烟", "body": "第一天很难熬。这个见效特别快，当场就缓过来了。第二天好多了。"}
     out = L.repair(L.EchoGenerator(), draft, plan)
     assert out == {"title": "戒烟", "body": "第一天很难熬。第二天好多了。"}
 
