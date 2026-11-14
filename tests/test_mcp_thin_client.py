@@ -17,9 +17,9 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-BODY = "上周办了张健身卡，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先戒烟还是边练边戒？"
+BODY = "上个月报了个游泳班，第一段讲事。\n第二段讲感受，挺累的但开心。\n大家怎么看，是先调作息还是边学边调？"
 SERVICE = {"subject_id": "draft", "passed": False, "invalid_reason": None, "profile": {"opening_type": "具体事件"},
-           "hard_fails": [["platform_health_v0.1", "efficacy_claim", "是", 0.68, "效果是真的绝"]], "unjudged": [], "ambiguous": [],
+           "hard_fails": [["platform_health_v0.1", "efficacy_claim", "是", 0.68, "这个见效特别快"]], "unjudged": [], "ambiguous": [],
            "para_stats": {}, "detail": {}, "para_mode": "none", "paras": [],
            "plan": [{"bank": "platform_health_v0.1", "qid": "efficacy_claim", "instruction": "…"}], "recorded": [{"qid": "opening_type", "why": "闸二"}],
            "calls": 3, "usage": {}, "banks": {"feature_questions_v0_1": {"version": "v0.1", "sha256": "x"}}, "ignored_banks": [],

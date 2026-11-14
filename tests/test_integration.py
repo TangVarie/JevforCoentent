@@ -21,7 +21,7 @@ from judge.jev_client import RETRY_STATUSES, JevClient, mock_response  # noqa: E
 FQ = ROOT / "banks" / "vendor" / "feature_questions_v0_1.yaml"
 PH = ROOT / "banks" / "platform_health_v0.1.yaml"
 HF2 = ROOT / "banks" / "human_feel_para_v0.2.yaml"
-BODY = "上周办了张健身卡。\n教练问我是不是抽烟。\n办卡花了三千多，挺亏的。\n你们是先戒烟还是边练边戒？"
+BODY = "上个月报了个游泳班。\n教练问我平时是不是熬夜。\n报名花了两千出头，有点心疼。\n你们是先调作息还是边学边调？"
 
 
 class FixedJev:
@@ -43,7 +43,7 @@ class FixedJev:
 def test_askable_matches_tv_render_call_skip_rules():
     b = B.load_bank(FQ)
     tv = S._tv
-    for raw, mode, title_col in [("标题：老公戒烟成功但开始疯狂吃零食了\n正文：老公戒烟到今天正好40天了，烟是真的没抽。", "markers", None),
+    for raw, mode, title_col in [('【标题】合成标题\n【正文】虚构人物在周末整理书架，用一个下午试了三种摆放顺序，记录下一次还想调整的地方。', "markers", None),
                                  ("【标题】好\n【正文】短短的正文十二个字而已哦", "markers", None),        # 1 字标题；full = 标题+正文 ≥ 20，body < 20
                                  ("只有正文没有标题的一篇，正文写得足够长足够长足够长。", "none", None),
                                  ("", "none", None), ("正文", "column", "标题列的标题")]:
@@ -69,7 +69,7 @@ def test_all_skipped_means_zero_calls_and_null_rows():
 
 def test_missing_out_of_vocab_and_evidence_contract():
     b = B.load_bank(FQ)
-    raw = "标题：戒烟第几天最难熬？\n正文：戒烟第15天，记录一下。昨天在药店看到咀嚼胶就买了一盒。嚼了几口辣嗓子，不太习惯。"
+    raw = "标题：早起第几天最难熬？\n正文：早起第12天，写两句。昨天在便利店看到无糖茶就买了一瓶。喝了几口有点苦，不太习惯。"
     jev = FixedJev({"title_is_question": {"type": "noul", "noul": 0.9},                  # 是 → 要证据，证据调用给「1」
                     "has_specific_time": {"type": "noul"},                               # 没有数值 → out_of_vocab
                     "opening_type": {"type": "choice", "choice": "不存在的选项", "probabilities": {"不存在的选项": 0.9}},
@@ -141,7 +141,7 @@ def test_postgrest_upsert_refreshes_extracted_at(monkeypatch):
 def test_gate2_unvalidated_fq_targets_are_recorded_not_planned():
     from judge import loop as L
     fq = B.load_bank(FQ, name="feature_questions_v0_1")
-    dj = L.judge_draft(JevClient(mock=True), {"title": "健身房教练劝我先戒烟", "body": BODY}, fq=fq)
+    dj = L.judge_draft(JevClient(mock=True), {"title": "游泳班教练劝我先调作息", "body": BODY}, fq=fq)
     now = dj.profile["opening_type"]
     want = next(v for v in fq.by_id()["opening_type"].criteria if v != now)
     recorded: list = []
@@ -151,7 +151,7 @@ def test_gate2_unvalidated_fq_targets_are_recorded_not_planned():
     assert plan2[0]["qid"] == "opening_type" and fq.by_id()["opening_type"].criteria[want] in plan2[0]["instruction"]
     # 换名加载的 fq（按格式认，不按写死的名字）守卫照样生效
     fq2 = B.load_bank(FQ, name="fq_renamed")
-    dj2 = L.judge_draft(JevClient(mock=True), {"title": "健身房教练劝我先戒烟", "body": BODY}, fq=fq2)
+    dj2 = L.judge_draft(JevClient(mock=True), {"title": "游泳班教练劝我先调作息", "body": BODY}, fq=fq2)
     assert L.repair_plan(dj2, {fq2.name: fq2}, target={"opening_type": want}) == []
     assert "此题未过闸二" not in L.repair_prompt({"title": "t", "body": BODY}, plan)
 
@@ -272,8 +272,8 @@ def test_draft_too_short_and_unjudged_hard_rules():
 
 def test_echo_generator_repairs_by_deleting_evidence_sentence():
     from judge import loop as L
-    plan = [{"instruction": "有一条合规硬约束没过（0.9）。依据句：效果是真的绝，立马就压住了。"}]
-    draft = {"title": "戒烟", "body": "第一天很难熬。效果是真的绝，立马就压住了。第二天好多了。"}
+    plan = [{"instruction": "有一条合规硬约束没过（0.9）。依据句：这个见效特别快，当场就缓过来了。"}]
+    draft = {"title": "戒烟", "body": "第一天很难熬。这个见效特别快，当场就缓过来了。第二天好多了。"}
     out = L.repair(L.EchoGenerator(), draft, plan)
     assert out == {"title": "戒烟", "body": "第一天很难熬。第二天好多了。"}
 

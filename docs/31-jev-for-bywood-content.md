@@ -1,5 +1,7 @@
 # 31 · Jev for BYWOOD content：一个模型、一套题库纪律、七个位置（说明 · 供讨论）
 
+> **2026-11-14 公开样本更正**：本文的 50 篇笔记、33 条评论及其比对数字属于当时的真实材料。当前 `fixtures/fq_notes_gate1_50.json` 和 `fixtures/comments_ops_sample_33.json` 已替换为合成工程输入，关联真实答案 TSV 已从当前树移除；文件定位仅保留为历史记录，不能用现有合成输入重演本文准确率或作为金标准。真实材料的授权和历史处置见 `fixtures/README.md`。
+
 > **状态**：2026-09-23 拍板版。按三个仓库当天的 main 写（truth-vault `d7615d5`，到 D-081；autowriter `b09df8e`；sanshengliubu `cab7750`，v0.36.1）。三仓没改代码；判定服务的骨架、题库、脚本和实跑结果在独立仓库 `judge`（见 §9）。
 > **评论现行口径（2026-11-03）**：自然点名、无默认固定配额；经验与答疑位允许有真实素材依据的亲历、评价和推荐，不因表达分类自动复核。冻结题面的旧 `feeds` 路由由代码替代，分类与事实核验分开。具体见[评论接口口径](comment-tools-rollout-2026-10-12.md)，下文早期实跑数字仍作历史观察。
 > 它整合三样东西：docs/30（Jev 在 TV 和写作台的用法）、今天的评论级实跑（`jev-comment-unit` 包，jev-1.13.0）、这几天讨论的「判在写前 / 写中 / 写后」三个参与点。docs/30 里已经写清的段落这里只引不抄。
@@ -195,7 +197,7 @@ docs/30 §3 已写借卡（§3.1）、发牌（§3.2）、查稿（§3.3）、�
 - **写后** `judge_draft → repair_plan → repair`：篇级跑 fq + 平台 + 项目题库；平台和项目题答「是」的做证据选句；篇级不过再判段（人感题库 + 意图题）；修改单每条 = 题号 + 概率 + 依据句 + 该题定义，不写改法；修补由便宜模型只改指到的句子，再判，直到过或预算用完。fq 题的正向写法只对过了闸二的题下发（docs/28 §7）。
 - **整条** `produce`：把上面串起来，返回终稿、篇级画像、段级分布（语域分布、无产品意图段占比、产品第一次出现在第几段、有没有摩擦、总结式收尾段数）和每一步的轨迹。
 
-两个入口：写手在 Claude Code / WorkBuddy 里用**写作台 deskcore** 的 `judge_draft` / `repair_plan_for` / `list_banks`（2026-10-09 并进 deskcore：deskcore 用服务端的管理 key 转发到 `/judge_draft`，`write` / `return_rows` 钉死 false，写手只有 deskcore 那一个 MCP、不持任何 judge 密钥；`judge.mcp_server` 这个 stdio 薄客户端只剩内部 / 运维机器用，judge_comments / comment_repair_plan_for / judge_thread 要 `JUDGE_ALLOW_LOCAL_JEV=1`），现在就能用；deskcore 的 `commit_drafts` 挂 HTTP `/judge`，答案进账本。两篇真实笔记实跑：每篇 10–12 次调用、4.5 秒；「效果是真的绝…立马就压住了」被平台题库判疗效暗示 0.68，「省下的烟钱都够给老婆买个包」被项目题库判省钱 0.77，都带依据句；段级分布给出无产品意图段 83%、产品第一次出现在第 4 段、有摩擦、无总结式收尾。生成端是可插拔适配器（Anthropic 兼容端点，接三省六部那个中转站即可），本轮没有接真实生成端。目标画像等 ⑧ 的参考分布和闸二。
+两个入口：写手在 Claude Code / WorkBuddy 里用**写作台 deskcore** 的 `judge_draft` / `repair_plan_for` / `list_banks`（2026-10-09 并进 deskcore：deskcore 用服务端的管理 key 转发到 `/judge_draft`，`write` / `return_rows` 钉死 false，写手只有 deskcore 那一个 MCP、不持任何 judge 密钥；`judge.mcp_server` 这个 stdio 薄客户端只剩内部 / 运维机器用，judge_comments / comment_repair_plan_for / judge_thread 要 `JUDGE_ALLOW_LOCAL_JEV=1`），现在就能用；deskcore 的 `commit_drafts` 挂 HTTP `/judge`，答案进账本。两篇真实笔记实跑：每篇 10–12 次调用、4.5 秒；一句夸见效快的话被平台题库判疗效暗示 0.68，一句讲省下烟钱的话被项目题库判省钱 0.77（原句 2026-11-14 起不再引用），都带依据句；段级分布给出无产品意图段 83%、产品第一次出现在第 4 段、有摩擦、无总结式收尾。生成端是可插拔适配器（Anthropic 兼容端点，接三省六部那个中转站即可），本轮没有接真实生成端。目标画像等 ⑧ 的参考分布和闸二。
 
 **补记（2026-10-20）**：写前多了一个入口 `POST /compile_rules`：写作台把存下的自由文本规则编成写后检查（代码检查 / 是非题 / 查不了），是非题作为内联 `project_bank` 送回 `/judge_draft` 的项目层，只作建议、不进 `hard_rules`。前提是 owner 当天拍板项目层对所有项目放行（`project_layer_cleared: ["*"]`，docs/00 #7）。Jev 格式题可以声明 `scope`（标题 / 正文 / 全文），标题题的证据从标题里选。这一节「项目层题库由写作台按 brief 编」仍然成立，规则编译是第二个来源；两者都走同一个 `project_bank` 槽位，一次只能给一份。字段见 README「规则编译」。
 

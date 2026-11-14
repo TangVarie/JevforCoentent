@@ -19,8 +19,8 @@
 | `scripts/` | `run_gold.py` 金标准评测 · `fq_shadow.py` 特征层影子跑（与现行抽取器 / D-081 表比对，出 SQL）· `backfill_comments.py` 评论回填 · `external_corpus.py` 外部语料定时抓取（`--dry-run` 算钱、`--probe` 钉字段、`--rows` 出两张表的行）· `apply_rows.py` 把 rows.json 经 PostgREST 写进 TV（TV 没有、也不该有执行任意 SQL 的 RPC）· `known_external_ids.py` 从 TV 拉已入库的外部笔记 id 做第二道去重 · `backfill_external_publish_time.py` 一次性回填旧外部笔记的 `publish_time`（默认只看不写） |
 | `config/` | `external_corpus.yaml`：品类、关键词、排序、页数、每次 / 每月上限、预算——量级和频率都在这里改 · `data_policy.yaml`：处方药项目、合同已清出境的项目、放行项目层的项目 · `hidden_rotation.yaml`：暗题的比例与手工指定 |
 | `migrations/` | `notes_v1_17_judge_subjects.sql`（账本加 comment / ssll_sample / external_note，prob 口径统一）· `notes_v1_18_external_notes.sql`（外部笔记表 + 参考分布视图 `v_external_reference`） |
-| `fixtures/` | gate1 的 50 篇笔记 + Opus 答案（覆盖其中 47 篇，所以报告里有 921 与 999 两个分母）+ D-081 Jev 表；33 条运营评论（运营前缀【贴主回复】等已剥掉、角色已改正）；评论用例 |
-| `docs/` | 实跑报告（特征层 50 篇、评论 33 条、评论金标准）与拍板记录 |
+| `fixtures/` | 50 篇合成笔记、6 篇合成评论关联帖和 33 条合成评论，保留输入结构供离线演示；不是人工金标准。真实样本及关联答案 TSV 已从当前树移除，见 `fixtures/README.md`；其他评论用例 |
+| `docs/` | 历史实跑报告与拍板记录；2026-10-15 的真实交接 case/Excel/ZIP 按该批明确公开许可保留，不能据 fixture 合成化宣称全仓已无真实素材 |
 | `tests/` | 合成工程测试（本轮功能基线200项），全 mock（评论回路用按关键词给答案的假 Jev；MCP 薄客户端的 urllib 打到进程内 TestClient），不联网 |
 
 ## 跑起来
@@ -30,14 +30,14 @@ pip install -r requirements.txt
 export TYPESAFE_API_KEY=...                     # Jev 密钥，只在服务端
 python3 -m pytest -q                            # 全 mock
 python3 scripts/run_gold.py banks/comment_reader_v0.4.yaml fixtures/comment_cases.json --gold banks/gold/comment_reader_gold_v0.2_proposed.yaml   # 占位符从用例文件的 fill 填
-python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --opus fixtures/fq_opus_gate1_50.tsv --gate1 fixtures/fq_jev_d081_A_gate1_50.tsv --out fq.md --sql fq.sql --run-tag shadow-$(date +%F)
+python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --mock --out /tmp/fq-synthetic.md   # 仅验证程序路径，无准确率结论
 uvicorn judge.api:app --port 8080              # HTTP：POST /judge（一个题库、一批 subject，并行）· POST /judge_draft（一篇稿、多层题库、带修改单）· POST /compile_rules（规则编成写后检查）· GET /banks · GET /health（不鉴权；回显 `policy_sha256`，两份配置坏了回 503）
 JUDGE_URL=https://… JUDGE_API_KEY=… python3 -m judge.mcp_server   # 内部 / 运维机器的 MCP 工具（上面那个 HTTP 服务的薄客户端）：judge_draft · repair_plan_for · list_banks。写手不用它：这三个工具 2026-10-09 起由写作台 deskcore 转发（写手只配 deskcore 那一个 MCP）；
                                                 #   旧 stdio MCP 的 judge_comments · comment_repair_plan_for · judge_thread 仍为显式本机路径；写手通过 deskcore 转发已实现的评论HTTP（默认关闭），见 HANDOFF
 python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要花多少钱；--probe 花一次请求钉字段；正式跑由 .github/workflows/external-corpus.yml 每周一、周四触发
 ```
 
-金标准报告头会写明对的是哪一版金标准；`cg-v0.2-proposed` 是提议版、未经勘误，命中率不等于对勘误版的命中率。影子跑从库里取用 `--from-db --mappings ../truth-vault/mappings`，切标题按每个项目的 mapping 走。
+金标准报告头会写明对的是哪一版金标准；`cg-v0.2-proposed` 是提议版、未经勘误，命中率不等于对勘误版的命中率。历史 50 篇/33 评论的实跑数字属于当时的真实材料，不能用现有合成样本复现或更新。需比较真实结果时，从获授权的私有文件传入 `--notes /私有路径/notes.json --opus /私有路径/opus.tsv --gate1 /私有路径/jev.tsv`；不要提交或上传原文及证据。影子跑从库里取用 `--from-db --mappings ../truth-vault/mappings`，切标题按每个项目的 mapping 走。
 
 环境变量（服务端）：`TYPESAFE_API_KEY`（必需，**只放在服务端**，写手机器不配；也可用 `TYPESAFE_KEY_FILE` 指向密钥文件，`TYPESAFE_BASE_URL` 换端点）· `JUDGE_API_KEY`（管理 key，必需；不配则服务拒绝所有请求，本地开发显式设 `JUDGE_ALLOW_ANONYMOUS=1`）· `JUDGE_WRITER_API_KEYS`（发给写手机器的 key，逗号分隔可多把；只够 `GET /banks` 和 `POST /judge_draft`，后者 write 一律 403、不回账本行；`/judge` 只认管理 key）· `JUDGE_WORKERS`（一批 subject 并行几路，默认 4）·
 `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`（与 truth-vault 同名；直接写账本，没有就只出 SQL / rows.json）· `JUDGE_MOCK=1`（不联网的假 Jev；它判的行 extractor 是 `mock:<模型>`，任何写库请求一律拒绝）· `TIKHUB_API_KEY`（外部语料，每次请求 0.01 美元；`TIKHUB_BASE_URL` 换端点）·

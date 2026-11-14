@@ -71,6 +71,8 @@ jobs:
         with:
           name: "external-corpus-${{ github.run_id }}"
           path: out
+          # 含补写所需的外部正文；诊断详情只留脱敏结构，恢复产物也只短期保存。
+          retention-days: 7
       - name: write to db via PostgREST (missing key or failed write makes the job red so the cache does not keep a seen-but-unwritten state; needs TV notes_v1_17 + v1_18)
         if: always() && github.event.inputs.dry_run != 'true' && hashFiles('out/rows.json') != ''
         run: python3 scripts/apply_rows.py out/rows.json

@@ -32,7 +32,7 @@ SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
 DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"   # 官方文档：图文接口图文、视频笔记都能取到文字；视频接口只认视频
 USER_AGENT = "bywood-judge/0.1 (+https://github.com/TangVarie/JevforCoentent)"
 DETAIL_PROBE = 5           # 连着这么多篇取全文失败（接口报错或解析不出正文）→ 整次停，不再按篇白付费
-DETAIL_SAMPLES = 3         # 每次运行留几份详情原始返回进产物，字段变了能直接看
+DETAIL_SAMPLES = 3         # 每次运行留几份详情脱敏结构进产物，字段变了能直接看（不留正文/账号）
 SEARCH_SAMPLES = 1         # 每次运行留几份「一条笔记都没认出来」的搜索原始返回进产物（脱敏），格式变了能直接看
 # Jev 回了 200 却没答（missing）或答案不在选项里（out_of_vocab）：这篇「没判成」，不是「判了是否」。
 # 设计内的无效（no_title / text_too_short / evidence_not_found / span_truncated）是判完了的结论，照常入账本。
@@ -237,6 +237,30 @@ def _masked(obj: Any, api_key: str = "", depth: int = 0) -> Any:
     return obj
 
 
+def _detail_diagnostic(raw: Any, api_key: str = "") -> Any:
+    """详情诊断只留结构和状态值；先脱敏，再缩减，正文、昵称和未知字段的值不进诊断产物。"""
+    safe = _masked(raw, api_key)
+
+    def shape(obj: Any, key: str = "", depth: int = 0) -> Any:
+        if depth > 8:
+            return "…"
+        if isinstance(obj, dict):
+            return {k: shape(v, str(k), depth + 1) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [shape(v, depth=depth + 1) for v in obj[:3]]
+        if obj is None or isinstance(obj, bool):
+            return obj
+        if key in {"code", "status", "status_code"} and isinstance(obj, (int, float)):
+            return obj
+        if obj == "***":
+            return obj
+        if isinstance(obj, str):
+            return {"type": "str", "chars": len(obj)}
+        return {"type": type(obj).__name__}
+
+    return shape(safe)
+
+
 def _find_session(obj: Any, depth: int = 0) -> dict:
     """搜索返回里的翻页会话：TikHub 要求第 2 页起回传首页给的 search_id / search_session_id（官方 OpenAPI 的「翻页说明」）。"""
     if depth > 5:
@@ -313,11 +337,12 @@ class TikHubClient:
     def detail(self, note_id: str, note_type: str = "") -> tuple:
         """返回 ({title, desc}, 原始返回)；解析不出正文抛 DetailUnparseable（这次请求已计费）。"""
         raw = self._get(DETAIL_PATH, {"note_id": note_id})
+        diagnostic = _detail_diagnostic(raw, self.api_key)
         if len(self.detail_samples) < DETAIL_SAMPLES:
-            self.detail_samples.append({"note_id": note_id, "raw": raw})
+            self.detail_samples.append({"note_id": note_id, "raw": diagnostic})
         title, body = _detail_text(raw, note_id)
         if not body:
-            raise DetailUnparseable(f"详情里找不到正文：{json.dumps(raw, ensure_ascii=False)[:300]}")
+            raise DetailUnparseable(f"详情里找不到正文（返回结构）：{json.dumps(diagnostic, ensure_ascii=False)[:300]}")
         return {"title": title, "desc": body}, raw
 
 
@@ -339,7 +364,7 @@ def mock_search(params: dict) -> dict:
 
 def mock_detail(params: dict) -> dict:
     return {"code": 200, "data": {"note": {"note_id": params.get("note_id"), "title": "全文标题",
-            "desc": "戒烟第15天，记录一下。昨天在药店看到咀嚼胶就买了一盒试试。嚼了几口辣嗓子，也不知道有没有用。有几次忘了带，烟瘾上来还是挺难受的。大家用过吗？"}}}
+            "desc": "早起第12天，写两句。昨天在便利店看到无糖茶就买了一瓶试试。喝了几口有点苦，不确定能坚持多久。有几次忘了定闹钟，睡过头还是挺懊恼的。大家试过吗？"}}}
 
 
 # ── 一次运行 ──────────────────────────────────────────────────────────────
