@@ -30,7 +30,8 @@
       "target": {"opening_type": "具体事件"}, "validated": ["opening_type"],   # 可选：目标画像 / 过了闸二的 fq 题
       "judge_paras": "on_fail", "run_tag": "primary", "write": false, "return_rows": true
     }
-    返回 passed / profile / hard_fails / unjudged / ambiguous / para_stats / plan（修改单）/ recorded（未过闸二只记录的目标题）/
+    返回 passed / profile / hard_fails / hard_ambiguous / needs_review / unjudged / ambiguous / para_stats / plan（修改单）/ recorded（未过闸二只记录的目标题）/
+    hard_ambiguous 是 [[题库名, 题号], ...]：硬约束答案拿不准，passed=false、needs_review=true，不当成确定违反、不自动生成修改单；普通描述题歧义不影响passed。
     detail / policy / 账本行。暗题（judge/hidden.py）不出现在 profile / detail / plan 等任何字段里；账本行照带全部题，调用方不得转给写手。
     subject_type 只能是 aw_version / ssll_sample（一篇稿子一定按未发布稿过数据出境）。judge_paras = on_fail 时篇级没有硬伤也会判暗题；
     段级结果（subject_id = <稿 id>:p<N>）与篇级一起落账本。

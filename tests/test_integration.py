@@ -43,7 +43,7 @@ class FixedJev:
 def test_askable_matches_tv_render_call_skip_rules():
     b = B.load_bank(FQ)
     tv = S._tv
-    for raw, mode, title_col in [("标题：老公戒烟成功但开始疯狂吃零食了\n正文：老公戒烟到今天正好40天了，烟是真的没抽。", "markers", None),
+    for raw, mode, title_col in [('【标题】合成标题\n【正文】虚构人物在周末整理书架，用一个下午试了三种摆放顺序，记录下一次还想调整的地方。', "markers", None),
                                  ("【标题】好\n【正文】短短的正文十二个字而已哦", "markers", None),        # 1 字标题；full = 标题+正文 ≥ 20，body < 20
                                  ("只有正文没有标题的一篇，正文写得足够长足够长足够长。", "none", None),
                                  ("", "none", None), ("正文", "column", "标题列的标题")]:
@@ -252,8 +252,14 @@ def test_data_policy_mcp(monkeypatch, policy_cfg, mcp_via_testclient):
     brief = {"hard_rules": [{"id": "must_ask", "ask": "有没有向读者提问？", "want": True}]}
     d = M.judge_draft("t", BODY, project="TUGE", brief=brief)                                  # 写手侧也能送 brief、硬约束接到判定
     assert "project" in d["detail"] and d["policy"]["project_layer"] and "ledger_rows" not in d
-    plan_ids = {p["qid"] for p in M.repair_plan_for("t", BODY, project="TUGE", brief=dict(brief, hard_rules=[dict(brief["hard_rules"][0], want=(d["profile"]["must_ask"] != "是"))]))["plan"]}
-    assert "must_ask" in plan_ids                                                               # repair_plan_for 也带项目层（以前连 project 都没传）
+    repair = M.repair_plan_for("t", BODY, project="TUGE", brief=dict(brief, hard_rules=[dict(brief["hard_rules"][0], want=(d["profile"]["must_ask"] != "是"))]))
+    plan_ids = {p["qid"] for p in repair["plan"]}
+    # 项目层确实到达服务端；拿不准的硬约束应回待复核，不能为了有修改单而假装确定违反。
+    if d["detail"]["project"]["must_ask"].get("ambiguous"):
+        assert ["project", "must_ask"] in repair["hard_ambiguous"]
+        assert repair["needs_review"] and not repair["passed"] and "must_ask" not in plan_ids
+    else:
+        assert "must_ask" in plan_ids
     d2 = M.judge_draft("t", BODY, project="NRT", brief=brief)                                  # 没放行项目层：服务端整层去掉并回显
     assert d2["policy"]["dropped_banks"] == ["project"] and "project" not in d2["detail"]
 

@@ -108,11 +108,11 @@ def test_interpret_noul_and_choice_thresholds():
 
 def test_spans_and_askable():
     b = B.load_bank(FQ)
-    sp = S.build_spans("标题：老公戒烟成功但开始疯狂吃零食了\n正文： 老公戒烟到今天正好40天了，烟是真的没抽。\n但是他现在变成了零食狂人。\n有没有同款老公的？求个解决办法\n#戒烟成功", mode="markers")
-    assert sp["title"] == "老公戒烟成功但开始疯狂吃零食了"
+    sp = S.build_spans('【标题】合成标题\n【正文】虚构人物在周末整理书架，用一个下午试了三种摆放顺序，记录下一次还想调整的地方。', mode="markers")
+    assert sp["title"] == '合成标题'
     qids, skipped = S.askable(b, sp)
     assert len(qids) == 20 and skipped == {}
-    sp2 = S.build_spans("【正文】\n情窦初开的时候父母不同意，情窦再开的时候老婆不同意。\n好遗憾。", mode="markers")
+    sp2 = S.build_spans('虚构人物在周末整理书架，用一个下午试了三种摆放顺序，记录下一次还想调整的地方。', mode="markers")
     qids2, skipped2 = S.askable(b, sp2)
     assert skipped2 == {"title_is_question": "no_title"} and len(qids2) == 19
     st = S.state_from_spans(sp2)

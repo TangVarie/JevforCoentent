@@ -1,5 +1,7 @@
 # 02 · judge 设计审查（2026-09-23）
 
+> **2026-11-14 公开样本更正**：本文的 50 篇笔记、33 条评论及其比对数字属于当时的真实材料。当前 `fixtures/fq_notes_gate1_50.json` 和 `fixtures/comments_ops_sample_33.json` 已替换为合成工程输入，关联真实答案 TSV 已从当前树移除；文件定位仅保留为历史记录，不能用现有合成输入重演本文准确率或作为金标准。真实材料的授权和历史处置见 `fixtures/README.md`。
+
 > **对象**：上传包 `812beb15-judge.zip`，原样导入为本仓第一个 commit（未改一个字）。对照三仓当天 main：truth-vault `d7615d5`、autowriter `b09df8e`、sanshengliubu `cab7750`，与 docs/31 页首写的三个 commit 逐一相同，没有版本漂移。
 > **方法**：读完全部源码、题库、fixtures、文档；本地跑 22 个测试；用机器上现成的 PostgreSQL 16 真跑 TV 的 v1_13 账本表 + 本仓 v1_17 + v1_18，再把三个脚本 mock 生成的账本 SQL 灌进去；联网核 TypeSafe 官方文档、TikHub OpenAPI、GitHub Actions 文档与 runner 源码；对三仓逐条打开文档引用的每个 file:line；七个维度并行审（core / loop+comments / 外部语料与基础设施 / TV / 写作台 / 三省六部 / 文档与题库），每条中高严重度发现另起怀疑者复核。
 > **复核状态**：七个维度共报 94 条，其中 23 条（high 全部 + medium 的 bug / mismatch）送两路怀疑者复核；跑完 7 条时撞上会话额度，7 条全部成立、零驳倒（其中 4 条被「实际后果」视角降级，本文按降级后的口径写）。其余 16 条没跑复核的，我逐条自己核了一遍：v1_18 视图用真实 PostgreSQL 16 跑、`exec_sql` 与密钥变量名用全仓 grep、金标准处数用 diff、写作台 D-071 与 worker 的 subprocess 包装直接打开原文，其余按源码逐行读。

@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 """特征层影子跑：用 Jev 跑 TV 的 fq 题库（20 题 + 证据选句），与现行抽取器（Opus）和 D-081 的 Jev 表比对，并生成落库 SQL。
 
-  # 从本地 JSON / TSV（fixtures 里有 gate1 的 50 篇）
-  python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --opus fixtures/fq_opus_gate1_50.tsv \
-      --gate1 fixtures/fq_jev_d081_A_gate1_50.tsv --out docs/fq-shadow.md --raw raw.json --sql shadow.sql --run-tag shadow-2026-09-23
+  # 公开合成输入，只验证格式/程序路径，不是 gate1 金标准
+  python3 scripts/fq_shadow.py --notes fixtures/fq_notes_gate1_50.json --mock --out /tmp/fq-synthetic.md
+
+  # 真实比对材料只能从获授权的私有文件传入，不提交原文、证据或产物
+  python3 scripts/fq_shadow.py --notes /private/notes.json --opus /private/opus.tsv \
+      --gate1 /private/jev.tsv --out /private/fq-shadow.md --run-tag shadow-private
 
   # 直接从库里取（需要 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY；只读 notes / note_feature_answers）
   python3 scripts/fq_shadow.py --from-db --limit 200 --mappings ../truth-vault/mappings [--project NUC_phase1] ...
@@ -219,6 +222,9 @@ def main():
     else:
         notes = json.loads(Path(args.notes).read_text(encoding="utf-8"))
         opus = parse_tsv(args.opus)
+    synthetic = any(n.get("fixture_kind") == "synthetic" for n in notes)
+    if synthetic and (args.opus or args.gate1):
+        sys.exit("合成输入不能与真实参考答案比对；请使用获授权的同源私有样本。")
     gate1 = parse_tsv(args.gate1)
 
     if args.from_raw:
@@ -290,6 +296,7 @@ def main():
     def pct(a, b): return f"{a}/{b} ({a / b * 100:.0f}%)" if b else "–"
     used_ext = sorted({c.get("extractor") for q in opus.values() for c in q.values() if c.get("extractor")})
     L = [f"# 特征层影子跑 · {bank.name} {bank.version} × {bank.model} · {len(results)} 篇", "",
+         ("**合成输入：只验证程序路径，不是金标准，不代表模型准确率或历史实跑结果。**" if synthetic else ""),
          (f"现行抽取器：{'、'.join(used_ext)}（同篇同题多个模型时取最新）。" if used_ext else ""),
          (f"切标题按项目 mapping：{', '.join(f'{k}={v}' for k, v in sorted(modes.items()) if k in {n.get('project_id') for n in notes})}。" if modes else f"切标题：{args.title_extraction}。"), "",
          f"调用 {n_calls} 次，输入 {tok_in:,} / 输出 {tok_out:,} token，单次平均 {sum(lat) / max(len(lat), 1):.0f} ms（最慢 {max(lat) if lat else 0} ms）。"
