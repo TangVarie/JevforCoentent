@@ -147,7 +147,7 @@ SQL 链路其余部分是通的：v1_17 连跑两遍结果一样，自动约束�
 | `draw_angles` 均匀随机；14,592 = 12 × 19 × 8 × 8；没有 15% 随机保留 | `core.py:435-451`；`vocab.py:170-173` |
 | 版本 id 在入库后可拿到、判失败不回滚与现有纪律一致 | `core.py:1108-1111, 1243-1246, 1273-1274, 1290-1291, 1206-1211` |
 | drafts 的字段名（title / body / version_id / angle_key）与 judge 的 draft 形状对得上 | `core.py:1067, 1082, 1110, 1253` |
-| 09-10 途鸽 66 条里 49 条没带 angle_key；09-18 起交付即入库 | `core.py:1046-1052, 1267-1269`；`tests/test_deskcore_commit_gate.py:3-7` |
+| 09-10 一个求职机构项目 66 条里 49 条没带 angle_key；09-18 起交付即入库 | `core.py:1046-1052, 1267-1269`；`tests/test_deskcore_commit_gate.py:3-7` |
 | MCP 客户端约 22 秒容忍 | `config.py:123-126`；D-074 |
 
 **sanshengliubu**

@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """金标准评测：题库 + 用例 → Jev（或 mock）→ 歧义判定 → 与金标准比对 → Markdown 报告。
 
-  python3 scripts/run_gold.py banks/comment_reader_v0.3.yaml fixtures/comment_cases.json \
-      --gold banks/gold/comment_reader_gold_v0.1.yaml --out report.md [--raw raw.json] [--mock] [--lang en]
+  python3 scripts/run_gold.py banks/comment_reader_v0.4.yaml fixtures/comment_cases.json \
+      --gold banks/gold/comment_reader_gold_v0.2_proposed.yaml --out report.md [--raw raw.json] [--mock] [--lang en]
 
 用例文件：{"说明": "...", "shared": {...}, "fill": {占位符: 值}, "cases": [{"id": "c1", "state": {...}, "note": "..."}]}
   fill 填题库题干里按篇变的占位符（评论题库 v0.4 的帖子要点、主体称呼）；题库没有占位符时省略。
@@ -50,8 +50,12 @@ def compare(items: dict, expect: dict) -> dict:
 
 
 def fmt(it: dict) -> str:
-    s = f"{it['answer']} {it['p']:.2f}"
-    return s + ("  ⚠歧义" if it["ambiguous"] else "")
+    # 无效答案(词表外、概率不是 0–1 之间的数)没有 p: 照实写成「无效」, 不能让整份评测在出报告之前崩掉(Codex on #36)
+    p = it.get("p")
+    if it.get("answer") is None or not isinstance(p, (int, float)) or isinstance(p, bool):
+        return f"无效（{it.get('invalid') or it.get('invalid_reason') or '没有可用的答案'}）"
+    s = f"{it['answer']} {p:.2f}"
+    return s + ("  ⚠歧义" if it.get("ambiguous") else "")
 
 
 def main(argv=None) -> int:

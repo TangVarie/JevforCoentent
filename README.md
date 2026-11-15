@@ -15,11 +15,11 @@
 | 目录 | 内容 |
 |---|---|
 | `judge/` | `jev_client`（调用、重试、mock）· `banks`（两种题库格式 → 一种内部表示；歧义判定）· `spans`（TV 同款切片、切句）· `core`（判一篇 / 判一个 state、证据选句、账本行、SQL / PostgREST 写入）· `loop`（稿子的生产回路：brief 编译成项目题库、best-of-k、判 → 修改单 → 修补）· `comments`（评论的生产回路：评论位、best-of-k、修改单、评论区成组判、换位）· `external`（外部语料：TikHub 抓取、预算、去重、分诊、打标）· `draft`（一篇稿子判哪几层、哪些硬约束：`/judge_draft` 用，MCP 经 HTTP 间接用）· `policy`（数据出境：处方药未发布稿不出境；项目层看 `project_layer_cleared`，10-20 起 `"*"` 全部放行）· `rules`（`/compile_rules`：写作台的自由文本规则编成写后检查）· `hidden`（暗题：人感题库每季度 1/3 不进任何给写手看的输出）· `api`（HTTP `/judge` · `/judge_draft` · `/compile_rules`）· `mcp_server`（内部 / 运维机器用的 stdio MCP：HTTP 服务的薄客户端，不持 Jev 密钥、不读题库；写手的判稿入口在写作台 deskcore，见 docs/31 §5.4） |
-| `banks/` | `vendor/feature_questions_v0_1.yaml` TV 的 fq 题库原样 vendor（SHA256SUMS 记校验和，测试钉住）· `comment_reader_v0.6` 读者侧评论 7 题（C4 原样，D-112 owner 10-16 验收：四道门槛题 + 三道参考题；写手评论工具和评论回填默认用它）· `comment_reader_v0.4` 上一版读者侧 7 题（v0.3 + 按篇 / 按项目的占位符，途鸽用例逐字等同 v0.3）· `comment_thread_v0.4` 评论区 4 题（v0.3 + praise_share 的出口「评论太少」；v0.3 留给金标准）· `comment_ops_v0.2` 运营侧 comment_intent（草案；蓝词植入改成只看文字能判的定义，state 不带蓝词清单）· `platform_health_v0.1` 大健康平台层（草案）· `human_feel_para_v0.2` 人感段级（草案；para_function 加出口「说不清」）· `external_triage_v0.1` 外部语料分诊 4 题（草案）· `gold/` 金标准 |
+| `banks/` | `vendor/feature_questions_v0_1.yaml` TV 的 fq 题库原样 vendor（SHA256SUMS 记校验和，测试钉住）· `comment_reader_v0.6` 读者侧评论 7 题（C4 原样，D-112 owner 10-16 验收：四道门槛题 + 三道参考题；写手评论工具和评论回填默认用它）· `comment_reader_v0.4` 上一版读者侧 7 题（v0.3 + 按篇 / 按项目的占位符，用例文件的 fill 填回去逐字等同 v0.3）· `comment_thread_v0.4` 评论区 4 题（v0.3 + praise_share 的出口「评论太少」；v0.3 留给金标准）· `comment_ops_v0.2` 运营侧 comment_intent（草案；蓝词植入改成只看文字能判的定义，state 不带蓝词清单）· `platform_health_v0.1` 大健康平台层（草案）· `human_feel_para_v0.2` 人感段级（草案；para_function 加出口「说不清」）· `external_triage_v0.1` 外部语料分诊 4 题（草案）· `gold/` 金标准 |
 | `scripts/` | `run_gold.py` 金标准评测 · `fq_shadow.py` 特征层影子跑（与现行抽取器 / D-081 表比对，出 SQL）· `backfill_comments.py` 评论回填 · `external_corpus.py` 外部语料定时抓取（`--dry-run` 算钱、`--probe` 钉字段、`--rows` 出两张表的行）· `apply_rows.py` 把 rows.json 经 PostgREST 写进 TV（TV 没有、也不该有执行任意 SQL 的 RPC）· `known_external_ids.py` 从 TV 拉已入库的外部笔记 id 做第二道去重 · `backfill_external_publish_time.py` 一次性回填旧外部笔记的 `publish_time`（默认只看不写） |
 | `config/` | `external_corpus.yaml`：品类、关键词、排序、页数、每次 / 每月上限、预算——量级和频率都在这里改 · `data_policy.yaml`：处方药项目、合同已清出境的项目、放行项目层的项目 · `hidden_rotation.yaml`：暗题的比例与手工指定 |
 | `migrations/` | `notes_v1_17_judge_subjects.sql`（账本加 comment / ssll_sample / external_note，prob 口径统一）· `notes_v1_18_external_notes.sql`（外部笔记表 + 参考分布视图 `v_external_reference`） |
-| `fixtures/` | 50 篇合成笔记、6 篇合成评论关联帖和 33 条合成评论，保留输入结构供离线演示；不是人工金标准。真实样本及关联答案 TSV 已从当前树移除，见 `fixtures/README.md`；其他评论用例 |
+| `fixtures/` | 50 篇合成笔记、6 篇合成评论关联帖和 33 条合成评论，保留输入结构供离线演示；不是人工金标准。真实样本及关联答案 TSV 已从当前树移除，见 `fixtures/README.md`；`comment_cases.json`、`thread_cases.json` 两个评论用例 2026-11-15 起也是合成的 |
 | `docs/` | 历史实跑报告与拍板记录；2026-10-15 的真实交接 case/Excel/ZIP 按该批明确公开许可保留，不能据 fixture 合成化宣称全仓已无真实素材 |
 | `tests/` | 合成工程测试（本轮功能基线200项），全 mock（评论回路用按关键词给答案的假 Jev；MCP 薄客户端的 urllib 打到进程内 TestClient），不联网 |
 
@@ -37,7 +37,7 @@ JUDGE_URL=https://… JUDGE_API_KEY=… python3 -m judge.mcp_server   # 内部 /
 python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要花多少钱；--probe 花一次请求钉字段；正式跑由 .github/workflows/external-corpus.yml 每周一、周四触发
 ```
 
-金标准报告头会写明对的是哪一版金标准；`cg-v0.2-proposed` 是提议版、未经勘误，命中率不等于对勘误版的命中率。历史 50 篇/33 评论的实跑数字属于当时的真实材料，不能用现有合成样本复现或更新。需比较真实结果时，从获授权的私有文件传入 `--notes /私有路径/notes.json --opus /私有路径/opus.tsv --gate1 /私有路径/jev.tsv`；不要提交或上传原文及证据。影子跑从库里取用 `--from-db --mappings ../truth-vault/mappings`，切标题按每个项目的 mapping 走。
+金标准报告头会写明对的是哪一版金标准；`cg-v0.2-proposed` 是提议版、未经勘误，命中率不等于对勘误版的命中率。评论用例文件 2026-11-15 起是合成的，两份金标准的期望答案按结构沿用、没有用真实 Jev 重跑过，只用来验证脚本路径。历史 50 篇/33 评论的实跑数字属于当时的真实材料，不能用现有合成样本复现或更新。需比较真实结果时，从获授权的私有文件传入 `--notes /私有路径/notes.json --opus /私有路径/opus.tsv --gate1 /私有路径/jev.tsv`；不要提交或上传原文及证据。影子跑从库里取用 `--from-db --mappings ../truth-vault/mappings`，切标题按每个项目的 mapping 走。
 
 环境变量（服务端）：`TYPESAFE_API_KEY`（必需，**只放在服务端**，写手机器不配；也可用 `TYPESAFE_KEY_FILE` 指向密钥文件，`TYPESAFE_BASE_URL` 换端点）· `JUDGE_API_KEY`（管理 key，必需；不配则服务拒绝所有请求，本地开发显式设 `JUDGE_ALLOW_ANONYMOUS=1`）· `JUDGE_WRITER_API_KEYS`（发给写手机器的 key，逗号分隔可多把；只够 `GET /banks` 和 `POST /judge_draft`，后者 write 一律 403、不回账本行；`/judge` 只认管理 key）· `JUDGE_WORKERS`（一批 subject 并行几路，默认 4）·
 `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`（与 truth-vault 同名；直接写账本，没有就只出 SQL / rows.json）· `JUDGE_MOCK=1`（不联网的假 Jev；它判的行 extractor 是 `mock:<模型>`，任何写库请求一律拒绝）· `TIKHUB_API_KEY`（外部语料，每次请求 0.01 美元；`TIKHUB_BASE_URL` 换端点）·
