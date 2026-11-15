@@ -99,7 +99,7 @@ C1获owner“允许这一次候选试跑”后完整跑一次：553/700=79.0%，
 
 | 文件 | 版本/状态 |
 | --- | --- |
-| `banks/comment_reader_v0.4.yaml` | 生产默认；未改 |
+| `banks/comment_reader_v0.4.yaml` | 生产默认；未改（11-15 只改了注释里的品牌名，题目未动，校验和变了，见下表） |
 | `banks/candidates/comment_reader_v0.5_candidate1.yaml` | C1历史原样保留；仅此版本试跑一次 |
 | `banks/candidates/comment_reader_v0.5_candidate2.yaml` | 未试跑；修缺回复对象，仍采用个人经历细节提案 |
 | `banks/candidates/comment_reader_v0.5_candidate.yaml` | 当前C3；本次一次40条独立复验172/280，不能套C1分数 |
@@ -132,7 +132,7 @@ arranged定义及阈值未改；原A/B仅50/100一致，这题仍是普通读者
 | --- | --- |
 | 返回单人280格参考 | `953dc0975d58574045324d55b7f01b97a352b724c12e2c08ee8ff616045341d3` |
 | 旧700格参考 | `18ac3677862d62f72a4d48287ce26e39a1cc623fdb10dfd067e47435d04cdcf6` |
-| cb-v0.4 | `e7c4c14da386fc1d10f3bd5989a9a29571157039b95b0cd7816a2c1db249fbda` |
+| cb-v0.4 | `e7c4c14da386fc1d10f3bd5989a9a29571157039b95b0cd7816a2c1db249fbda`（11-15 之前的文件；11-15 只改注释后为 `58e28ba6505b144f5fbf036ba84049eab84a1f1e64b35ea4522cc573c0815a67`，题目未动，见 `fixtures/README.md`） |
 | C1 | `82d159dc2481afecf813d0e61c280aece2623e5dcff9e8444656ffc49b488f64` |
 | C2 | `c81abda5d74c2f42a13786acd395e381cf076280a75a51579fa74b9e537edc45` |
 | 当前C3 | `ac8260ddbe5a5614fa9da31154f9eb2f5438e444b2141bf55ef1c74d89fea48e` |

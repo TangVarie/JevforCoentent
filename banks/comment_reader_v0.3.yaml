@@ -1,7 +1,9 @@
 # ════════════════════════════════════════════════════════════════════
 # 评论级 Jev 判断题（最小单元实验 · 单条评论）  cb-v0.3
 # v0.2：按 v0.1 实跑结果收紧四道题的选项边界；v0.3：detail_level 的「具体」把机构名本身排除
-#（v0.2 把「可搜索的关键词」写进了「具体」，结果每条评论里的「途鸽」都被算成具体细节，7 条全判「具体」——见 iteration-log.md）
+#（v0.2 把「可搜索的关键词」写进了「具体」，结果每条评论里的机构名都被算成具体细节，7 条全判「具体」——见 iteration-log.md）
+# 2026-11-15：echoes_post 题干里写死的帖子要点原是一篇真实帖子的，随 fixtures/comment_cases.json 一起换成合成帖子的要点
+#（其余一字未动）。文件校验和因此变了；此前用本文件判出来的账本行带的是旧校验和，属历史记录。
 # ════════════════════════════════════════════════════════════════════
 # 用途：一次给 Jev 一条评论（带它所在的帖子），并行答完下面 7 道闭集题。
 #       题目只问「这条评论是什么、做了什么、给读者什么」，不问「真不真」——
@@ -77,12 +79,12 @@ questions:
   - id: echoes_post
     type: noul
     instructions:
-      zh: 这条评论有没有接住这篇帖子里具体说到的事？帖子说了：美本文科、秋招碰壁、被骂割韭菜、反复问「简历是不是你们写」、三千字素材库、四版简历、服务承诺书写了辅导网申面试。
-      en: Does the comment pick up something specific this post said? The post mentioned being a US liberal-arts undergrad, failing in autumn recruiting, being called a sucker for signing, asking whether they write the CV themselves, a 3,000-word material bank, four CV drafts, and a service pledge covering applications and interviews.
+      zh: 这条评论有没有接住这篇帖子里具体说到的事？帖子说了：英硕一年制、春招投了六十多份没回音、被说交智商税、追问「模拟面试是不是真人一对一」、四十多个岗位的投递表、五轮模拟面试、协议写明岗位筛选和面试复盘。
+      en: "Does the comment pick up something specific this post said? The post mentioned: 英硕一年制、春招投了六十多份没回音、被说交智商税、追问「模拟面试是不是真人一对一」、四十多个岗位的投递表、五轮模拟面试、协议写明岗位筛选和面试复盘."
     criteria:
       "true":
-        zh: 提到了帖子里的某个具体事实，或者用了帖子里的具体说法（比如接「简历是不是你们写」「三千字素材库」「被骂割韭菜」）
-        en: Mentions a specific fact from the post or reuses its specific wording (e.g. picks up "do you write the CV", "3,000-word material bank", "called a sucker")
+        zh: 提到了帖子里的某个具体事实，或者用了帖子里的具体说法（比如接「模拟面试是不是真人一对一」「四十多个岗位的投递表」「被说交智商税」）
+        en: "Mentions a specific fact from the post or reuses its specific wording (e.g. picks up 「模拟面试是不是真人一对一」「四十多个岗位的投递表」「被说交智商税」)"
       "false":
         zh: 只是同一个品类、同一类人群的话（留学生、文科、求职、机构），换到任何一篇同类帖子下面也能贴
         en: Only same-category talk (students abroad, humanities, job hunting, agencies); could be pasted under any similar post

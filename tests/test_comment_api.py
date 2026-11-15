@@ -169,7 +169,7 @@ def test_named_count_code_check_still_gates(wired):
 def test_brand_question_is_allowed_without_explicit_brand_configuration(wired):
     client, jev = wired
     jev.overrides["names_brand"] = True
-    data = single(client, text="途鸽这项服务怎么约呀").json()
+    data = single(client, text="样例求职这项服务怎么约呀").json()
     assert data["passed"] is True and data["needs_review"] is False, data
     assert not data["hard_fails"] and data["profile"]["names_brand"] == "是"
 
@@ -179,8 +179,8 @@ def test_multiple_natural_brand_mentions_have_no_default_quota(wired, limit):
     client, jev = wired
     jev.overrides["names_brand"] = True
     changes = {} if limit == "omitted" else {"max_named": limit}
-    data = thread(client, [{"text": "途鸽怎么约", "slot": {**SLOT, "id": "a"}},
-                           {"text": "途鸽周末能约吗", "slot": {**SLOT, "id": "b"}}], **changes).json()
+    data = thread(client, [{"text": "样例求职怎么约", "slot": {**SLOT, "id": "a"}},
+                           {"text": "样例求职周末能约吗", "slot": {**SLOT, "id": "b"}}], **changes).json()
     assert data["passed"] is True and data["needs_review"] is False, data
     assert data["code"]["named"] == 2 and not data["hard_fails"]
 
@@ -188,7 +188,7 @@ def test_multiple_natural_brand_mentions_have_no_default_quota(wired, limit):
 def test_explicit_zero_brand_quota_is_preserved(wired):
     client, jev = wired
     jev.overrides["names_brand"] = True
-    data = thread(client, [{"text": "途鸽怎么约", "slot": SLOT}], max_named=0).json()
+    data = thread(client, [{"text": "样例求职怎么约", "slot": SLOT}], max_named=0).json()
     assert data["passed"] is False and data["hard_fails"][0][:3] == ["named_count", "1", "≤0"]
     assert len(data["plan"]) == 1 and data["plan"][0]["slot"] == "q1"
 
@@ -202,7 +202,7 @@ def test_source_backed_experience_and_recommendation_fit_default_slots(wired, sl
     client, jev = wired
     slot = next(s for s in default_slots() if s.id == slot_id)
     jev.overrides.update(speech_act=speech_act, names_brand=True, echoes_post=True, detail_level="具体")
-    data = single(client, slot=asdict(slot), text="素材里这位同学在途鸽改了四版简历，最后一版把项目职责写清楚了").json()
+    data = single(client, slot=asdict(slot), text="素材里这位同学在样例求职练了五轮模拟面试，最后一轮把项目职责讲清楚了").json()
     assert data["passed"] is True and data["needs_review"] is False, data
     assert data["profile"]["speech_act"] == speech_act and "背书体" in data["flags"]
 

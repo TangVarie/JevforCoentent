@@ -9,6 +9,10 @@
 # why 是我标这个答案的理由，改答案时顺手改理由，方便回头看当时怎么想的。
 # ════════════════════════════════════════════════════════════════════
 
+# 2026-11-15：对应的用例（fixtures/comment_cases.json、thread_cases.json）已换成合成帖子和合成评论，结构与原用例一一对应，
+# 所以各条的期望答案沿用原标注，why 里引用的字眼改成合成评论里的字眼。合成用例没有用真实 Jev 重跑过：
+# 这份文件现在只用来验证评测脚本和题库占位符的路径（--mock），不能当作模型准确率的依据。
+
 gold_version: cg-v0.2-proposed
 
 cases:
@@ -24,13 +28,13 @@ cases:
       register: [文案腔]
       reader_value: [只有评价]
       arranged: true
-    why: 「留子回国」跟帖子讲的美本文科秋招只是同一个品类，没有接帖子里任何一件具体的事；「本土化」是机构话术
+    why: 「海归回来」跟帖子讲的英硕春招只是同一个品类，没有接帖子里任何一件具体的事；「讲成国内听得懂的话」是机构话术
 
   - id: c2
     expect:
       speech_act: [提问]
       names_brand: false
-      echoes_post: false   # v0.2：按定义「在哪里」没提帖子里的具体事实；它针对的是信息缺口，不是这道题
+      echoes_post: false   # v0.2：按定义「哪家呀」没提帖子里的具体事实；它针对的是信息缺口，不是这道题
       detail_level: [无]
       register: [随手口语]
       reader_value: [无]
@@ -45,8 +49,8 @@ cases:
       detail_level: [具体, 无]     # v0.2：@ 账号算不算可核细节定义上可争，两者都收
       register: [随手口语]
       reader_value: [可行动信息]
-      arranged: true              # v0.2：第三方账号替机构答「在哪里」，读者视角判「像安排的」站得住
-    why: 替作者回答「在哪里」，给了可搜索的账号名，是全区唯一一条承接；但由第三方账号来答，读者视角判「像安排的」（v0.2 由 cg-v0.1 的「歧义」改为 true，理由同上一行注释）
+      arranged: true              # v0.2：第三方账号替机构答「哪家呀」，读者视角判「像安排的」站得住
+    why: 替作者回答「哪家呀」，给了可搜索的账号名，是全区唯一一条承接；但由第三方账号来答，读者视角判「像安排的」（v0.2 由 cg-v0.1 的「歧义」改为 true，理由同上一行注释）
 
   - id: c4
     expect:
@@ -57,40 +61,40 @@ cases:
       register: [文案腔]
       reader_value: [只有评价]
       arranged: true
-    why: 「提前批」帖子里没有；「满意的结果」是结论没有依据；「感谢途鸽」开头是感谢信句式
+    why: 「春招补录」帖子里没有；「想要的结果」是结论没有依据；「谢谢 + 机构名」开头是感谢信句式
 
   - id: c5
     expect:
       speech_act: [旁观推荐, 亲历背书]
       names_brand: true
       echoes_post: true
-      detail_level: [模糊]   # v0.2：点到了情境（文社科、挖亮点）
+      detail_level: [模糊]   # v0.2：点到了情境（一年制硕士、练面试）
       register: [文案腔]
       reader_value: [只有评价]
       arranged: true
-    why: 七条里唯一接住了帖子的一条（文科 + 挖亮点 ≈ 美本文科 + 挖素材），但没说自己用没用过，「非常专业」是文案词；接住帖子也救不了它
+    why: 七条里唯一接住了帖子的一条（一年制硕士 + 一轮轮练面试 ≈ 英硕一年制 + 五轮模拟面试），但没说自己用没用过，「非常专业」是文案词；接住帖子也救不了它
 
   - id: c6
     expect:
       speech_act: [亲历背书]
       names_brand: true
       echoes_post: false
-      detail_level: [模糊]   # v0.2：点到了情境（文社科求职）
+      detail_level: [模糊]   # v0.2：点到了情境（海归求职）
       register: [文案腔]
       reader_value: [只有评价]
       arranged: true
-    why: 评论里带话题标签本身就是运营动作；「精准定位」「赛道」是机构话术，帖子里没有
+    why: 评论里带话题标签本身就是运营动作；「认清优势」「发力点」是机构话术，帖子里没有
 
   - id: c7
     expect:
       speech_act: [亲历背书]
       names_brand: true
       echoes_post: false
-      detail_level: [模糊]            # v0.2：点到了情境（被拒过）
+      detail_level: [模糊]            # v0.2：点到了情境（面试受挫）
       register: [文案腔, 随手口语]     # v0.2：原文截断，两者都收
       reader_value: [只有评价]
       arranged: true
-    why: 原文截断；「找回自信」是情绪结论；账号名「出卡专用号」是人一眼能看见、Jev 看不见的线索（不在题里，交给代码规则）
+    why: 原文截断；「把底气找了回来」是情绪结论；账号名「代发专用号」是人一眼能看见、Jev 看不见的线索（不在题里，交给代码规则）
 
   # ── 整个评论区（thread_bank.yaml）──────────────────────────────────
 
@@ -100,4 +104,4 @@ cases:
       same_template: true
       has_friction: false
       thread_arranged: true
-    why: 七条里五条夸，五条同一句式「痛点 + 途鸽老师帮我 + 结果」，四条同一天，只有一个「在哪里」是读者，作者本人零回复
+    why: 七条里五条夸，五条同一句式「痛点 + 机构老师帮我 + 结果」，四条同一天，只有一个「哪家呀」是读者，作者本人零回复

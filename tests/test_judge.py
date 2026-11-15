@@ -104,6 +104,57 @@ def test_interpret_noul_and_choice_thresholds():
     assert it["register"]["ambiguous"] and "第一名" in it["register"]["why"]
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), 1.7, -0.3, True, "很高", None, [0.9]])
+def test_interpret_noul_bad_probability_is_invalid(bad):
+    """是非题的概率不是有限数、不在 0–1 之间或根本不是数：按 out_of_vocab 作废，answer 与 p 都是 None。"""
+    b = B.load_bank(READER)
+    it = B.interpret(b, {"answers": {"names_brand": {"type": "noul", "noul": bad},
+                                     "arranged": {"type": "noul", "noul": 0.9}}}, asked=["names_brand", "arranged"])
+    assert it["names_brand"] == {"answer": None, "p": None, "ambiguous": False, "invalid_reason": "out_of_vocab"}
+    assert it["arranged"]["answer"] == "是" and it["arranged"]["p"] == 0.9          # 同一次返回里别的题不受牵连
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 5.0, -0.1, True, "很高", None, {"x": 1}])
+@pytest.mark.parametrize("where", ["chosen", "other"])
+def test_interpret_choice_bad_probability_is_invalid(bad, where):
+    """选择题概率表里有一项坏了（所选的或别的选项的）：整题 out_of_vocab，不抛异常，也不拿坏数排序。"""
+    b = B.load_bank(READER)
+    probs = {"亲历背书": 0.6, "旁观推荐": 0.3}
+    probs["亲历背书" if where == "chosen" else "旁观推荐"] = bad
+    it = B.interpret(b, {"answers": {"speech_act": {"type": "choice", "choice": "亲历背书", "probabilities": probs}}},
+                     asked=["speech_act"])
+    assert it["speech_act"]["answer"] is None and it["speech_act"]["p"] is None
+    assert it["speech_act"]["invalid_reason"] == "out_of_vocab" and "top3" not in it["speech_act"]
+
+
+def test_interpret_boundary_and_partial_probabilities_still_accepted():
+    """0 和 1 是合法概率；数字字符串照旧接受；概率表不要求覆盖全部选项（只给一项也算数）。"""
+    b = B.load_bank(READER)
+    it = B.interpret(b, {"answers": {"names_brand": {"type": "noul", "noul": 1},
+                                     "arranged": {"type": "noul", "noul": "0.0"},
+                                     "speech_act": {"type": "choice", "choice": "亲历背书",
+                                                    "probabilities": {"亲历背书": 1.0}}}})
+    assert it["names_brand"]["answer"] == "是" and it["names_brand"]["p"] == 1.0
+    assert it["arranged"]["answer"] == "否" and it["arranged"]["p"] == 1.0 and it["arranged"]["p_yes"] == 0.0
+    assert it["speech_act"]["answer"] == "亲历背书" and it["speech_act"]["p"] == 1.0
+
+
+def test_bad_probability_never_reaches_ledger_row():
+    """坏概率作废后，账本行的 answer / prob 是 NULL、带原因；json 里不会出现 NaN。"""
+    b = B.load_bank(READER)
+    items = B.interpret(b, {"answers": {"names_brand": {"type": "noul", "noul": float("nan")},
+                                        "speech_act": {"type": "choice", "choice": "亲历背书",
+                                                       "probabilities": {"亲历背书": 1.7}}}},
+                        asked=["names_brand", "speech_act"])
+    res = C.JudgeResult(bank=b.name, bank_version=b.version, bank_sha256=b.sha256, model=b.model,
+                        subject_type="comment", subject_id="s1", items=items)
+    rows = C.ledger_rows(res, b, run_tag="t")
+    assert len(rows) == 2
+    for r in rows:
+        assert r["answer"] is None and r["prob"] is None and r["invalid_reason"] == "out_of_vocab"
+    json.dumps(rows, allow_nan=False)
+
+
 # ── 切片与选句 ──
 
 def test_spans_and_askable():
@@ -308,8 +359,8 @@ READER4 = ROOT / "banks" / "comment_reader_v0.4.yaml"
 THREAD3 = ROOT / "banks" / "comment_thread_v0.3.yaml"
 
 
-def test_reader_v04_equals_v03_for_tugeo_case():
-    """v0.4 只是把按篇变的词换成占位符；填上途鸽用例的 fill 后，发给 Jev 的题目与 v0.3 逐字相同 → 金标准 cg-v0.2 仍然有效。"""
+def test_reader_v04_equals_v03_for_fixture_case():
+    """v0.4 只是把按篇变的词换成占位符；填上用例文件（合成帖子）的 fill 后，发给 Jev 的题目与 v0.3 逐字相同。"""
     cases = json.loads((ROOT / "fixtures" / "comment_cases.json").read_text(encoding="utf-8"))
     b3, b4 = B.load_bank(READER), B.load_bank(READER4)
     assert B.unfilled(b4) == ["echoes_post"] and B.unfilled(b4, cases["fill"]) == []
@@ -345,7 +396,7 @@ class ScriptedJev:
             ans["thread_arranged"] = {"type": "noul", "noul": 0.8 if n_praise >= 2 else 0.2}
             return {"model": "scripted", "answers": {k: v for k, v in ans.items() if k in qs}, "usage": {}}
         endorse = "帮我" in text
-        named = "途鸽" in text or "@" in text
+        named = "样例求职" in text or "@" in text
         ask = text.endswith("？") or text.endswith("?") or text in ("在哪里",)
         sa_labels = ["提问", "质疑", "补充经验", "亲历背书", "旁观推荐", "回复答疑", "闲聊表情", "说不清"]
         if "回复对象" in st and not ask:
@@ -360,8 +411,8 @@ class ScriptedJev:
             sa = "补充经验"
         ans["speech_act"] = self._choice("speech_act", sa, sa_labels, 0.95)
         ans["names_brand"] = {"type": "noul", "noul": 0.97 if named else 0.05}
-        ans["echoes_post"] = {"type": "noul", "noul": 0.9 if ("素材库" in text or "四版" in text) else 0.2}
-        ans["detail_level"] = self._choice("detail_level", "具体" if "四版" in text else "无" if (ask or endorse) else "模糊", ["无", "模糊", "具体"])
+        ans["echoes_post"] = {"type": "noul", "noul": 0.9 if ("投递表" in text or "五轮" in text) else 0.2}
+        ans["detail_level"] = self._choice("detail_level", "具体" if "五轮" in text else "无" if (ask or endorse) else "模糊", ["无", "模糊", "具体"])
         ans["register"] = self._choice("register", "文案腔" if endorse else "随手口语" if len(text) < 12 else "认真分享", ["随手口语", "认真分享", "文案腔", "说不清"])
         ans["reader_value"] = self._choice("reader_value", "可行动信息" if named and sa == "回复答疑" else "只有评价" if endorse else "无" if ask else "判断依据",
                                            ["可行动信息", "判断依据", "只有评价", "无"])
@@ -372,9 +423,9 @@ class ScriptedJev:
         return {"model": "scripted", "answers": {k: v for k, v in ans.items() if k in qs}, "usage": {"input_tokens": 1, "output_tokens": 1}}
 
 
-POST = {"title": "想问下各位留学生秋招真的不慌吗？", "kind": "agency",
-        "body": "我美本文科，之前秋招也是一头雾水。签约前我反复问顾问简历是不是你们写。他们带着我挖素材，三千字的素材库，磨了四版简历。",
-        "points": ["美本文科", "反复问简历是不是你们写", "三千字素材库", "四版简历"]}
+POST = {"title": "英硕回国找工作，有人和我一样没头绪吗？", "kind": "agency",       # 合成帖子，同 fixtures/comment_cases.json
+        "body": "我英硕一年制，刚回来的时候连岗位名称都看不懂。报名前我追着问模拟面试是不是真人一对一。他们按岗位陪我过，四十多个岗位的投递表，模拟面试做了五轮。",
+        "points": ["英硕一年制", "追着问模拟面试是不是真人一对一", "四十多个岗位的投递表", "五轮模拟面试"]}
 
 
 def test_comment_defaults_allow_natural_brand_and_source_backed_experience():
@@ -398,21 +449,21 @@ def test_comment_fill_and_judge_routes():
     from judge import comments as CM
     reader, ops = B.load_bank(READER4), B.load_bank(OPS)
     fill = CM.fill_for(POST)
-    assert fill["subject"] == "这家机构" and "四版简历" in fill["post_points"] and fill["post_examples"].startswith("「美本文科」")
+    assert fill["subject"] == "这家机构" and "五轮模拟面试" in fill["post_points"] and fill["post_examples"].startswith("「英硕一年制」")
     assert CM.fill_for({"title": "t", "body": "戒烟第三天，嘴里没味。", "kind": "product"})["subject"] == "这个产品"
     jev = ScriptedJev()
     # 背书体：只判不算硬伤（slot=None），保留分类标记，不因分类自动送复核
-    cj = CM.judge_comment(jev, POST, "文社科真的需要有人帮你挖掘亮点 途鸽老师帮我找到了最适合我的赛道", None, reader, ops=ops, fill=fill)
+    cj = CM.judge_comment(jev, POST, "一年制硕士特别需要有人陪着练面试 样例求职的老师帮我找准了发力点", None, reader, ops=ops, fill=fill)
     assert not cj.needs_review and {"背书体", "文案腔", "只有评价", "像安排的", "像脚本"} <= set(cj.flags) and cj.passed()
     # 默认经验位允许亲历/推荐和点名，其余接帖、细节等要求照常判断
     exp = CM.default_slots()[2]
     assert exp.id == "exp"
-    cj2 = CM.judge_comment(jev, POST, "文社科真的需要有人帮你挖掘亮点 途鸽老师帮我找到了最适合我的赛道", exp, reader, ops=ops, fill=fill)
+    cj2 = CM.judge_comment(jev, POST, "一年制硕士特别需要有人陪着练面试 样例求职的老师帮我找准了发力点", exp, reader, ops=ops, fill=fill)
     fails = {f[0] for f in cj2.hard_fails}
     assert fails == {"echoes_post", "register", "reader_value", "detail_level", "comment_intent"}
     plan = CM.comment_repair_plan(cj2, {"reader": reader, "ops": ops}, fill)
     assert len(plan) == len(cj2.hard_fails) and all(p["definition"] for p in plan)
-    assert any("美本文科" in p["instruction"] for p in plan)                    # 接帖定义中的占位符已按本篇填好
+    assert any("英硕一年制" in p["instruction"] for p in plan)                    # 接帖定义中的占位符已按本篇填好
     assert not any("{" in p["instruction"] for p in plan)
     # 提问位：「在哪里」过
     q1 = CM.default_slots()[0]
@@ -431,8 +482,8 @@ def test_produce_comments_best_of_k_repair_and_thread_swap():
     slots = CM.default_slots(n_questions=1)          # q1 提问 · exp 补充经验 · reply 贴主回复
     # 每一位的候选放在 prompt 的 ⟪…⟫ 里（EchoGenerator 就吐这些）；exp 位第一轮全是背书体，修补时 Echo 吐出修改单 prompt 里的 ⟪…⟫ → 给它一条能过的
     cands = {"q1": ["⟪文科能不能做？⟫", "⟪在哪里⟫"],
-             "exp": ["⟪文社科真的需要有人帮你挖掘亮点 途鸽老师帮我找到了最适合我的赛道⟫", "⟪感谢途鸽 帮我度过了最难熬的提前批⟫"],
-             "reply": ["⟪@TogoCareer 途鸽求职⟫"]}
+             "exp": ["⟪一年制硕士特别需要有人陪着练面试 样例求职的老师帮我找准了发力点⟫", "⟪谢谢样例求职 帮我熬过了最慌的春招补录⟫"],
+             "reply": ["⟪@样例求职 SampleJobs⟫"]}
     calls_per_slot = {}
 
     def prompt_for(post, slot):
@@ -442,20 +493,20 @@ def test_produce_comments_best_of_k_repair_and_thread_swap():
     class RepairingEcho(EchoGenerator):
         def __call__(self, prompt, n=1):
             if "修改单" in prompt:                      # 修补：给一条按修改单改过的（接住帖子、有情境、不点名）
-                return ["我也是文科，当时也反复问了简历是不是他们写，后来四版改下来才踏实"]
+                return ["我也是一年制，当时也追着问了模拟面试是不是真人，后来五轮练下来才踏实"]
             return super().__call__(prompt, n)
 
     out = CM.produce_comments(jev, RepairingEcho(), POST, slots, prompt_for, reader=reader, thread=thread, ops=ops, k=2, max_repairs=1)
     by = {c["slot"]: c for c in out["comments"]}
     assert by["q1"]["passed"] and by["reply"]["passed"] and by["reply"]["profile"]["names_brand"] == "是"
-    assert by["exp"]["passed"] and "四版" in by["exp"]["text"] and by["exp"]["profile"]["speech_act"] == "补充经验"
+    assert by["exp"]["passed"] and "五轮" in by["exp"]["text"] and by["exp"]["profile"]["speech_act"] == "补充经验"
     steps = [t["step"] for t in out["trail"]]
     assert "best_of_k:q1" in steps and "repair_1:exp" in steps and steps[-1].startswith("thread_")
     assert out["thread"]["items"]["has_friction"]["answer"] == "是"     # 贴主回复算摩擦
     assert out["thread"]["code"] == {"n": 3, "named": 1, "endorse": 0} and out["passed"] and out["calls"] == jev.calls
     # 成组不过 → 换位：三条背书体的组，评论区判同一句式 + 像安排的，thread_repair_plan 指到那几位
     bad = [CM.judge_comment(jev, POST, t, None, reader, fill=CM.fill_for(POST)) for t in
-           ["途鸽老师帮我本土化了", "感谢途鸽 帮我度过了提前批", "在哪里"]]
+           ["样例求职的老师帮我讲明白了", "谢谢样例求职 帮我熬过了补录", "在哪里"]]
     unlimited = CM.judge_thread(jev, POST, [{"text": cj.text} for cj in bad], thread, fill=CM.fill_for(POST), judged=bad)
     assert unlimited.code["named"] == 2 and "named_count" not in {f[0] for f in unlimited.hard_fails}
     tj = CM.judge_thread(jev, POST, [{"text": cj.text} for cj in bad], thread, fill=CM.fill_for(POST), judged=bad, max_named=1)

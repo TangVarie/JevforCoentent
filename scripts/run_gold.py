@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """金标准评测：题库 + 用例 → Jev（或 mock）→ 歧义判定 → 与金标准比对 → Markdown 报告。
 
-  python3 scripts/run_gold.py banks/comment_reader_v0.3.yaml fixtures/comment_cases.json \
-      --gold banks/gold/comment_reader_gold_v0.1.yaml --out report.md [--raw raw.json] [--mock] [--lang en]
+  python3 scripts/run_gold.py banks/comment_reader_v0.4.yaml fixtures/comment_cases.json \
+      --gold banks/gold/comment_reader_gold_v0.2_proposed.yaml --out report.md [--raw raw.json] [--mock] [--lang en]
 
 用例文件：{"说明": "...", "shared": {...}, "fill": {占位符: 值}, "cases": [{"id": "c1", "state": {...}, "note": "..."}]}
   fill 填题库题干里按篇变的占位符（评论题库 v0.4 的帖子要点、主体称呼）；题库没有占位符时省略。

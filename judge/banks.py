@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -223,10 +224,23 @@ def build_questions(bank: Bank, qids: Optional[list] = None, fill: Optional[dict
     return out
 
 
+def _prob(v) -> Optional[float]:
+    """Jev 给的概率 → float；不是数（含 true/false）、NaN / Inf、不在 0–1 之间 → None。数字字符串照旧接受。"""
+    if isinstance(v, bool):
+        return None
+    try:
+        p = float(v)
+    except (TypeError, ValueError):
+        return None
+    return p if math.isfinite(p) and 0.0 <= p <= 1.0 else None
+
+
 def interpret(bank: Bank, resp: dict, asked: Optional[list] = None) -> dict:
     """Jev 原始答案 → {qid: {answer, p(所选答案概率), p_yes(是非题), top3, ambiguous, why}}
     asked：这次真的问了的题。问了却没返回 → invalid_reason = missing（与 TV 同口径，续跑按「已答」判时不会漏）；
-    是非题没有数值、选择题答案不在选项里或没有概率 → out_of_vocab，answer 与 p 都是 None（不落「无原因的 NULL 行」）。"""
+    是非题没有数值、选择题答案不在选项里或没有概率 → out_of_vocab，answer 与 p 都是 None（不落「无原因的 NULL 行」）。
+    概率不是数、不是有限数（NaN / Inf）或不在 0–1 之间，同样走 out_of_vocab：这种数不进账本，外部语料那条线下一轮会重判。
+    选择题的概率表里只要有一项是坏的，整题作废（排序和 top3 都靠它）；不要求概率表覆盖全部选项。"""
     amb = bank.ambiguity
     lo, hi = amb["noul_band"]
     raw = resp.get("answers") or {}
@@ -241,9 +255,8 @@ def interpret(bank: Bank, resp: dict, asked: Optional[list] = None) -> dict:
                 out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_MISSING}
             continue
         if a.get("type") == "noul" or (q.jtype == "noul" and "noul" in a):
-            try:
-                p = float(a["noul"])
-            except (KeyError, TypeError, ValueError):
+            p = _prob(a.get("noul"))
+            if p is None:
                 out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_OUT_OF_VOCAB}
                 continue
             yes = p > 0.5
@@ -251,9 +264,14 @@ def interpret(bank: Bank, resp: dict, asked: Optional[list] = None) -> dict:
             out[q.id] = {"answer": "是" if yes else "否", "raw": yes, "p": round(max(p, 1 - p), 3),
                          "p_yes": round(p, 3), "ambiguous": bool(reasons), "why": "；".join(reasons)}
         else:
-            probs = sorted(((k, float(v)) for k, v in (a.get("probabilities") or {}).items()), key=lambda kv: -kv[1])
             choice = a.get("choice")
-            prob_map = dict(probs)
+            # 概率表本身不是映射（整个返回结构坏了）照旧抛异常，由调用方按「这次调用失败」处理，不在这里改口径
+            prob_map = {k: _prob(v) for k, v in (a.get("probabilities") or {}).items()}
+            if any(v is None for v in prob_map.values()):
+                out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_OUT_OF_VOCAB,
+                             "raw": choice}
+                continue
+            probs = sorted(prob_map.items(), key=lambda kv: -kv[1])
             # 所选答案自己没有概率（只给了别的选项的）→ out_of_vocab；不拿第一名的概率顶替，那是编出来的数
             if q.jtype == "noul" or choice not in q.criteria or choice not in prob_map:
                 out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_OUT_OF_VOCAB,
