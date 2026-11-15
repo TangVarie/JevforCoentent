@@ -889,3 +889,18 @@ def test_writer_key_is_scoped_to_banks_and_non_writing_judge_draft(monkeypatch, 
     assert r.status_code == 200 and r.json()["ledger_rows"] is None and "plan" in r.json(), r.text
     r = c.post("/judge_draft", json=draft, headers=A)
     assert r.status_code == 200 and isinstance(r.json()["ledger_rows"], list), r.text
+
+
+def test_run_gold_fmt_writes_invalid_answers_instead_of_crashing():
+    """Codex on #36: 概率越界的答案现在 p 是 None, 报告的格式化不能在这儿崩。"""
+    import importlib.util
+    import pathlib
+    spec = importlib.util.spec_from_file_location(
+        "run_gold_for_fmt", pathlib.Path(__file__).resolve().parents[1] / "scripts" / "run_gold.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.fmt({"answer": "是", "p": 0.91, "ambiguous": False}) == "是 0.91"
+    assert mod.fmt({"answer": "否", "p": 0.55, "ambiguous": True}).endswith("⚠歧义")
+    out = mod.fmt({"answer": None, "p": None, "ambiguous": False, "invalid": "out_of_vocab"})
+    assert out.startswith("无效") and "out_of_vocab" in out
+    assert mod.fmt({"answer": None, "p": None}).startswith("无效")
