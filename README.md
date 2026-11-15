@@ -4,7 +4,7 @@
 
 > **接手当前进度（2026-10-15）先读 [HANDOFF.md](HANDOFF.md)**：本轮检查、已合并改动、生产验证、未完成事项和下一步执行顺序。
 
-评论线本轮工程与固定验证已收尾，C4新40与AI参考225/280未达预注册标准，生产评论继续关闭；见[收尾报告与接手边界](docs/comment-line-closeout-2026-10-15.md)。人员返回及C3历史结果见[原返回说明](docs/comment-holdout-return-2026-10-15.md)。
+评论线本轮工程与固定验证已收尾，C4新40与AI参考225/280未达预注册标准，生产评论继续关闭；见[收尾报告与接手边界](docs/comment-line-closeout-2026-10-15.md)。（这是 10-15 的状态，已被取代：10-16 按 truth-vault D-112 的门槛轮通过并上线 `comment_reader_v0.6`，11-03 D-145 调整了通过口径；收尾报告开头有同一条说明。）人员返回及C3历史结果见[原返回说明](docs/comment-holdout-return-2026-10-15.md)。
 
 一句话：同一个模型（Jev）、同一套题库纪律、同一张账本（`truth_vault.note_feature_answers`），在内容生产的写前、写中、写后
 和数据飞轮的特征层、评论层、外部语料上做同一件事——把文字变成带概率、带证据句的闭集事实。它不写字，不解释理由，不判「会不会爆」。
@@ -16,7 +16,7 @@
 |---|---|
 | `judge/` | `jev_client`（调用、重试、mock）· `banks`（两种题库格式 → 一种内部表示；歧义判定）· `spans`（TV 同款切片、切句）· `core`（判一篇 / 判一个 state、证据选句、账本行、SQL / PostgREST 写入）· `loop`（稿子的生产回路：brief 编译成项目题库、best-of-k、判 → 修改单 → 修补）· `comments`（评论的生产回路：评论位、best-of-k、修改单、评论区成组判、换位）· `external`（外部语料：TikHub 抓取、预算、去重、分诊、打标）· `draft`（一篇稿子判哪几层、哪些硬约束：`/judge_draft` 用，MCP 经 HTTP 间接用）· `policy`（数据出境：处方药未发布稿不出境；项目层看 `project_layer_cleared`，10-20 起 `"*"` 全部放行）· `rules`（`/compile_rules`：写作台的自由文本规则编成写后检查）· `hidden`（暗题：人感题库每季度 1/3 不进任何给写手看的输出）· `api`（HTTP `/judge` · `/judge_draft` · `/compile_rules`）· `mcp_server`（内部 / 运维机器用的 stdio MCP：HTTP 服务的薄客户端，不持 Jev 密钥、不读题库；写手的判稿入口在写作台 deskcore，见 docs/31 §5.4） |
 | `banks/` | `vendor/feature_questions_v0_1.yaml` TV 的 fq 题库原样 vendor（SHA256SUMS 记校验和，测试钉住）· `comment_reader_v0.6` 读者侧评论 7 题（C4 原样，D-112 owner 10-16 验收：四道门槛题 + 三道参考题；写手评论工具和评论回填默认用它）· `comment_reader_v0.4` 上一版读者侧 7 题（v0.3 + 按篇 / 按项目的占位符，用例文件的 fill 填回去逐字等同 v0.3）· `comment_thread_v0.4` 评论区 4 题（v0.3 + praise_share 的出口「评论太少」；v0.3 留给金标准）· `comment_ops_v0.2` 运营侧 comment_intent（草案；蓝词植入改成只看文字能判的定义，state 不带蓝词清单）· `platform_health_v0.1` 大健康平台层（草案）· `human_feel_para_v0.2` 人感段级（草案；para_function 加出口「说不清」）· `external_triage_v0.1` 外部语料分诊 4 题（草案）· `gold/` 金标准 |
-| `scripts/` | `run_gold.py` 金标准评测 · `fq_shadow.py` 特征层影子跑（与现行抽取器 / D-081 表比对，出 SQL）· `backfill_comments.py` 评论回填 · `external_corpus.py` 外部语料定时抓取（`--dry-run` 算钱、`--probe` 钉字段、`--rows` 出两张表的行）· `apply_rows.py` 把 rows.json 经 PostgREST 写进 TV（TV 没有、也不该有执行任意 SQL 的 RPC）· `known_external_ids.py` 从 TV 拉已入库的外部笔记 id 做第二道去重 · `backfill_external_publish_time.py` 一次性回填旧外部笔记的 `publish_time`（默认只看不写） |
+| `scripts/` | `run_gold.py` 金标准评测 · `fq_shadow.py` 特征层影子跑（与现行抽取器 / D-081 表比对，出 SQL）· `backfill_comments.py` 评论回填（运营写的评论和链接巡查抄回来的读者评论分开算：读者评论只跑读者侧题库；巡查来的行里命中预埋关键词的（TV 写 `is_scripted = true`）和贴主自己的回复（`comment_role = 贴主`）不算读者评论、不跑题、单独报数；TV `notes_v1_27` 的 `source` 列还没有时同以前）· `external_corpus.py` 外部语料定时抓取（`--dry-run` 算钱、`--probe` 钉字段、`--rows` 出两张表的行）· `apply_rows.py` 把 rows.json 经 PostgREST 写进 TV（TV 没有、也不该有执行任意 SQL 的 RPC）· `known_external_ids.py` 从 TV 拉已入库的外部笔记 id 做第二道去重 · `backfill_external_publish_time.py` 一次性回填旧外部笔记的 `publish_time`（默认只看不写） |
 | `config/` | `external_corpus.yaml`：品类、关键词、排序、页数、每次 / 每月上限、预算——量级和频率都在这里改 · `data_policy.yaml`：处方药项目、合同已清出境的项目、放行项目层的项目 · `hidden_rotation.yaml`：暗题的比例与手工指定 |
 | `migrations/` | `notes_v1_17_judge_subjects.sql`（账本加 comment / ssll_sample / external_note，prob 口径统一）· `notes_v1_18_external_notes.sql`（外部笔记表 + 参考分布视图 `v_external_reference`） |
 | `fixtures/` | 50 篇合成笔记、6 篇合成评论关联帖和 33 条合成评论，保留输入结构供离线演示；不是人工金标准。真实样本及关联答案 TSV 已从当前树移除，见 `fixtures/README.md`；`comment_cases.json`、`thread_cases.json` 两个评论用例 2026-11-15 起也是合成的 |
@@ -56,7 +56,9 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 - **数据出境**（docs/00 #7，`judge/policy.py` + `config/data_policy.yaml`）：公开内容（note / external_note / comment）直接跑；未发布稿（aw_version / ssll_sample）必须带 `project`，
   通用层（fq、人感、评论、三省六部二审、外部分诊）+ 平台层照跑；项目层（brief / 内联 `project_bank` / 项目题库 / `/compile_rules` 的规则原文）只有 `project_layer_cleared` 里的项目才跑，否则整层去掉并在响应的 `policy.dropped_banks` 回显（`/compile_rules` 直接 403）。
   **2026-10-20 起 `project_layer_cleared: ["*"]`**：owner 拍板项目层对所有项目放行（原话「全部放行，一次到位」），`*` = 所有项目，显式列项目代号照旧认；YAML 里 `*` 必须带引号。
-  处方药闸不受影响、仍先执行：处方药项目（`rx_categories` / `rx_projects`）的未发布稿在合同确认、加进 `rx_cleared` 之前一律 403，一次 Jev 都不调（`rx_cleared` 不认通配）。规则只在服务端执行一遍：MCP 是 `/judge_draft` 的薄客户端，只把 `project` / `category` 传过去，403 的 detail 原样带回写手。
+  处方药未发布稿的数据出境闸（下文和代码注释里简称「处方药闸」）不受影响、仍先执行：处方药项目（`rx_categories` / `rx_projects`）的未发布稿在合同确认、加进 `rx_cleared` 之前一律 403，一次 Jev 都不调（`rx_cleared` 不认通配）。
+  **这道闸管的是数据出境，不是发布合规**（2026-11-15 第三轮外部评审 B，owner 认可）：它只决定处方药项目的未发布稿能不能发给境外的模型，不判断这篇内容能不能发、该怎么发；发布合规由人和客户流程把关，不在系统里。处方药项目的文字往模型去有三个出口：① 本服务的判稿（`/judge_draft` 等）；② 写作台馆员挑经验卡的那次模型调用（会带上项目 brief）；③ 标题的向量调用。**只有 ① 查这份名单**，② ③ 不查；写手自己的 AI 客户端（稿子实际是在那里写出来的）在系统之外，谁也拦不到。所以规矩放在开项目那一步：**处方药项目没进 `rx_cleared` 之前，不在写作台开这个项目**（TV 的新项目接入步骤里同一条）。
+  规则只在服务端执行一遍：MCP 是 `/judge_draft` 的薄客户端，只把 `project` / `category` 传过去，403 的 detail 原样带回写手。
   **配置坏了直接报错**（2026-11-04，审计 11-02 F15）：`data_policy.yaml` / `hidden_rotation.yaml` 缺文件、YAML 读不出、少键多键、名单不是字符串列表、`rx_*` 里写了 `"*"`，都不再静默回落成空配置（以前缺文件等于「没有处方药项目」「没有暗题」）。
   服务启动时两份都先校验，坏了起不来、Railway 的 `/health` 探活不过；运行中 `/health` 每次重新校验两份，哪份坏了都回 503（`ok=false`、`config_error` 说清哪里坏）。
   别的端点只在读到坏的那份时回 503（detail 以 `config:` 开头），在调 Jev 之前就返回；不读那份的端点照常（`/judge` 和两个评论端点不读 `hidden_rotation.yaml`，`/banks` 不读 `data_policy.yaml`）。
