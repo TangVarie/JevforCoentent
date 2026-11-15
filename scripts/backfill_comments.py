@@ -170,6 +170,9 @@ def _db():
     return url, key
 
 
+MAX_LIMIT = 30000       # --limit 的上限; 也是「只跑一种来源」时先取多少条再挑
+
+
 def fetch(limit: int, project: str | None):
     url, key = _db()
     q = "&order=note_id,comment_order,comment_id"
@@ -342,7 +345,7 @@ def main():
     args = ap.parse_args()
     if sum(map(bool, (args.from_db, args.input, args.resume_ids))) != 1:
         ap.error("必须且只能指定 --from-db、--input、--resume-ids 之一")
-    if not 1 <= args.limit <= 30000 or not 1 <= args.workers <= 8:
+    if not 1 <= args.limit <= MAX_LIMIT or not 1 <= args.workers <= 8:
         ap.error("limit 需为 1..30000，workers 需为 1..8")
     if args.mock and args.write:
         ap.error("mock 答案不允许写库")
@@ -358,16 +361,19 @@ def main():
             ap.error(str(exc))
     if args.resume_ids:
         try:
-            comments = fetch_ids(json.loads(Path(args.resume_ids).read_text(encoding="utf-8")))[:args.limit]
+            comments = fetch_ids(json.loads(Path(args.resume_ids).read_text(encoding="utf-8")))
         except (ValueError, OSError) as exc:
             sys.exit(str(exc))
     else:
-        comments = fetch(args.limit, args.project) if args.from_db else load_input(args.input)[:args.limit]
+        # 只跑一种来源时先挑来源再截条数：先截再挑的话，前 limit 条全是另一种来源就一条都跑不到，重跑还是同一批。
+        take = args.limit if args.source == "all" else MAX_LIMIT
+        comments = fetch(take, args.project) if args.from_db else load_input(args.input)
     if len({c["comment_id"] for c in comments}) != len(comments):
         ap.error("输入包含重复 comment_id")
     kinds = {c["comment_id"]: source_kind(c) for c in comments}
     if args.source != "all":
         comments = [c for c in comments if kinds[c["comment_id"]] == args.source]
+    comments = comments[:args.limit]
     by_kind = Counter(kinds[c["comment_id"]] for c in comments)
     if args.input_snapshot:
         Path(args.input_snapshot).write_text(json.dumps(snapshot_of(comments), ensure_ascii=False, indent=1), encoding="utf-8")

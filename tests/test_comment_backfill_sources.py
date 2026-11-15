@@ -291,3 +291,13 @@ def test_resume_run_drops_the_paid_answers_of_a_vanished_digest_row_and_writes_t
     key = lambda r: (r["subject_id"], r["question_id"])            # noqa: E731
     assert sorted(again, key=key) == sorted((r for r in first if r["subject_id"] != "a2"), key=key)
     assert "1 条巡查来的评论" in capsys.readouterr().err
+
+
+def test_the_limit_counts_rows_of_the_chosen_source(monkeypatch, tmp_path):
+    """先挑来源再截条数：第一条是读者评论、只跑运营写的、limit 1 —— 跑到的是后面那条运营写的，不是空。"""
+    comments = [_c("rd1", source=DIGEST_SOURCE), _c("op1"), _c("op2")]
+    fake, rows, _, _ = _run(monkeypatch, tmp_path, comments, "--source", "operator", "--limit", "1")
+    assert {r["subject_id"] for r in rows} == {"op1"}
+    fake, rows, _, _ = _run(monkeypatch, tmp_path, [_c("op1"), _c("rd1", source=DIGEST_SOURCE)],
+                            "--source", "digest", "--limit", "1")
+    assert {r["subject_id"] for r in rows} == {"rd1"}
