@@ -22,6 +22,7 @@ judge 行是整句；要按 TV 的 validate_answers 复核 judge 行，先按 ex
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -228,6 +229,67 @@ def _sql_lit(v) -> str:
     return "'" + str(v).replace("'", "''") + "'"
 
 
+_PARA_SUFFIX = re.compile(r":p\d+$")     # loop.judge_draft 给段落行起的 subject_id: "<稿子 id>:p<n>"
+
+
+def _pack(groups: list, batch: int, split) -> list:
+    """把若干组行依次装进不超过 batch 行的批: 装不下就先封口再开新批, 不把一组拆到两批里;
+    单独一组就超过 batch 时交给 split 往下再切。"""
+    out, buf = [], []
+    for g in groups:
+        if len(buf) + len(g) <= batch:
+            buf.extend(g)
+            continue
+        if buf:
+            out.append(buf)
+            buf = []
+        if len(g) <= batch:
+            buf = list(g)
+        else:
+            parts = split(g)
+            out.extend(parts[:-1])
+            buf = parts[-1]
+    if buf:
+        out.append(buf)
+    return out
+
+
+def _grouped(rows: list, key) -> list:
+    """按 key 归组, 组的先后 = 各组第一行出现的先后, 组内保持原顺序。key 返回 None 的行各自成组。"""
+    groups: dict = {}
+    for i, r in enumerate(rows):
+        k = key(r)
+        groups.setdefault(("", i) if k is None else ("k", k), []).append(r)
+    return list(groups.values())
+
+
+def subject_batches(rows: list, batch: int = 200) -> list:
+    """按 subject 的边界切批, 不按固定行数硬切 (2026-11-15 第三轮外部评审 E)。
+
+    PostgREST 一批一个事务、批与批之间没有: 固定 200 行一刀, 会把一个 subject 的题切在两批里,
+    两批之间失败就留下"这篇只写了一半题"的账本。这里的切法:
+      · 同一个 subject (subject_type + subject_id) 的行永远在同一批;
+      · 一篇稿子和它的段落行 (subject_id 形如 "<稿子 id>:p<n>") 装得进一批时放在一起;
+        装不进时退到"稿子本身一批、段落按整段装批", 仍不拆任何一个 subject;
+      · 只有单个 subject 自己就超过 batch 行 (现有题库到不了) 才按行数切, 这是唯一会半写一个 subject 的情况;
+      · 没有 subject_id 的行 (apply_rows 写 external_notes 也走这里) 各自成组, 等于原来的固定行数切法。
+    每批不超过 batch 行; 行不丢不重, 同一 subject 内的顺序不变 (upsert 与行的先后无关)。"""
+    batch = max(1, int(batch))
+
+    def exact(r):
+        sid = r.get("subject_id")
+        return None if sid is None else (r.get("subject_type"), str(sid))
+
+    def family(r):
+        k = exact(r)
+        return None if k is None else (k[0], _PARA_SUFFIX.sub("", k[1]))
+
+    def by_rows(g):
+        return [g[i:i + batch] for i in range(0, len(g), batch)]
+
+    return _pack(_grouped(rows, family), batch, lambda fam: _pack(_grouped(fam, exact), batch, by_rows))
+
+
 def rows_to_sql(rows: list, table: str = "truth_vault.note_feature_answers", batch: int = 200) -> str:
     """生成幂等的 INSERT … ON CONFLICT DO UPDATE，没有 service key 时可经 MCP / psql 执行（同 ingest_gate1_answers --sql-out）。"""
     if not rows:
@@ -236,8 +298,8 @@ def rows_to_sql(rows: list, table: str = "truth_vault.note_feature_answers", bat
     key = "(subject_type, subject_id, question_id, question_version, extractor, run_tag)"
     upd = ", ".join(f"{c} = EXCLUDED.{c}" for c in ("bank_version", "bank_sha256", "answer", "evidence", "prob", "invalid_reason"))
     out = []
-    for i in range(0, len(rows), batch):
-        vals = ",\n".join("(" + ", ".join(_sql_lit(r.get(c)) for c in LEDGER_COLUMNS) + ")" for r in rows[i:i + batch])
+    for part in subject_batches(rows, batch):          # 一条语句 = 若干个完整 subject (同 postgrest_upsert)
+        vals = ",\n".join("(" + ", ".join(_sql_lit(r.get(c)) for c in LEDGER_COLUMNS) + ")" for r in part)
         out.append(f"INSERT INTO {table} ({cols}) VALUES\n{vals}\nON CONFLICT {key} DO UPDATE SET {upd}, extracted_at = now();\n")
     return "\n".join(out)
 
@@ -246,6 +308,8 @@ class LedgerWriteError(RuntimeError):
     """账本写到一半失败 (TV 审计 2026-10-08 B-06)。
 
     PostgREST 一批一个事务、批与批之间没有事务: 20 批写到第 7 批炸, 前 6 批已经在库里。
+    批按 subject 边界切 (subject_batches): 已确认写入的批里每个 subject 都是完整的, 没发的批里的 subject 一行都没写,
+    不会有哪个 subject 只写了一半题 (单个 subject 超过一批行数的除外)。
     以前这里直接把底层异常抛上去, 调用方只知道"写库失败", 不知道**写了多少** —— /judge 200 篇
     4,000 行可能半写, Jev 的钱已经付了, 结果也算出来了, 却整个变成 500。
     这个异常带着 ``written`` (已确认写入的下限) / ``uncertain`` (炸掉那一批的行数: 连接可能在 PostgREST 提交之后才断,
@@ -266,7 +330,8 @@ def postgrest_upsert(rows: list, url: str, service_key: str, table: str = "note_
     写账本表（note_feature_answers）时带上 extracted_at = 现在，与 rows_to_sql 的 `extracted_at = now()` 同口径
     （否则重判的行时间戳停在第一次）。别的表（apply_rows 也用它写 external_notes，那张表只有 fetched_at）原样写，
     多一个它没有的列 PostgREST 会整批拒绝。mock 行（extractor 以 mock: 开头）拒绝写。
-    某一批失败抛 LedgerWriteError, 带已写行数 (批之间没有事务, 前面的批已经在库里)。"""
+    某一批失败抛 LedgerWriteError, 带已写行数 (批之间没有事务, 前面的批已经在库里)。
+    批按 subject 边界切 (见 subject_batches): 两批之间失败不会留下只写了一半题的 subject。"""
     import urllib.request
     bad = sorted({r.get("extractor") for r in rows if str(r.get("extractor") or "").startswith(MOCK_EXTRACTOR_PREFIX)})
     if bad:
@@ -274,8 +339,8 @@ def postgrest_upsert(rows: list, url: str, service_key: str, table: str = "note_
     now = datetime.now(timezone.utc).isoformat()
     touch = table == "note_feature_answers"
     n = 0
-    for k, i in enumerate(range(0, len(rows), batch), start=1):
-        chunk = [dict(r, extracted_at=now) for r in rows[i:i + batch]] if touch else rows[i:i + batch]
+    for k, part in enumerate(subject_batches(rows, batch), start=1):
+        chunk = [dict(r, extracted_at=now) for r in part] if touch else part
         data = json.dumps(chunk, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(f"{url.rstrip('/')}/rest/v1/{table}", data=data, method="POST", headers={
             "apikey": service_key, "Authorization": f"Bearer {service_key}", "Content-Type": "application/json",
@@ -286,7 +351,7 @@ def postgrest_upsert(rows: list, url: str, service_key: str, table: str = "note_
                     raise RuntimeError(f"PostgREST HTTP {resp.status}")
         except Exception as exc:  # noqa: BLE001
             raise LedgerWriteError(n, len(rows), k, exc, uncertain=len(chunk)) from exc
-        n += len(rows[i:i + batch])
+        n += len(part)
     return n
 
 
