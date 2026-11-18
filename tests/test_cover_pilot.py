@@ -107,6 +107,9 @@ def test_http_status_words(status, word):
     (json.dumps({"code": 200, "success": False}).encode(), "upstream_failed"),
     (json.dumps(F.UPSTREAM).encode(), "upstream_failed"),                     # success=false + data=[]：不是「删了」
     (json.dumps({"code": 200, "data": {"success": False, "data": []}}).encode(), "upstream_failed"),
+    # Codex 11-18：里层 code 不是 0 / 200，就算 success=true 也不是「删了」
+    (json.dumps({"code": 200, "data": {"success": True, "code": 500, "data": []}}).encode(), "upstream_failed"),
+    (json.dumps({"code": 200, "data": {"success": True, "code": 0, "data": []}}).encode(), "gone"),
     (json.dumps(F.GONE).encode(), "gone"),
     (json.dumps({"code": 200, "data": {"code": 0, "data": [{"note_list": []}]}}).encode(), "gone"),
     (json.dumps({"code": 200, "data": {"code": 0, "data": [{"model_type": "note"}]}}).encode(), "unknown_shape"),
@@ -617,7 +620,31 @@ def test_http_links_try_https_first_then_http():
     assert [c[0].split(":")[0] for c in f.calls] == ["https", "http"]
     assert out["status"] == "ok" and out["scheme"] == "http" and out["scheme_used"] == "http"
     later = d.download(_plan("http://img.xhsfake.invalid/w900h1200"), "C2")
-    assert later["status"] == "ok" and f.calls[-1][0].startswith("http://") and len(f.calls) == 3
+    assert later["status"] == "ok" and f.calls[-1][0].startswith("http://") and len(f.calls) == 4   # 照样先 https 再 http
+
+
+def test_working_https_tier_still_falls_back_to_http_for_http_links():
+    """Codex 11-18：前一篇在 https 上成了，后面 http 的链接不能只试 https。"""
+    def script(u, h, k):
+        if u.startswith("https://img.xhsfake.invalid/a"):
+            return OKW
+        return OKW if u.startswith("http://") else TimeoutError()
+    d, f = _dl(script)
+    assert d.download(_plan("https://img.xhsfake.invalid/a"), "C1")["status"] == "ok" and d.working[1] == "https"
+    out = d.download(_plan("http://img.xhsfake.invalid/b"), "C2")
+    assert out["status"] == "ok" and out["scheme_used"] == "http"
+    assert [c[0].split(":")[0] for c in f.calls[1:]] == ["https", "http"]
+
+
+def test_cap_hit_inside_a_redirect_chain_still_counts_as_attempted():
+    """Codex 11-18：上限在跳转中途用完，这一篇已经发过请求，要进 Q3 的分母（算没成）。"""
+    led = K.Ledger()
+    led.image_requests = K.MAX_IMAGE_REQUESTS - 1
+    d, f = _dl(lambda u, h, k: P.Resp(302, {"location": "/again"}, b"", ""), led)
+    out = d.download(_plan(), "C1")
+    assert len(f.calls) == 1 and out["status"] == "cap_interrupted" and out["attempted"] is True and d.cap_hit
+    nxt = d.download(_plan(), "C2")
+    assert nxt["status"] == "not_attempted" and nxt["attempted"] is False and nxt["not_attempted_reason"] == "image_cap"
 
 
 def test_image_request_cap_is_enforced():

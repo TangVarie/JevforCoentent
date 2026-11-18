@@ -389,6 +389,7 @@ class Downloader:
         self.tier_needed: Optional[str] = None
         self.disabled = False
         self.cap_hit = False
+        self._post_sent = False
         self.refused_posts = 0
         self.probes: list = []
         self._last: Optional[float] = None
@@ -414,6 +415,7 @@ class Downloader:
         cur, redirected = url, 0
         while True:
             self.ledger.charge_image()
+            self._post_sent = True                                # 这一篇真的发出过请求（上限在跳转中途用完时也要算「试过」）
             self._pace()
             try:
                 r = self.fetch(cur, tier_headers(tier), timeout=IMAGE_TIMEOUT, cap=IMAGE_CAP, stop_ct=_video_ct)
@@ -489,12 +491,16 @@ class Downloader:
             return d
         dims = plan.get("dims")
         last = None
+        self._post_sent = False
         try:
             if self.working:
-                tier, sch = self.working
-                vurl = url if d["scheme"] == "https" else (K.https_variant(url) if sch == "https" else url)
-                word, info = self._fetch(vurl, tier, dims)
-                last = (word, info, vurl, tier)
+                tier, _sch = self.working
+                # 档位固定下来之后，http 的链接照样先试 https、不行再试 http（不靠前一篇用的是哪种；Codex 11-18）
+                for vurl, _s in self._variants(url):
+                    word, info = self._fetch(vurl, tier, dims)
+                    last = (word, info, vurl, tier)
+                    if word == "ok":
+                        break
             else:
                 probes, nondet = [], False
                 for tier in K.TIERS:
@@ -521,6 +527,9 @@ class Downloader:
         except K.CapReached:
             self.cap_hit = True
             if last is None:
+                if self._post_sent:                                # 发出过请求、跳转中途撞上限：算试过、没成（进 Q3 的分母）
+                    d.update(status="cap_interrupted", attempted=True)
+                    return d
                 d["not_attempted_reason"] = "image_cap"
                 return d
         word, info, vurl, tier = last

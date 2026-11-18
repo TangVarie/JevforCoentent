@@ -58,7 +58,7 @@ FAIL_WORDS = frozenset({"upstream_failed", "bad_request", "not_found", "server",
 HARD_STOP = frozenset({"auth", "quota", "rate_limited"})
 NEUTRAL = frozenset({"gone", "hidden"})
 IMAGE_WORDS = ("ok", "forbidden", "not_found", "redirect", "client_error", "server", "network", "too_large", "not_image",
-               "placeholder_suspect", "url_rejected", "no_url", "not_attempted", "download_error")
+               "placeholder_suspect", "url_rejected", "no_url", "not_attempted", "download_error", "cap_interrupted")
 DETERMINISTIC_REFUSALS = frozenset({"forbidden", "not_found", "not_image", "placeholder_suspect", "redirect", "client_error"})
 TIERS = ("bare", "browser_ua", "browser_ua_referer")
 # linkcheck xhsearch/transport.py BROWSER_UA 原样
@@ -444,6 +444,8 @@ def classify_raw(raw: dict) -> str:
         return "unknown_shape"
     if E._search_business_error(raw):
         return "upstream_failed"                 # 外壳 200 包着上游失败：照样计费，不能当成「删了」
+    if data.get("code") is not None and E._as_int(data.get("code")) not in (0, 200):
+        return "upstream_failed"                 # 里层 code 不是 0 / 200：就算同时写着 success=true 也算上游失败（Codex 11-18）
     inner = data.get("data")
     if not isinstance(inner, list):
         return "unknown_shape"
