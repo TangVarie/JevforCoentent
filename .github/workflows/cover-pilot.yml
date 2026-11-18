@@ -1,0 +1,75 @@
+name: cover-pilot
+# I-35 封面试点（TV OPEN-ITEMS I-35、TV docs/33-first-image-trial.md §7；本仓 docs/cover-pilot-2026-11-18.md）。只能手动点。
+# plan（默认）：只读 TV（SELECT），打印计数和 10 个槽位；不碰 TikHub、GitHub、图片服务器，不花钱。
+# rehearse：整条付费路径在进程里的假服务上空跑一遍（不读任何密钥、不联网、不用掉认领 tag），先看 summary、产物、退出码对不对。
+# run：付费的那一次。最多 10 次详情调用、¥0.75，写死在 scripts/cover_pilot_core.py，这里改不了；要 confirm=I-35、只能在 main 上；
+#   第一次付费调用之前建 git tag cover-pilot-i35-run-claimed 认领这唯一一次（已有这个 tag 就拒，一分钱不花）；
+#   周一、周四 02:00–13:00 UTC 拒跑（external-corpus 在同一个 TikHub 账户上花钱，余额差会被它搅）。
+# 公开仓：日志、step summary、产物里只有计数、固定状态词、键名和宽高比统计。
+# 不加任何新密钥或环境变量：只用 Actions 里已有的 TIKHUB_API_KEY / SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 和自带的 github.token，
+#   而且只放在 Pilot 这一步（pip install 那步看不到）；TikHub 密钥和 token 只在 run 模式给。
+# 注意：含 ${{ … }} 的值不能写在 {…} 流式映射里（YAML 会把 { 当嵌套映射，GitHub 直接拒绝整个文件），一律用块式 + 引号。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "plan = 只读 TV 看计数（不花钱）；rehearse = 假服务上空跑全流程（不花钱）；run = 付费的那一次"
+        type: choice
+        options: [plan, rehearse, run]
+        default: plan
+      confirm:
+        description: "run 模式填 I-35"
+        default: ""
+      recheck_minutes:
+        description: "第一次下载之后隔几分钟再下一次（0 = 不复查）"
+        type: choice
+        options: ["0", "10", "20", "30"]
+        default: "20"
+permissions:
+  contents: write   # run 模式建认领 tag；token 只在 run 模式交给脚本
+concurrency:
+  group: cover-pilot
+  cancel-in-progress: false
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Guard
+        if: inputs.mode == 'run' && (inputs.confirm != 'I-35' || github.ref != 'refs/heads/main')
+        run: |
+          echo "::error::run needs confirm=I-35 on main"; exit 1
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -q -r requirements.txt
+      - name: Pilot
+        env:
+          PILOT_MODE: "${{ inputs.mode }}"
+          PILOT_RECHECK: "${{ inputs.recheck_minutes }}"
+          SUPABASE_URL: "${{ inputs.mode != 'rehearse' && secrets.SUPABASE_URL || '' }}"
+          SUPABASE_SERVICE_ROLE_KEY: "${{ inputs.mode != 'rehearse' && secrets.SUPABASE_SERVICE_ROLE_KEY || '' }}"
+          TIKHUB_API_KEY: "${{ inputs.mode == 'run' && secrets.TIKHUB_API_KEY || '' }}"
+          GITHUB_TOKEN: "${{ inputs.mode == 'run' && github.token || '' }}"
+        run: |
+          set +e
+          python3 scripts/cover_pilot.py "$PILOT_MODE" --out out --summary "$GITHUB_STEP_SUMMARY" --recheck-minutes "$PILOT_RECHECK"
+          rc=$?
+          set -e
+          echo "cover pilot exit code: $rc"
+          # 0 = 完成，3 = 按停止规则提前停（报告照样有效）；2 = 一分钱没花就拒绝，1 = 出错（部分报告照样写出）
+          if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then exit "$rc"; fi
+      - name: Upload counts-only report
+        if: always() && hashFiles('out/cover_pilot_report.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: "cover-pilot-${{ inputs.mode }}-${{ github.run_id }}"
+          path: |
+            out/cover_pilot_report.json
+            out/cover_pilot_report.md
+          retention-days: 3
+          if-no-files-found: ignore

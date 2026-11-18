@@ -1,3 +1,9 @@
+# Jev · 2026-11-18：I-35 封面试点（手动 workflow `cover-pilot`）
+
+TV 里没有飞书首图的 310 篇爆帖，封面能不能从发布链接经 TikHub 详情接口拿到（TV [OPEN-ITEMS I-35](https://github.com/TangVarie/truth-vault/blob/main/OPEN-ITEMS.md)、[docs/33 第 7 节](https://github.com/TangVarie/truth-vault/blob/main/docs/33-first-image-trial.md)）。owner 11-18 同意先花约 0.7 元试 10 篇。本仓加了一条只能手动点的命令和 workflow：`plan`（默认，只读 TV、不花钱）、`rehearse`（假服务上空跑全流程、不花钱）、`run`（最多 10 次详情、0.75 元，写死在代码里；confirm=I-35、只在 main；git tag `cover-pilot-i35-run-claimed` 认领唯一一次；周一、周四 02:00–13:00 UTC 拒跑）。不加任何新密钥或环境变量，不写库，定时任务不变，产物只有计数。合并会让 Railway 重启 Jev 服务（服务代码没变），别在夜跑调 Jev 的时候合。**还没跑**：合并后先 `plan`、再 `rehearse`、再 `run`，结果填进 [docs/cover-pilot-2026-11-18.md](docs/cover-pilot-2026-11-18.md)「结果」，再开 TV 只改文档的 PR 更新 I-35。
+
+---
+
 # Jev 移交下一位 · 2026-10-22
 
 先读 [Jev接手卡](docs/handoff-2026-10-22-next-owner.md) 与 [三仓执行书PR TV#215](https://github.com/TangVarie/truth-vault/pull/215)。本轮未改Jev实现；评论v0.6已上线、编译接口已在线，aw也已限制正则源长300字（148条对拍差异0）。aw#121已合并但生产部署待核，#117最终head fdeaa9f过审/CI、未合并。用户要求本轮交接给同事，已有生产授权与私有操作包见总执行书。下方10-21及更早段落是历史快照，与本节冲突时按本节。
