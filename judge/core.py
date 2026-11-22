@@ -84,14 +84,18 @@ def build_evidence_call(bank: Bank, spans_: dict, items: dict) -> Optional[tuple
 
 
 def apply_evidence(items: dict, resp: dict, sent_map: dict) -> None:
+    from .banks import _prob
     for qid, a in (resp.get("answers") or {}).items():
-        if qid not in items or qid not in sent_map:
+        if qid not in items or qid not in sent_map or not isinstance(a, dict):
             continue
         ch = a.get("choice")
-        p = float((a.get("probabilities") or {}).get(ch, 0.0))
-        if ch == "没有" or ch is None:
+        probs = a.get("probabilities")
+        raw_p = probs.get(ch) if isinstance(probs, dict) else None
+        p = _prob(raw_p)
+        p_out = round(p, 3) if p is not None else 0.0
+        if ch == "没有" or ch is None or isinstance(ch, bool):
             items[qid]["evidence"] = None
-            items[qid]["evidence_p"] = round(p, 3)
+            items[qid]["evidence_p"] = p_out
             items[qid]["invalid_reason"] = INVALID_EVIDENCE_NOT_FOUND
         else:
             try:
@@ -99,10 +103,10 @@ def apply_evidence(items: dict, resp: dict, sent_map: dict) -> None:
                 if k < 1:
                     raise IndexError(ch)          # 「0」「-1」不是编号：别让 Python 负下标静默取到最后一句
                 items[qid]["evidence"] = sent_map[qid][k - 1]
-            except (ValueError, IndexError):
+            except (TypeError, ValueError, IndexError):
                 items[qid]["evidence"] = None
                 items[qid]["invalid_reason"] = INVALID_EVIDENCE_NOT_FOUND
-            items[qid]["evidence_p"] = round(p, 3)
+            items[qid]["evidence_p"] = p_out
 
 
 def enforce_evidence(bank: Bank, items: dict) -> None:

@@ -193,22 +193,23 @@ def check_bank(bank: Bank) -> list:
     return problems
 
 
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
 def fill_text(text: str, fill: Optional[dict]) -> str:
-    """把题干 / 定义里的 {占位符} 换成本篇的值。只做字面替换，不用 str.format（定义里可能有别的花括号）。"""
+    """把题干 / 定义里的 {占位符} 换成本篇的值。单遍正则替换，替换进去的文本里就算带 {别的词} 也不会再被二次替换。"""
     if not fill or "{" not in text:
         return text
-    for k, v in fill.items():
-        text = text.replace("{" + k + "}", str(v))
-    return text
+    return _PLACEHOLDER_RE.sub(lambda m: str(fill[m.group(1)]) if m.group(1) in fill else m.group(0), text)
 
 
 def unfilled(bank: Bank, fill: Optional[dict] = None) -> list:
-    """填完之后仍留着 {占位符} 的题（说明调用方漏给了）。"""
+    """模板里仍缺值的 {占位符} 的题（说明调用方漏给了）。只检查模板本身的占位符，避免帖子正文里自带花括号误触发 500。"""
     merged = dict(bank.fill_defaults); merged.update(fill or {})
     left = []
     for q in bank.questions:
         texts = [q.instructions] + [str(v) for v in q.criteria.values()]
-        if any("{" in fill_text(t, merged) and "}" in fill_text(t, merged) for t in texts):
+        if any(any(m.group(1) not in merged for m in _PLACEHOLDER_RE.finditer(t)) for t in texts):
             left.append(q.id)
     return left
 
@@ -254,7 +255,7 @@ def interpret(bank: Bank, resp: dict, asked: Optional[list] = None) -> dict:
             if asked_set is not None:
                 out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_MISSING}
             continue
-        if a.get("type") == "noul" or (q.jtype == "noul" and "noul" in a):
+        if q.jtype == "noul" and (a.get("type") == "noul" or "noul" in a):
             p = _prob(a.get("noul"))
             if p is None:
                 out[q.id] = {"answer": None, "p": None, "ambiguous": False, "invalid_reason": INVALID_OUT_OF_VOCAB}
