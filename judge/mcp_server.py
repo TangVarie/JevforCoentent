@@ -169,7 +169,7 @@ def _draft_body(title: str, body: str, banks: Optional[list], judge_paras: str, 
     if not project:
         raise ThinClientError("policy: 未发布稿必须带 project（参数 project 或环境变量 JUDGE_PROJECT）：不知道是哪个项目就判断不了能不能出境（docs/00 #7）")
     req = {"title": title, "body": body, "subject_id": subject_id or "draft", "subject_type": "aw_version",
-           "project": project, "category": category, "banks": list(banks or DEFAULT_BANKS), "brief": brief, "hard_rules": hard_rules,
+           "project": project, "category": category, "banks": list(DEFAULT_BANKS if banks is None else banks), "brief": brief, "hard_rules": hard_rules,
            "target": target, "validated": validated, "judge_paras": judge_paras, "run_tag": RUN_TAG, "write": False, "return_rows": False}
     return {k: v for k, v in req.items() if v is not None}
 
@@ -320,7 +320,7 @@ def comment_repair_plan_for(post_title: str, post_body: str, text: str, slot: di
     reader, ops = _bank("comment_reader_v0.4"), _bank("comment_ops_v0.2")
     post = _post(post_title, post_body, kind, points); s = _slot(slot); fill = CM.fill_for(post)
     cj = CM.judge_comment(_client(), post, text, s, reader, ops=ops, fill=fill)
-    return {"passed": cj.passed(), "needs_review": cj.needs_review, "flags": cj.flags, "hard_fails": cj.hard_fails,
+    return {"passed": cj.passed() and not cj.needs_review, "needs_review": cj.needs_review, "flags": cj.flags, "hard_fails": cj.hard_fails,
             "profile": cj.profile(), "plan": CM.comment_repair_plan(cj, {"reader": reader, "ops": ops}, fill), "calls": cj.calls}
 
 

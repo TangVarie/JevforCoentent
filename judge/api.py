@@ -88,7 +88,7 @@ from .hidden import HiddenConfigError, all_hidden, check_config as _check_hidden
 from .jev_client import JevClient, JevError
 from .loop import judge_draft as _judge_draft, redact, repair_plan
 
-BANKS_DIR = Path(os.environ.get("JUDGE_BANKS_DIR", Path(__file__).resolve().parent.parent / "banks"))
+BANKS_DIR = Path((os.environ.get("JUDGE_BANKS_DIR") or "").strip() or (Path(__file__).resolve().parent.parent / "banks"))
 DEFAULT_DRAFT_BANKS = ("feature_questions_v0_1", "platform_health_v0.1", "human_feel_para_v0.2")
 TITLE_MODES = set(getattr(sp._tv, "TITLE_EXTRACTION_MODES", ("column", "markers", "none")))
 _BANK_CACHE: dict = {}
@@ -432,7 +432,7 @@ def judge_draft(req: DraftRequest, role: str = Depends(require_any_key)):
     try:
         ds = setup_draft(get_bank, req.banks, subject_type=req.subject_type, project_code=req.project, category=req.category,
                          brief=req.brief, project_bank=req.project_bank, project_bank_name=req.project_bank_name,
-                         hard_rules=req.hard_rules)
+                         hard_rules=req.hard_rules, hidden_for=all_hidden)
     except P.PolicyBlocked as exc:
         raise HTTPException(403, str(exc))
     except (P.PolicyInputError, DraftSetupError) as exc:

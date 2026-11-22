@@ -19,6 +19,7 @@ import logging
 import math
 import os
 import re
+import threading
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Optional
@@ -26,12 +27,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-CONFIG = Path(os.environ.get("JUDGE_HIDDEN_CONFIG", Path(__file__).resolve().parent.parent / "config" / "hidden_rotation.yaml"))
+CONFIG = Path((os.environ.get("JUDGE_HIDDEN_CONFIG") or "").strip() or (Path(__file__).resolve().parent.parent / "config" / "hidden_rotation.yaml"))
 _cache: dict = {}
+_lock = threading.Lock()
 _log = logging.getLogger("judge.hidden")
 # 季度按哪个时区的"今天"算 (TV 审计 2026-10-08 C-08): 以前是 date.today() = 服务器本地时间, Railway 是 UTC、
 # 起 judge.mcp_server 的机器 (当时是写手机器) 是北京时间, 每季交界有 8 小时两边暗题不一样。钉死一个时区, 两边一致; 要换用 JUDGE_TZ。
-QUARTER_TZ_NAME = os.environ.get("JUDGE_TZ", "Asia/Shanghai")
+QUARTER_TZ_NAME = (os.environ.get("JUDGE_TZ") or "").strip() or "Asia/Shanghai"
 # 起 MCP 的机器可能是 Windows / 精简镜像, 没有系统 IANA 时区库: requirements.txt 声明了 tzdata 兜底, 这里再兜一层 ——
 # 找不到就退到固定偏移 (上海 +8, 其它退 UTC) 并记一行; 不能让一个时区名把 API / MCP 服务起不来 (codex review on #6)。
 _FIXED_OFFSETS = {"Asia/Shanghai": 8, "UTC": 0}
@@ -95,15 +97,19 @@ def _config() -> dict:
     """读并校验暗题配置，按 (路径, 修改时间) 缓存。缺文件、YAML 坏、形状不对都抛 HiddenConfigError，坏的不进缓存。"""
     try:
         key = (str(CONFIG), CONFIG.stat().st_mtime)
-        if key not in _cache:
-            cfg = validate(yaml.safe_load(CONFIG.read_text(encoding="utf-8")))
+        with _lock:
+            cached = _cache.get(key)
+        if cached is not None:
+            return cached
+        cfg = validate(yaml.safe_load(CONFIG.read_text(encoding="utf-8")))
+        with _lock:
             _cache.clear()
             _cache[key] = cfg
+        return cfg
     except FileNotFoundError:
         raise HiddenConfigError(f"暗题配置不存在：{CONFIG}（部署要带上 config/hidden_rotation.yaml，或用 JUDGE_HIDDEN_CONFIG 指对位置）") from None
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         raise HiddenConfigError(f"暗题配置 {CONFIG} 读不出：{exc}") from None
-    return _cache[key]
 
 
 def check_config() -> dict:

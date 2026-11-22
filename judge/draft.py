@@ -94,7 +94,8 @@ def project_from_request(loaded: dict, names: list, *, brief: Optional[dict], pr
 def setup_draft(get_bank: Callable[[str], Bank], names: list, *, subject_type: str = "aw_version",
                 project_code: Optional[str] = None, category: Optional[str] = None, brief: Optional[dict] = None,
                 project_bank: Optional[dict] = None, project_bank_name: str = "project",
-                hard_rules: Optional[dict] = None) -> DraftSetup:
+                hard_rules: Optional[dict] = None,
+                hidden_for: Optional[Callable[[dict], set]] = None) -> DraftSetup:
     """policy 的 PolicyBlocked / PolicyInputError 原样抛出（HTTP 分别映射 403 / 422）。
     一篇稿子一定是未发布稿：subject_type 只能是 aw_version / ssll_sample，否则调用方写个 note 就绕过了数据出境（codex review on #2）。"""
     if subject_type not in P.UNPUBLISHED_SUBJECT_TYPES:
@@ -120,6 +121,7 @@ def setup_draft(get_bank: Callable[[str], Bank], names: list, *, subject_type: s
         raise DraftSetupError("项目题库只有意图题（intent_of_para），它只在判段时问；没有人感题库这次一题都不会判")
     hard = {k: v for k, v in DEFAULT_HARD_RULES.items() if k[0] in loaded}
     hard.update(brief_hard)
+    hidden = set(hidden_for(loaded)) if (hard_rules and hidden_for is not None) else set()
     for k, v in (hard_rules or {}).items():
         if ":" not in k:
             raise DraftSetupError(f"hard_rules 的键要写成 题库名:题号，收到 {k!r}")
@@ -129,8 +131,9 @@ def setup_draft(get_bank: Callable[[str], Bank], names: list, *, subject_type: s
             continue
         if bname not in loaded:
             raise DraftSetupError(f"hard_rules[{k!r}]：题库 {bname!r} 不在这次要判的层里（有：{sorted(loaded)}）")
-        if qid not in loaded[bname].ids():
-            raise DraftSetupError(f"hard_rules[{k!r}]：题库 {bname} 没有题 {qid!r}（有：{loaded[bname].ids()}）")
+        visible_ids = [q for q in loaded[bname].ids() if q not in hidden]
+        if qid not in loaded[bname].ids() or qid in hidden:
+            raise DraftSetupError(f"hard_rules[{k!r}]：题库 {bname} 没有题 {qid!r}（有：{visible_ids}）")
         hard[(bname, qid)] = norm_want(k, v)
     return DraftSetup(loaded=loaded, fq=fq, platform=platform, human=human, project=project, hard=hard,
                       ignored=ignored, decision=decision)

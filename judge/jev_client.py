@@ -98,7 +98,7 @@ class JevClient:
         self.api_key = api_key or (None if mock else find_api_key())
         if not self.api_key and not mock:
             raise JevError("没找到 Jev 密钥（TYPESAFE_API_KEY / TYPESAFE_KEY_FILE / ~/.config/typesafe/key）")
-        self.base_url = (base_url or os.environ.get("TYPESAFE_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
+        self.base_url = ((base_url or "").strip() or (os.environ.get("TYPESAFE_BASE_URL") or "").strip() or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = float(timeout) if timeout is not None else _env_number("JEV_TIMEOUT_SEC", 30.0, 1.0, 120.0)
         self.retries = int(retries) if retries is not None else int(_env_number("JEV_RETRIES", 3, 0, 5))
 
