@@ -82,7 +82,7 @@ from . import relay as _relay
 from . import rules as _rules
 from . import spans as sp
 from .banks import Bank, check_bank, discover, load_bank, unfilled
-from .core import LedgerWriteError, judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
+from .core import LedgerWriteError, enforce_evidence, judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
 from .draft import DraftSetupError, setup_draft
 from .hidden import HiddenConfigError, all_hidden, check_config as _check_hidden_config
 from .jev_client import JevClient, JevError
@@ -242,7 +242,11 @@ def _judge_one(client: JevClient, bank: Bank, s: Subject, with_evidence: bool):
         if bank.fmt == "tv":
             return judge_note(client, bank, s.subject_id, s.raw_content, title_extraction=s.title_extraction,
                               title_col=s.title_col, with_evidence=with_evidence, subject_type=s.subject_type)
-        return judge_state(client, bank, s.subject_id, s.state, subject_type=s.subject_type, qids=s.qids, fill=s.fill)
+        r = judge_state(client, bank, s.subject_id, s.state, subject_type=s.subject_type, qids=s.qids, fill=s.fill)
+        # TV 守卫 3 同样适用于 Jev 格式题库（AU-F03）：这条路不做证据调用，evidence: on_true 的题答「是」就是没证据 → evidence_not_found，
+        # 和 judge_note、/judge_draft 一个口径，不让无依据的「是」进账本。
+        enforce_evidence(bank, r.items)
+        return r
     except JevError as exc:
         return {"subject_type": s.subject_type, "subject_id": s.subject_id, "error": f"Jev 调用失败：{exc}"}
     except Exception as exc:  # noqa: BLE001 — 例如 Jev 200 但 answers 形状异常
