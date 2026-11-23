@@ -99,7 +99,7 @@ class AnthropicCompatGenerator:
                  extra: Optional[dict] = None, fail_on_stop: tuple = (),
                  backup_base_url: Optional[str] = None, backup_api_key: Optional[str] = None):
         self.model, self.max_tokens, self.temperature, self.system = model, max_tokens, temperature, system
-        base = (base_url or os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")).rstrip("/")
+        base = ((base_url or os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com").rstrip("/")
         self.base_url = base[:-3] if base.endswith("/v1") else base
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "") or os.environ.get("MOONSHOT_API_KEY", "")
         self.retries, self.timeout = retries, timeout
@@ -460,8 +460,10 @@ def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None
             if recorded is not None:
                 recorded.append(dict(entry, why="未过闸二：只记录，不进修改单、不下发生成端"))
             continue
-        plan.append(dict(entry, definition=q.criteria.get(want, ""),
-                         instruction=f"「{q.ask}」现在是「{now}」，目标是「{want}」：{q.criteria.get(want, '')}"))
+        definition = (q.criteria.get("true" if want == "是" else "false", "")
+                      if q.jtype == "noul" else q.criteria.get(want, ""))
+        plan.append(dict(entry, definition=definition,
+                         instruction=f"「{q.ask}」现在是「{now}」，目标是「{want}」" + (f"：{definition}" if definition else "")))
     for p in dj.para_items:
         it = p["items"]
         checks = (("para_register", it.get("para_register", {}).get("answer") == "文案腔", "文案腔", "随手口语/认真分享",

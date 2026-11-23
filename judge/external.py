@@ -27,7 +27,11 @@ from .banks import INVALID_MISSING, INVALID_OUT_OF_VOCAB, Bank
 from .core import judge_note, judge_state, ledger_rows
 from .jev_client import JevClient
 
-TIKHUB_BASE = os.environ.get("TIKHUB_BASE_URL", "https://api.tikhub.io")
+def _tikhub_base() -> str:
+    return ((os.environ.get("TIKHUB_BASE_URL") or "").strip() or "https://api.tikhub.io").rstrip("/")
+
+
+TIKHUB_BASE = _tikhub_base()
 SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
 DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"   # 官方文档：图文接口图文、视频笔记都能取到文字；视频接口只认视频
 USER_AGENT = "bywood-judge/0.1 (+https://github.com/TangVarie/JevforCoentent)"

@@ -24,8 +24,10 @@ from typing import Iterable, Optional
 
 import yaml
 
-CONFIG = Path(os.environ.get("JUDGE_POLICY_CONFIG", Path(__file__).resolve().parent.parent / "config" / "data_policy.yaml"))
+CONFIG = Path((os.environ.get("JUDGE_POLICY_CONFIG") or "").strip() or (Path(__file__).resolve().parent.parent / "config" / "data_policy.yaml"))
 UNPUBLISHED_SUBJECT_TYPES = frozenset({"aw_version", "ssll_sample"})
+PUBLIC_SUBJECT_TYPES = frozenset({"note", "comment", "external_note"})
+VALID_SUBJECT_TYPES = PUBLIC_SUBJECT_TYPES | UNPUBLISHED_SUBJECT_TYPES
 GENERIC_PREFIXES = ("feature_questions", "human_feel", "comment_", "ssll_critic", "external_triage")
 PLATFORM_PREFIXES = ("platform",)
 
@@ -122,9 +124,13 @@ def decide(subject_types: Iterable[str], project: Optional[str] = None, category
            cfg: Optional[dict] = None, published: Optional[bool] = None) -> Decision:
     """published=False 可以把公开类型（如预埋评论的 comment）收紧成未发布；published=True 放不宽未发布类型。"""
     cfg = load() if cfg is None else cfg
+    types = list(subject_types)
+    unknown = sorted({t for t in types if t not in VALID_SUBJECT_TYPES})
+    if unknown:
+        raise PolicyInputError(f"未知的 subject_type：{unknown}（允许：{sorted(VALID_SUBJECT_TYPES)}）")
     project = (project or "").strip() or None
     category = (category or "").strip() or None
-    unpublished = published is False or any(t in UNPUBLISHED_SUBJECT_TYPES for t in subject_types)
+    unpublished = published is False or any(t in UNPUBLISHED_SUBJECT_TYPES for t in types)
     if not unpublished:
         return Decision(published=True, project=project, category=category, project_layer=True)
     if not project:
