@@ -65,6 +65,8 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
   `/health` 回显 `policy_sha256` = `data_policy.yaml` 文件字节的 sha256：和仓里 `sha256sum config/data_policy.yaml` 一致，就说明生产跑的是仓里这份出境规则（J-10，不用带鉴权的请求）。
 - **Jev 格式题的 `scope`**（2026-10-20）：Jev 格式题（含内联 `project_bank`）可选写 `scope: title | body | full`。只在 `/judge_draft` 的平台层 / 项目层起作用：题干前加「只看【标题】」之类的提示；
   答「是」的证据，`title` 只在标题里找、`full` 在「标题（自成一句）+ 正文各句」里找；稿子没标题时 `title` 题不问、记 `no_title`（不算 unjudged，同 fq）。不写 `scope` 的题行为不变：证据只从正文句里选。
+- **`POST /judge` 上的 Jev 格式题库不做证据调用**（S-20 ④ / AU-F03）：题目带证据要求（`evidence: on_true` / `on_choice_except:…`）的，答「是」（choice 题是豁免值以外的选项）没有依据句，
+  一律记 `evidence_not_found`、账本 answer 为 NULL，不会以「是」通过，和 TV 格式题库、`/judge_draft` 一个口径；`with_evidence` 管不到这条路。这类题要拿到带依据句的有效「是」，走 `/judge_draft`（平台层 / 项目层有要证据的答案时会再发一次证据调用）。
 - **暗题**（docs/00 #4，`judge/hidden.py` + `config/hidden_rotation.yaml`）：人感题库每季度按 sha256(题号|季度) 自动换 1/3；暗题照判（段级）、照落账本，
   **不算硬伤、不影响 `passed`**：人感题库只在段级判，硬伤只看篇级的 `hard_rules`（fq / 平台 / 项目层）；暗题命中时修改单里命中的每一段各一条「第 N 段有一项不公开的检查没过：<段首 60 字>…」，不带题号和答案；修改单的段级条目只来自文案腔、总结收尾、评价词堆叠三项检查，暗题落在别的题上时不进修改单，只照判、照落账本（2026-11-04 改正：以前这里写「照算硬伤」，和代码不符，审计 11-02 F03）。
   暗题的题号、题干、答案不出现在修改单、`/judge_draft` 的 profile / detail / plan / ledger_rows、`/banks` 与 MCP `list_banks` 的题号列表里。

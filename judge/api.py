@@ -18,6 +18,9 @@
     subjects 并行判（JUDGE_WORKERS，默认 4 路），单个 subject 的 Jev 失败只让它自己带 error，不拖累整批；全部失败才 502。
     返回每个 subject 的 items（答案、概率、歧义、证据）、歧义题列表、用量与延迟；write=true 时另返回写入行数。
     write=true 时 with_evidence 必须为 true（TV 契约：答「是」要有证据，否则账本 answer 为 NULL）。
+    Jev 格式题库（subject 给 state 的那种）在这里不做证据调用，with_evidence 管不到：题目带证据要求（evidence: on_true / on_choice_except:…）的，
+    答「是」（choice 题是豁免值以外的选项）没有依据句，一律记 evidence_not_found、账本 answer 为 NULL，不会以「是」通过（S-20 ④ / AU-F03）。
+    这类题要拿到带依据句的有效「是」，走 /judge_draft（平台层 / 项目层有要证据的答案时会再发一次证据调用）。
 
   POST /judge_draft   （一篇稿子、多层题库、带修改单；写作台 commit_drafts 挂的是它）
     {
@@ -82,7 +85,7 @@ from . import relay as _relay
 from . import rules as _rules
 from . import spans as sp
 from .banks import Bank, check_bank, discover, load_bank, unfilled
-from .core import LedgerWriteError, judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
+from .core import LedgerWriteError, enforce_evidence, judge_note, judge_state, ledger_rows, postgrest_upsert, result_to_dict
 from .draft import DraftSetupError, setup_draft
 from .hidden import HiddenConfigError, all_hidden, check_config as _check_hidden_config
 from .jev_client import JevClient, JevError
@@ -242,7 +245,11 @@ def _judge_one(client: JevClient, bank: Bank, s: Subject, with_evidence: bool):
         if bank.fmt == "tv":
             return judge_note(client, bank, s.subject_id, s.raw_content, title_extraction=s.title_extraction,
                               title_col=s.title_col, with_evidence=with_evidence, subject_type=s.subject_type)
-        return judge_state(client, bank, s.subject_id, s.state, subject_type=s.subject_type, qids=s.qids, fill=s.fill)
+        r = judge_state(client, bank, s.subject_id, s.state, subject_type=s.subject_type, qids=s.qids, fill=s.fill)
+        # TV 守卫 3 同样适用于 Jev 格式题库（AU-F03）：这条路不做证据调用，evidence: on_true 的题答「是」就是没证据 → evidence_not_found，
+        # 和 judge_note、/judge_draft 一个口径，不让无依据的「是」进账本。
+        enforce_evidence(bank, r.items)
+        return r
     except JevError as exc:
         return {"subject_type": s.subject_type, "subject_id": s.subject_id, "error": f"Jev 调用失败：{exc}"}
     except Exception as exc:  # noqa: BLE001 — 例如 Jev 200 但 answers 形状异常
