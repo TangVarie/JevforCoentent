@@ -275,11 +275,11 @@ DEFAULT_HARD_RULES = {("platform_health_v0.1", "efficacy_claim"): "否", ("platf
 
 def project_hard_rules(brief: dict, name: str = "project") -> dict:
     """brief.hard_rules[].want → {(题库名, 题号): 期望答案}，与 compile_project_bank 编出的题配套；
-    want 可写 true/false 或「是」/「否」，不写按 false（答「是」即硬伤）。"""
+    want 可写 true/false、"true"/"false" 或「是」/「否」，不写按 false（答「是」即硬伤）。"""
     out = {}
     for r in brief.get("hard_rules") or []:
         w = r.get("want", False)
-        out[(name, r["id"])] = w if isinstance(w, str) else ("是" if w else "否")
+        out[(name, r["id"])] = noul_want(w) if isinstance(w, str) else ("是" if w else "否")   # 编出来的都是是非题
     return out
 
 
@@ -414,6 +414,35 @@ def _is_fq(bank: Optional[Bank]) -> bool:
     return bank is not None and bank.fmt == "tv"          # 按格式认 fq，不按写死的名字（换名加载也守得住闸二）
 
 
+_NOUL_WANT = {"是": "是", "否": "否", "true": "是", "false": "否"}
+_NOUL_KEY = {"是": "true", "否": "false"}
+
+
+def noul_want(v):
+    """是非题的期望答案先按「是」/「否」归一：JSON 布尔、"true" / "false"（不分大小写）、「是」/「否」；认不出的原样返回。
+    是非题的答案是「是」/「否」、定义的键是 "true" / "false"：target 写成 true / "true" 时不先归一，
+    查定义会落到 "false" 那一条（给出的定义正好反了），和答案比也永远不等（S-18）。"""
+    if isinstance(v, bool):
+        return "是" if v else "否"
+    if isinstance(v, str):
+        return _NOUL_WANT.get(v.strip().lower(), v)
+    return v
+
+
+def _noul_definition(q: Question, want) -> str:
+    """是非题按归一后的期望答案取定义；认不出的期望答案不给定义（不猜成「否」）。"""
+    key = _NOUL_KEY.get(noul_want(want))
+    return q.criteria.get(key, "") if key else ""
+
+
+def normalize_target(target: Optional[dict], banks: dict) -> Optional[dict]:
+    """目标画像里是非题的期望答案按「是」/「否」归一（noul_want），选择题原样。best-of-k 打分和修改单用同一份。"""
+    if not target:
+        return target
+    noul = {q.id for b in banks.values() if b is not None for q in b.questions if q.jtype == "noul"}
+    return {qid: (noul_want(w) if qid in noul else w) for qid, w in target.items()}
+
+
 def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None,
                 target: Optional[dict] = None, hidden: Optional[set] = None, recorded: Optional[list] = None) -> list:
     """修改指令 = 题号 + 概率 + 证据句 + 定义。不写改法，只说哪一句、犯了哪条、这条的定义是什么。
@@ -438,7 +467,8 @@ def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None
         if q is None:
             definition = ""
         elif q.jtype == "noul":
-            definition = q.criteria.get("true" if want == "是" else "false", "")
+            want = noul_want(want)
+            definition = _noul_definition(q, want)
         else:
             definition = q.criteria.get(want, "")
         plan.append({"kind": "hard", "bank": bname, "qid": qid, "now": ans, "want": want, "p": p, "evidence": ev,
@@ -447,12 +477,16 @@ def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None
                                     + (f"。依据句：{ev}" if ev else "")})
     for qid, want in (target or {}).items():
         now = dj.profile.get(qid)
-        if now is None or now == want or qid in hidden:
+        if now is None or qid in hidden:
             continue
         bname = next((b for b, items in dj.detail.items() if qid in items), None)
         bank = banks.get(bname) if bname else None
         q = bank.by_id().get(qid) if bank else None
         if not (bname and q):
+            continue
+        if q.jtype == "noul":
+            want = noul_want(want)                        # true / "true" → 「是」：先归一再比、再查定义（S-18）
+        if now == want:
             continue
         entry = {"kind": "target", "bank": bname, "qid": qid, "now": now, "want": want,
                  "p": dj.detail[bname][qid].get("p"), "evidence": dj.detail[bname][qid].get("evidence")}
@@ -460,8 +494,7 @@ def repair_plan(dj: DraftJudgement, banks: dict, validated: Optional[set] = None
             if recorded is not None:
                 recorded.append(dict(entry, why="未过闸二：只记录，不进修改单、不下发生成端"))
             continue
-        definition = (q.criteria.get("true" if want == "是" else "false", "")
-                      if q.jtype == "noul" else q.criteria.get(want, ""))
+        definition = _noul_definition(q, want) if q.jtype == "noul" else q.criteria.get(want, "")
         plan.append(dict(entry, definition=definition,
                          instruction=f"「{q.ask}」现在是「{now}」，目标是「{want}」" + (f"：{definition}" if definition else "")))
     for p in dj.para_items:
@@ -555,6 +588,7 @@ def produce(client: JevClient, generator: Generator, prompt: str, *, k: int = 3,
     from .hidden import all_hidden
     banks = {b.name: b for b in (fq, platform, project, human) if b is not None}
     hidden = all_hidden(banks) if hidden is None else hidden
+    target = normalize_target(target, banks)              # 打分（score）和修改单对同一份「是」/「否」
     kw = dict(fq=fq, platform=platform, project=project, human=human, hard_rules=hard_rules, judge_paras="on_fail")
     (draft, dj), ranking = best_of_k(client, generator, prompt, k, judge_kwargs=kw, target=target)
     trail = [{"step": "best_of_k", "ranking": [s for _, s in ranking], "hard_fails": len(dj.hard_fails)}]

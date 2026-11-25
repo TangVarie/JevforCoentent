@@ -67,6 +67,7 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
   答「是」的证据，`title` 只在标题里找、`full` 在「标题（自成一句）+ 正文各句」里找；稿子没标题时 `title` 题不问、记 `no_title`（不算 unjudged，同 fq）。不写 `scope` 的题行为不变：证据只从正文句里选。
 - **`POST /judge` 上的 Jev 格式题库不做证据调用**（S-20 ④ / AU-F03）：题目带证据要求（`evidence: on_true` / `on_choice_except:…`）的，答「是」（choice 题是豁免值以外的选项）没有依据句，
   一律记 `evidence_not_found`、账本 answer 为 NULL，不会以「是」通过，和 TV 格式题库、`/judge_draft` 一个口径；`with_evidence` 管不到这条路。这类题要拿到带依据句的有效「是」，走 `/judge_draft`（平台层 / 项目层有要证据的答案时会再发一次证据调用）。
+- **是非题的期望答案先归一成「是」/「否」**（2026-11-25，TV S-18）：`/judge_draft` 的 `target`、`hard_rules` 和 brief 的 `hard_rules[].want` 写成 `true` / `false`、`"true"` / `"false"`（不分大小写）都按「是」/「否」比、取对应的定义；以前 `"true"` 会让修改单给出 `false` 那条定义（正好反了）。选择题照原样。
 - **暗题**（docs/00 #4，`judge/hidden.py` + `config/hidden_rotation.yaml`）：人感题库每季度按 sha256(题号|季度) 自动换 1/3；暗题照判（段级）、照落账本，
   **不算硬伤、不影响 `passed`**：人感题库只在段级判，硬伤只看篇级的 `hard_rules`（fq / 平台 / 项目层）；暗题命中时修改单里命中的每一段各一条「第 N 段有一项不公开的检查没过：<段首 60 字>…」，不带题号和答案；修改单的段级条目只来自文案腔、总结收尾、评价词堆叠三项检查，暗题落在别的题上时不进修改单，只照判、照落账本（2026-11-04 改正：以前这里写「照算硬伤」，和代码不符，审计 11-02 F03）。
   暗题的题号、题干、答案不出现在修改单、`/judge_draft` 的 profile / detail / plan / ledger_rows、`/banks` 与 MCP `list_banks` 的题号列表里。
@@ -149,7 +150,7 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 冻结 `comment_reader_v0.6` 的题面和 digest 不变，其中旧 `feeds` 的高风险路由说明由上述现行路由覆盖。
 写手通过 HTTP 判候选时，四项门槛题和门槛漏答/歧义复核照常；语气、价值、像安排及整组四道模型题仅作提示，见 [评论接口口径](docs/comment-tools-rollout-2026-10-12.md)。
 内部 `produce_comments(client, generator, post, slots, prompt_for, reader=…, thread=…, ops=…)` 仍按所传题库生成候选、给修改单并处理整组结果；它保留原来的整组模型门槛，不等同于写手 HTTP 的提示口径。
-题干里按篇变的部分（帖子要点、主体是机构还是产品）由 `fill_for(post)` 填占位符；漏填会报错，不会拿别的帖子的要点去判。
+题干里按篇变的部分（帖子要点、主体是机构还是产品）由 `fill_for(post)` 填占位符；漏填会报错，不会拿别的帖子的要点去判。占位符只认英文标识符（`{post_points}`）；模板里写成 `{帖子要点}` 这种填不进去的花括号也按漏填报错（2026-11-25，TV S-18），只查模板原文、不查填进去的帖子正文。
 
 ## 外部语料怎么控量
 
@@ -157,7 +158,7 @@ python3 scripts/external_corpus.py --dry-run   # 外部语料：先看这次要�
 钱花在两处：搜索按页（0.01 美元 / 页）、取全文按篇（0.01 美元 / 篇）。分诊（Jev 四题）只看搜索页的摘要，不花抓取费，所以「先分诊再取全文」是省钱的关键。
 分诊通过的一律取全文再打 fq：TikHub 搜索页的摘要截在 60 字，拿它打标等于只看半句话。详情接口没有公开 schema，正文从整棵返回里找（id 对得上的优先）；每次运行的前 3 份原始返回进产物 `kept.json` 的 `detail_samples`，开头 5 篇都解析不出正文就整次停、job 红。
 默认配置（2026-11-02 起）：8 品类（戒烟、鼻炎、运动补给、术后营养、求职留学、家居家电、个护、藻油）× 4 词 × 2 排序 × 2 页 = 128 页，每品类每次最多 40 篇全文，最坏 4.48 美元 / 次（单次硬上限 6 美元）；2026-11-03 起每周一、周四各跑一次（以前每周一一次），一个月最多 9 次，每月最坏 9 次 ≈ 40.3 美元（平均每月约 8.7 次时约 39 美元，手动触发另算）；每品类每月 360 篇（= 9 × 40，定时跑拦不住任何一次）只封顶入库篇数、不封顶花费；实际到上限的品类就停搜，按 10 月一周一次的量推一次约 3.5～3.9 美元，一周两次后每次新帖少一些、花得更少。加品类要同时在 TV 的 `prompts/external_shelf_v1.json` 补同名一行（外部参考书架按品类名对表），`budget_usd_per_run` 不能低于 `--dry-run` 算出的最坏花费（测试钉住）。
-去重靠 `state/external_corpus_state.json`（GitHub Actions 用 cache 保留）和 `--known-ids`（账本里已有的 external note_id）；一条笔记只在有了结局（分诊拒绝 / 太短 / 入账本）后才记为「见过」，因上限、预算或报错没看的下次还会看。从库里删掉一批外部笔记后要重抓，手动触发时设 `fresh_state=true`（不恢复 cache 里的 state）。
+去重靠 `state/external_corpus_state.json`（GitHub Actions 用 cache 保留）和 `--known-ids`（账本里已有的 external note_id）；一条笔记只在有了结局（分诊拒绝 / 太短 / 入账本）后才记为「见过」，因上限、预算或报错没看的下次还会看。例外是取全文时返回里找不到正文（`DetailUnparseable`）的：同一趟换个关键词再碰到不再分诊、不再取；连续 3 个算数的趟次都这样（`DETAIL_GIVE_UP_RUNS`）就记为见过（`why = detail_unparseable`），以后不再取。算数的趟次 = 这一趟至少取到一篇全文、且没有因连续 5 篇取全文失败（`DETAIL_PROBE`）整次停；不算数的趟次不加一，也不会只因为这一篇这趟没取到全文就清零。清零不看这一趟算不算数：这一篇在哪一趟取到过一次全文（之后 Jev 没判成或报错、没进见过的也算；同一趟先取到过、换个关键词再碰到时返回里找不到正文的，按取到过算，不加一），或者有了结局记为见过，计数就清零。这一篇在某一趟只碰到请求层报错（超时 / 5xx）的，不加也不清。计数在同一个 state 文件的 `detail_fail` 里，不动库；这一趟记为见过的，报告出错列表里标「已记进 seen」（2026-11-25，TV S-18：同样几篇每趟都取不到、每趟白付几次详情费）。从库里删掉一批外部笔记后要重抓，手动触发时设 `fresh_state=true`（不恢复 cache 里的 state）。
 Jev 回了 200 却缺答（`missing`）或答案不在选项里（`out_of_vocab`）算「没判成」，不算分诊拒绝、也不算判完：分诊的 on_topic / voice 没判成（判成的那一题已足以拒绝时照旧算分诊拒绝：on_topic 判成不是「是」，或 voice 判成不留的视角）、留下的四题没判齐（取全文之前就查）、fq 有一题没判成，这篇都按单条出错处理（不进 seen、不入账本、下次重判；fq 这一步没判成的下次会再付一次全文费），整次全部没判成照旧红。`known_external_ids.py` 只数判成了的 fq 题（`invalid_reason` 为空或是设计内的 no_title / text_too_short / evidence_not_found / span_truncated；分诊那 4 行不算），不再按原始行数（2026-11-04，外部评审 F03）。
 翻页按 TikHub 的规矩带首页返回的 `search_id` / `search_session_id`；单条笔记或单页搜索出错只记进报告、不中止整次运行。
 搜索返回 HTTP 200、一条笔记都没认出来、且业务报错（顶层 `code` 不是 200，或里层 `success=false` / `code` 不是 0、200）算这页搜索失败（认得出笔记的页不看业务码，照常处理）（`SearchUnparseable`，报错里带脱敏后的前 300 字）；一页一条笔记都没认出来就不再翻这个关键词×排序的后面几页；整次搜了若干页却 0 候选是系统性故障（job 红：多半是返回格式变了或外壳 200 包着上游失败），某品类搜了 ≥2 页 0 候选或搜索全部出错只告警（`::warning::`，报告顶上「注意」）；第一份认不出笔记的搜索原始返回脱敏后进 `kept.json` 的 `search_samples`（2026-11-04，外部评审 F09）。单个关键词真没结果照旧绿。写库走 `scripts/apply_rows.py`（PostgREST upsert，外部笔记表在前、账本行在后），产物先上传再写库。`--mock` 的 state 默认落到临时目录。

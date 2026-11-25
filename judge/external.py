@@ -36,6 +36,12 @@ SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
 DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"   # 官方文档：图文接口图文、视频笔记都能取到文字；视频接口只认视频
 USER_AGENT = "bywood-judge/0.1 (+https://github.com/TangVarie/JevforCoentent)"
 DETAIL_PROBE = 5           # 连着这么多篇取全文失败（接口报错或解析不出正文）→ 整次停，不再按篇白付费
+# 同一篇连着这么多趟（算数的趟）取全文都「返回里找不到正文」（DetailUnparseable）→ 记进 seen（why = detail_unparseable），以后不再取（S-18）。
+# 算数的趟 = 这一趟至少取到一篇全文、且没有因连续 DETAIL_PROBE 篇取全文失败整次停（详情接口是好的，是这一篇自己取不到）；
+# 不算数的趟不加，也不因这一篇这趟没取到就清。清不看算不算数：这一篇哪一趟取到过一次全文（后面 Jev 没判成也算；同一趟先取到、
+# 再碰到时找不到正文的按取到算、不加），或进了 seen，就清。这一篇的请求层报错（超时 / 5xx）不加也不清。
+# 计数在 state 的 detail_fail 里，不动库。规则全在 _settle_detail_fail。
+DETAIL_GIVE_UP_RUNS = 3
 DETAIL_SAMPLES = 3         # 每次运行留几份详情脱敏结构进产物，字段变了能直接看（不留正文/账号）
 SEARCH_SAMPLES = 1         # 每次运行留几份「一条笔记都没认出来」的搜索原始返回进产物（脱敏），格式变了能直接看
 # Jev 回了 200 却没答（missing）或答案不在选项里（out_of_vocab）：这篇「没判成」，不是「判了是否」。
@@ -392,6 +398,9 @@ class RunReport:
     processed: int = 0             # 走进分诊 / 取全文 / 打标的笔记数（含失败的）
     note_errors: int = 0
     detail_failed: int = 0         # 取全文失败的篇数（请求报错或解析不出正文；计在 note_errors 里）
+    detail_unparseable: int = 0    # 其中返回里找不到正文的篇数（同一趟再碰到不再取）
+    detail_given_up: int = 0       # 其中连续 DETAIL_GIVE_UP_RUNS 趟都取不到、这一趟记进 seen 不再取的篇数
+    given_up_ids: list = field(default_factory=list)   # 上面那几篇的 note_id（报告的出错列表里标出来：它们进了 seen）
     detail_samples: list = field(default_factory=list)
     search_samples: list = field(default_factory=list)
     warnings: list = field(default_factory=list)    # 不至于红、但要人看一眼的（某品类搜了几页一条笔记都没认出来）
@@ -410,6 +419,35 @@ def load_state(path: Path) -> dict:
 def save_state(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _settle_detail_fail(state: dict, seen: dict, unparseable: dict, fetched_ok: set, rep: RunReport, counted: bool) -> None:
+    """一趟跑完后更新 state["detail_fail"]（note_id → {runs, at}），连续就是靠这里的清和加：
+      · 清（不管这一趟算不算数）：已经有了结局、进了 seen 的（入账本 / 分诊拒绝 / 太短）；
+        这一趟取到过全文的（fetched_ok，含取到之后 Jev 没判成 / 报错、没进 seen 的）—— 正文取得到，连续就断了；
+      · counted 为假（这一趟一篇全文都没取到，或连续 DETAIL_PROBE 篇取全文失败整次停了）不加：分不清是这一篇的事还是详情接口的事，
+        已有的计数除了第一条清掉的都原样留着；
+      · 算数的趟里返回里找不到正文的（unparseable）runs + 1，到 DETAIL_GIVE_UP_RUNS 就记进 seen（why = detail_unparseable），
+        以后不再分诊、不再取全文；同一趟先取到过全文（fetched_ok）的不加（第一条已经清了）；
+      · 这一篇这一趟只碰到请求层报错（超时 / 5xx，不在 unparseable 里）：不加也不清。"""
+    fails = state.get("detail_fail")
+    if not isinstance(fails, dict):
+        fails = state["detail_fail"] = {}
+    for nid in [k for k in fails if k in seen or k in fetched_ok]:
+        del fails[nid]
+    if not counted:
+        return
+    for nid, where in unparseable.items():
+        if nid in fetched_ok:                           # 同一趟先取到过（Jev 没判成）、再碰到时取不到：这一趟不算「取不到」
+            continue
+        prev = fails.get(nid)
+        runs = (prev.get("runs") if isinstance(prev, dict) and isinstance(prev.get("runs"), int) else 0) + 1
+        if runs >= DETAIL_GIVE_UP_RUNS:
+            seen[nid] = {"cat": where["cat"], "kw": where["kw"], "at": rep.started, "kept": False, "why": "detail_unparseable"}
+            fails.pop(nid, None)
+            rep.detail_given_up += 1; rep.given_up_ids.append(nid)
+        else:
+            fails[nid] = {"runs": runs, "at": rep.started}
 
 
 def triage_state(n: dict, category: str) -> dict:
@@ -468,6 +506,8 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
              known_ids: Optional[set] = None, dry_run: bool = False) -> RunReport:
     """一次运行。纪律：
       · seen 只在一条笔记有了结局（分诊拒绝 / 太短 / 入账本）之后才写；因上限、预算、报错而没看的不写，下次还会看。
+        例外：取全文返回里找不到正文的，同一趟换个关键词再碰到不再取；连续 DETAIL_GIVE_UP_RUNS 个算数的趟都这样就记进 seen
+        （算数 = 这一趟取到过至少一篇全文、且没被 DETAIL_PROBE 整次停；取到过一次全文或进了 seen 就清零，算不算数都清；规则见 _settle_detail_fail）。
       · dry_run 不写 seen、不调 Jev、不取全文，只数候选。
       · 每次 / 每月上限到了整个品类停搜（不再逐页付费）；预算到了整次运行停。
       · 单条笔记或单页搜索的异常记进 rep.errors 继续跑；意外异常也不丢产物，写进 stopped_reason。"""
@@ -486,6 +526,9 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
         stats["errors"] += 1
 
     detail_streak = 0                                   # 连续取全文失败的篇数；有一篇取到就清零
+    unparseable: dict = {}                              # 这一趟取全文返回里找不到正文的：note_id → {cat, kw}
+    fetched_ok: set = set()                             # 这一趟取到过全文、之后出错没进 seen 的（Jev 没判成 / 报错）：清掉 detail_fail
+    endpoint_down = False
     try:
         for cat in cfg.get("categories") or []:
             name = cat["name"]
@@ -523,8 +566,8 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                             if not n["note_id"]:
                                 continue
                             rep.candidates += 1; stats["candidates"] += 1          # 搜到的页整页计数，报告里看得到规模
-                            if n["note_id"] in seen or n["note_id"] in known_ids:
-                                rep.duplicates += 1; continue
+                            if n["note_id"] in seen or n["note_id"] in known_ids or n["note_id"] in unparseable:
+                                rep.duplicates += 1; continue                   # unparseable：这一趟取过、返回里没有正文，不再分诊、不再付费
                             if dry_run:
                                 continue
                             if cap_reached():
@@ -539,11 +582,14 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
                                 rep.note_errors += 1; err(n["note_id"], exc, stats)
                                 if isinstance(exc, DetailFailed):
                                     rep.detail_failed += 1; detail_streak += 1
+                                    if isinstance(exc, DetailUnparseable):
+                                        unparseable[n["note_id"]] = {"cat": name, "kw": kw}
                                     if detail_streak >= DETAIL_PROBE:
                                         raise DetailEndpointDown(f"连续 {DETAIL_PROBE} 篇取全文失败（TikHub 详情接口报错或返回里找不到正文），整次停；"
                                                                  f"原始返回见产物 detail_samples")
                                 elif rep.fetched > fetched_before:
                                     detail_streak = 0                       # 全文取到了、是后面 Jev 没判成：详情接口是好的
+                                    fetched_ok.add(n["note_id"])            # 这一篇正文取得到：detail_fail 的连续断了
                                 continue
                             seen[n["note_id"]] = {"cat": name, "kw": kw, "at": rep.started, "kept": outcome == "kept", "why": outcome}
                             if outcome != "triage_reject":
@@ -563,11 +609,13 @@ def run_once(cfg: dict, provider: TikHubClient, jev: JevClient, triage_bank: Ban
     except BudgetExceeded as exc:
         rep.stopped_reason = str(exc)
     except DetailEndpointDown as exc:
-        rep.stopped_reason = str(exc)
+        rep.stopped_reason = str(exc); endpoint_down = True
         if rep.fetched == 0:                            # 一篇全文都没取到才算系统性故障（job 红）；中途断掉只告警，已取到的照常入库
             rep.systemic_failure = str(exc)
     except Exception as exc:  # noqa: BLE001 — 意外异常也要把已花钱拿到的产物和 state 写出去
         rep.stopped_reason = f"异常中止：{type(exc).__name__}: {exc}"
+    rep.detail_unparseable = len(unparseable)
+    _settle_detail_fail(state, seen, unparseable, fetched_ok, rep, counted=rep.fetched > 0 and not endpoint_down)
     rep.calls = provider.budget.calls; rep.spent_usd = provider.budget.spent
     rep.detail_samples = list(provider.detail_samples)
     rep.search_samples = list(getattr(provider, "search_samples", []))
@@ -660,8 +708,15 @@ def render_report(rep: RunReport, cfg: dict) -> str:
          "| 品类 | 搜索页 | 候选 | 分诊通过 | 取全文 | 太短 | 打标 | 出错 | 备注 |", "|---|---|---|---|---|---|---|---|---|"]
     for name, s in rep.per_category.items():
         L.append(f"| {name} | {s['searched']} | {s['candidates']} | {s.get('triaged', 0)} | {s['fetched']} | {s.get('short', 0)} | {s['judged']} | {s.get('errors', 0)} | {s.get('note', '')} |")
+    if rep.detail_unparseable:
+        L += ["", f"取全文返回里找不到正文 {rep.detail_unparseable} 篇（同一趟再碰到不再取）；其中连续 {DETAIL_GIVE_UP_RUNS} 趟都这样、"
+                  f"这一趟记进 seen 以后不再取的 {rep.detail_given_up} 篇。"]
     if rep.errors:
-        L += ["", "出错的（不进 seen，下次会再看）：", ""] + [f"- {w}: {e}" for w, e in rep.errors[:50]]
+        given_up = set(rep.given_up_ids)
+        head = ("出错的（不进 seen，下次会再看）：" if not given_up else
+                f"出错的（标了「已记进 seen」的 {len(given_up)} 篇是连续 {DETAIL_GIVE_UP_RUNS} 趟取全文找不到正文、这一趟记进 seen 以后不再取的；"
+                f"其余不进 seen，下次会再看）：")
+        L += ["", head, ""] + [f"- {w}: {e}" + ("（已记进 seen，以后不再取）" if w in given_up else "") for w, e in rep.errors[:50]]
         if len(rep.errors) > 50:
             L.append(f"- …还有 {len(rep.errors) - 50} 条")
     if rep.kept_notes:
