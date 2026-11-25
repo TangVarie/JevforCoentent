@@ -33,7 +33,16 @@ _lock = threading.Lock()
 _log = logging.getLogger("judge.hidden")
 # 季度按哪个时区的"今天"算 (TV 审计 2026-10-08 C-08): 以前是 date.today() = 服务器本地时间, Railway 是 UTC、
 # 起 judge.mcp_server 的机器 (当时是写手机器) 是北京时间, 每季交界有 8 小时两边暗题不一样。钉死一个时区, 两边一致; 要换用 JUDGE_TZ。
-QUARTER_TZ_NAME = (os.environ.get("JUDGE_TZ") or "").strip() or "Asia/Shanghai"
+DEFAULT_TZ_NAME = "Asia/Shanghai"
+
+
+def tz_name(raw: Optional[str]) -> str:
+    """JUDGE_TZ 的值 → 时区名。没设、空串、全是空白都按默认（北京时间）。
+    注意（S-18）：#40（11-23 合并）之前，空串会让 ZoneInfo("") 报错、退成 UTC；之后空串和没设一样是北京时间。"""
+    return (raw or "").strip() or DEFAULT_TZ_NAME
+
+
+QUARTER_TZ_NAME = tz_name(os.environ.get("JUDGE_TZ"))
 # 起 MCP 的机器可能是 Windows / 精简镜像, 没有系统 IANA 时区库: requirements.txt 声明了 tzdata 兜底, 这里再兜一层 ——
 # 找不到就退到固定偏移 (上海 +8, 其它退 UTC) 并记一行; 不能让一个时区名把 API / MCP 服务起不来 (codex review on #6)。
 _FIXED_OFFSETS = {"Asia/Shanghai": 8, "UTC": 0}

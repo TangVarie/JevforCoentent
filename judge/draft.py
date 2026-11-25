@@ -15,7 +15,7 @@ from typing import Callable, Optional
 
 from . import policy as P
 from .banks import Bank, check_bank, load_bank_data
-from .loop import DEFAULT_HARD_RULES, compile_project_bank, project_hard_rules
+from .loop import DEFAULT_HARD_RULES, compile_project_bank, noul_want, project_hard_rules
 
 
 class DraftSetupError(ValueError):
@@ -134,6 +134,9 @@ def setup_draft(get_bank: Callable[[str], Bank], names: list, *, subject_type: s
         visible_ids = [q for q in loaded[bname].ids() if q not in hidden]
         if qid not in loaded[bname].ids() or qid in hidden:
             raise DraftSetupError(f"hard_rules[{k!r}]：题库 {bname} 没有题 {qid!r}（有：{visible_ids}）")
-        hard[(bname, qid)] = norm_want(k, v)
+        want = norm_want(k, v)
+        if loaded[bname].by_id()[qid].jtype == "noul":
+            want = noul_want(want)                    # 是非题写成 "true" / "false" 也按「是」/「否」比（S-18）
+        hard[(bname, qid)] = want
     return DraftSetup(loaded=loaded, fq=fq, platform=platform, human=human, project=project, hard=hard,
                       ignored=ignored, decision=decision)

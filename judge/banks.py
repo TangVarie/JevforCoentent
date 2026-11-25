@@ -203,13 +203,21 @@ def fill_text(text: str, fill: Optional[dict]) -> str:
     return _PLACEHOLDER_RE.sub(lambda m: str(fill[m.group(1)]) if m.group(1) in fill else m.group(0), text)
 
 
+_BRACED_RE = re.compile(r"\{([^{}]*)\}")
+
+
 def unfilled(bank: Bank, fill: Optional[dict] = None) -> list:
-    """模板里仍缺值的 {占位符} 的题（说明调用方漏给了）。只检查模板本身的占位符，避免帖子正文里自带花括号误触发 500。"""
+    """模板里仍缺值的 {占位符} 的题（说明调用方漏给了）。只检查模板本身的占位符，避免帖子正文里自带花括号误触发 500。
+    两条都只看模板原文（题干 + 各选项定义），不看填进去的值：
+      · 英文标识符的占位符（{post_points}）没有值；
+      · 模板里有 fill_text 填不了的花括号（{帖子要点}、{post points} 这种不是英文标识符的）：给了同名的值也填不进去，
+        原样发给 Jev 就是一段没填的模板（S-18：#40（11-23 合并）改成只认英文标识符之后，这种以前认得出、后来漏掉了）。"""
     merged = dict(bank.fill_defaults); merged.update(fill or {})
     left = []
     for q in bank.questions:
         texts = [q.instructions] + [str(v) for v in q.criteria.values()]
-        if any(any(m.group(1) not in merged for m in _PLACEHOLDER_RE.finditer(t)) for t in texts):
+        if any(any(m.group(1) not in merged for m in _PLACEHOLDER_RE.finditer(t)) for t in texts) \
+                or any(not _PLACEHOLDER_RE.fullmatch(m.group(0)) for t in texts for m in _BRACED_RE.finditer(t)):
             left.append(q.id)
     return left
 
