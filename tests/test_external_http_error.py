@@ -135,3 +135,83 @@ def test_run_report_shows_the_excerpt_and_the_run_is_red(monkeypatch):
     report = E.render_report(rep, cfg)
     assert report.count("TikHubHTTPError: HTTP 400：code=400；message=Request failed, please retry") == 2 * n_sorts
     assert "ECHO" not in report and KEY not in report
+
+
+def test_422_nested_values_are_dropped(monkeypatch):
+    body = json.dumps({"detail": [{"loc": ["query", {"nick": "REALNICK"}], "msg": {"user": "REALNICK"}}]}).encode()
+    c, _ = _client(monkeypatch, 422, body)
+    with pytest.raises(E.TikHubHTTPError) as ei:
+        c.search("k", 1, "general", None)
+    assert "REALNICK" not in str(ei.value) and "loc=query" in str(ei.value)
+
+
+def test_excerpt_failure_never_replaces_the_status(monkeypatch):
+    monkeypatch.setattr(E, "_http_error_excerpt", lambda body, key="": (_ for _ in ()).throw(RecursionError("deep")))
+    c, _ = _client(monkeypatch, 400, b'{"code": 400}')
+    with pytest.raises(E.TikHubHTTPError) as ei:
+        c.search("k", 1, "general", None)
+    assert str(ei.value) == "HTTP 400" and ei.value.status == 400
+
+
+def test_body_longer_than_the_read_cap_says_so(monkeypatch):
+    body = json.dumps({"detail": {"code": 400, "message": "m", "pad": "x" * 20000}}).encode()
+    c, _ = _client(monkeypatch, 400, body)
+    with pytest.raises(E.TikHubHTTPError) as ei:
+        c.search("k", 1, "general", None)
+    assert f"超过 {E._ERR_BODY_READ} 字节" in str(ei.value)
+
+
+def test_detail_http_errors_in_a_run_count_as_request_failures_not_unparseable(monkeypatch):
+    """搜索正常、取全文全回 400：照旧是请求层失败（detail_failed、连续 DETAIL_PROBE 篇整次停），
+    不进「返回里找不到正文」，不加 S-18 的放弃计数，报告出错行带摘要。"""
+    from urllib.parse import parse_qs, urlparse
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=60):
+        u = urlparse(req.full_url)
+        if u.path.endswith("search_notes"):
+            q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            return _Resp(json.dumps(E.mock_search(q)).encode())
+        raise _http_error(400, json.dumps({"detail": {"code": 400, "message": "upstream failed", "params": {"note_id": "ECHO"}}}).encode())
+
+    monkeypatch.setattr(E.urllib.request, "urlopen", fake_urlopen)
+    c = E.TikHubClient(api_key=KEY, budget=E.Budget(limit_usd=6.0), rps=1000)
+    cfg = yaml.safe_load((ROOT / "config" / "external_corpus.yaml").read_text(encoding="utf-8"))
+    cfg["categories"] = cfg["categories"][:1]
+    cfg["pages_per_sort"] = 1
+    triage = B.load_bank(ROOT / "banks" / "external_triage_v0.1.yaml", name="external_triage_v0.1")
+    fq = B.load_bank(ROOT / "banks" / "vendor" / "feature_questions_v0_1.yaml", name="feature_questions_v0_1")
+
+    class KeepJev:
+        mock = True
+
+        def __init__(self):
+            self.inner = JevClient(mock=True)
+
+        def call(self, body):
+            r = self.inner.call(body)
+            if "on_topic" in body["questions"]:
+                ans = dict(r["answers"])
+                ans["on_topic"] = {"type": "noul", "noul": 0.95}
+                ans["voice"] = {"type": "choice", "choice": "普通用户",
+                                "probabilities": {v: (0.96 if v == "普通用户" else 0.01)
+                                                  for v in ("普通用户", "达人测评", "商家或品牌", "媒体或科普", "说不清")}}
+                r = dict(r, answers=ans)
+            return r
+
+    state = {"detail_fail": {"m0000000000": {"runs": 2, "at": "x"}}}
+    rep = E.run_once(cfg, c, KeepJev(), triage, fq, state, known_ids=set())
+    assert rep.detail_failed == E.DETAIL_PROBE and rep.fetched == 0
+    assert rep.detail_unparseable == 0 and rep.detail_given_up == 0
+    assert state["detail_fail"] == {"m0000000000": {"runs": 2, "at": "x"}}      # 不算数的趟：不加、不清
+    assert not any(v.get("why") == "detail_unparseable" for v in state.get("seen", {}).values())
+    assert rep.systemic_failure                                                 # 一篇全文都没取到：整次红
+    errs = [e for _, e in rep.errors]
+    assert errs and all(e.startswith("DetailFailed: 取全文失败：TikHubHTTPError: HTTP 400：code=400；message=upstream failed") for e in errs)
+    assert not any("ECHO" in e or KEY in e for e in errs)

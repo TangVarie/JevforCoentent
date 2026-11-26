@@ -278,7 +278,7 @@ def _http_error_excerpt(body: bytes, api_key: str = "") -> str:
     try:
         data = json.loads(body.decode("utf-8", "replace"))
     except ValueError:
-        return f"返回不是 JSON（{len(body)} 字节）"
+        return f"返回不是 JSON（{len(body)} 字节）" if len(body) < _ERR_BODY_READ else f"返回不是 JSON（超过 {_ERR_BODY_READ} 字节，只读了这么多）"
     parts: list = []
     for box in (data, data.get("detail") if isinstance(data, dict) else None):
         if isinstance(box, dict):
@@ -289,8 +289,9 @@ def _http_error_excerpt(body: bytes, api_key: str = "") -> str:
             parts.append(f"detail={_err_text(box, api_key)}")
         elif isinstance(box, list) and box and isinstance(box[0], dict):        # FastAPI 参数校验（422）：detail 是列表
             first = box[0]
-            loc = ".".join(str(x) for x in first.get("loc") or []) if isinstance(first.get("loc"), list) else ""
-            parts.append(f"loc={_err_text(loc, api_key)} msg={_err_text(first.get('msg', ''), api_key)}")
+            loc = ".".join(str(x) for x in first.get("loc") or [] if isinstance(x, (str, int))) if isinstance(first.get("loc"), list) else ""
+            msg = first.get("msg") if isinstance(first.get("msg"), (str, int)) else ""
+            parts.append(f"loc={_err_text(loc, api_key)} msg={_err_text(msg, api_key)}")
     return "；".join(dict.fromkeys(parts)) or f"返回里没有 code / message（{len(body)} 字节）"
 
 
@@ -370,7 +371,11 @@ class TikHubClient:
                 body = exc.read(_ERR_BODY_READ) if exc.fp is not None else b""
             except Exception:  # noqa: BLE001 — 读不到返回体就只报状态码
                 body = b""
-            raise TikHubHTTPError(exc.code, _http_error_excerpt(body or b"", self.api_key)) from None
+            try:
+                excerpt = _http_error_excerpt(body or b"", self.api_key)
+            except Exception:  # noqa: BLE001 — 摘要出错（如 3.11 下嵌套过深的 JSON 抛 RecursionError）也不能顶掉状态码
+                excerpt = ""
+            raise TikHubHTTPError(exc.code, excerpt) from None
 
     def has_session(self, keyword: str, sort_type: str) -> bool:
         return (keyword, sort_type) in self._sessions
