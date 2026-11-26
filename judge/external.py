@@ -16,6 +16,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -67,6 +68,15 @@ class DetailEndpointDown(RuntimeError):
 
 class SearchUnparseable(RuntimeError):
     """搜索接口 HTTP 200、一条笔记都没认出来，且业务码报错（顶层 code ≠ 200，或里层 success=false / code 不是 0 或 200）。这次请求已计费。"""
+
+
+class TikHubHTTPError(RuntimeError):
+    """TikHub 回了非 2xx。消息里带返回体的 code / message 摘要（脱敏、截短），不带 URL、请求头和返回里别的字段。
+    11-26 外部语料 64 次搜索全是「HTTP Error 400: Bad Request」，光看状态码分不清是参数、上游失败还是账户问题。"""
+
+    def __init__(self, status: int, excerpt: str = ""):
+        self.status = status
+        super().__init__(f"HTTP {status}" + (f"：{excerpt}" if excerpt else ""))
 
 
 class JevIncomplete(RuntimeError):
@@ -247,6 +257,44 @@ def _masked(obj: Any, api_key: str = "", depth: int = 0) -> Any:
     return obj
 
 
+_EMAILISH = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
+_ERR_TEXT_MAX = 160          # 每个字段最多留几个字
+_ERR_BODY_READ = 8192        # 报错返回体最多读几个字节
+
+
+def _err_text(v: Any, api_key: str = "") -> str:
+    s = " ".join(str(v).split())
+    if api_key and api_key in s:
+        s = s.replace(api_key, "***")
+    s = _EMAILISH.sub("***@***", s)
+    return s if len(s) <= _ERR_TEXT_MAX else s[:_ERR_TEXT_MAX] + "…"
+
+
+def _http_error_excerpt(body: bytes, api_key: str = "") -> str:
+    """报错返回体只留 code / message（含 message_zh）和 FastAPI 422 的第一条 loc / msg；脱敏（API key、邮箱）、截短。
+    params、router、request 回显、账户字段一律不留：报告会进公开的 Actions 日志。不是 JSON 的（如 Cloudflare 页面）只记长度。"""
+    if not body:
+        return ""
+    try:
+        data = json.loads(body.decode("utf-8", "replace"))
+    except ValueError:
+        return f"返回不是 JSON（{len(body)} 字节）" if len(body) < _ERR_BODY_READ else f"返回不是 JSON（超过 {_ERR_BODY_READ} 字节，只读了这么多）"
+    parts: list = []
+    for box in (data, data.get("detail") if isinstance(data, dict) else None):
+        if isinstance(box, dict):
+            for k in ("code", "message", "message_zh", "msg"):
+                if box.get(k) not in (None, "") and not isinstance(box.get(k), (dict, list)):
+                    parts.append(f"{k}={_err_text(box[k], api_key)}")
+        elif isinstance(box, str) and box.strip() and box is not data:          # detail 是一句话（如鉴权失败）
+            parts.append(f"detail={_err_text(box, api_key)}")
+        elif isinstance(box, list) and box and isinstance(box[0], dict):        # FastAPI 参数校验（422）：detail 是列表
+            first = box[0]
+            loc = ".".join(str(x) for x in first.get("loc") or [] if isinstance(x, (str, int))) if isinstance(first.get("loc"), list) else ""
+            msg = first.get("msg") if isinstance(first.get("msg"), (str, int)) else ""
+            parts.append(f"loc={_err_text(loc, api_key)} msg={_err_text(msg, api_key)}")
+    return "；".join(dict.fromkeys(parts)) or f"返回里没有 code / message（{len(body)} 字节）"
+
+
 def _detail_diagnostic(raw: Any, api_key: str = "") -> Any:
     """详情诊断只留结构和状态值；先脱敏，再缩减，正文、昵称和未知字段的值不进诊断产物。"""
     safe = _masked(raw, api_key)
@@ -315,8 +363,19 @@ class TikHubClient:
         # TikHub 前面的 Cloudflare 按 UA 封 Python-urllib（Error 1010，403），必须自带 UA
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.api_key}", "Accept": "application/json", "User-Agent": USER_AGENT})
         self._last = time.time()
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            try:
+                body = exc.read(_ERR_BODY_READ) if exc.fp is not None else b""
+            except Exception:  # noqa: BLE001 — 读不到返回体就只报状态码
+                body = b""
+            try:
+                excerpt = _http_error_excerpt(body or b"", self.api_key)
+            except Exception:  # noqa: BLE001 — 摘要出错（如 3.11 下嵌套过深的 JSON 抛 RecursionError）也不能顶掉状态码
+                excerpt = ""
+            raise TikHubHTTPError(exc.code, excerpt) from None
 
     def has_session(self, keyword: str, sort_type: str) -> bool:
         return (keyword, sort_type) in self._sessions
